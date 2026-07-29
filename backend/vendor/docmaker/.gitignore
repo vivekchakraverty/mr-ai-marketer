@@ -1,0 +1,20 @@
+# Runtime artifacts (uploads, frames, audio, generated docs)
+work/
+
+# Secrets
+.env
+
+# Virtual environments
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Gradio cache
+.gradio/
+
+# HuggingFace / model caches living in-project (if any)
+.cache/
