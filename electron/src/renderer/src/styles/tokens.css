@@ -1,0 +1,165 @@
+@import '../assets/fonts/fonts.css';
+
+:root {
+  --bg: #fff6ea;
+  --surface: #fffbf3;
+  --surface-paper: #fffbf3;
+  --surface-tint: #fff1d6;
+  --surface-tint-2: #fff1d6;
+  --surface-code: #2b2420;
+
+  --border: #2b2420;
+  --border-soft: #ead9c2;
+  --border-tint: #2b2420;
+  --border-tint-2: #ead9c2;
+  --border-paper: #2b2420;
+
+  --ink: #2b2420;
+  --ink-body: #4a4235;
+  --ink-muted: #6b5f4e;
+  --ink-faint: #8a7b68;
+  --ink-fainter: #b0a488;
+  --ink-fainter-2: #8a7b68;
+  --ink-placeholder: #b0a488;
+
+  --accent: #ff7a5c;
+  --accent-hover: #e85f40;
+  --accent-ink: #fffbf3;
+  --accent-deep: #b0553b;
+  --accent-soft-bg: #ffe3d9;
+  --accent-soft-border: #2b2420;
+  --accent-dot: #ff7a5c;
+
+  --avatar-bg: #a78bfa;
+  --avatar-ink: #fffbf3;
+
+  --code-ink: #fffbf3;
+  --tip-bg: #fff1d6;
+  --tip-ink: #b0553b;
+
+  --danger-border: #2b2420;
+  --danger-ink: #a34a3a;
+
+  --shadow-paper: 6px 7px 0 rgba(43, 36, 32, 0.16);
+  --shadow-sm: 3px 4px 0 rgba(43, 36, 32, 0.2);
+  --shadow-md: 5px 6px 0 rgba(43, 36, 32, 0.16);
+
+  --font-sans: 'Quicksand', system-ui, sans-serif;
+  --font-serif: 'Kalam', cursive;
+
+  /* Per-tool accent palette — mirrors the mockup's color-coded tool cards/icon badges. */
+  --tool-blog: #ff9a7c;
+  --tool-guest: #ffcb4d;
+  --tool-tutorial: #6fcbc0;
+  --tool-docu: #a78bfa;
+  --tool-plan: #8fd3f4;
+  --tool-distribute: #5fcb94;
+  --tool-social: #f79ac8;
+  --tool-mastodon: #9db4ff;
+  --tool-email: #f6a97a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background-color: var(--bg);
+  background-image: radial-gradient(circle at 93% 6%, rgba(255, 203, 77, 0.34), transparent 34%),
+    radial-gradient(circle at 6% 96%, rgba(111, 203, 192, 0.24), transparent 34%),
+    radial-gradient(#f0d9be 1.6px, transparent 1.6px);
+  background-size:
+    auto,
+    auto,
+    26px 26px;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+@keyframes wiggle {
+  0%,
+  100% {
+    transform: rotate(-9deg);
+  }
+  50% {
+    transform: rotate(9deg);
+  }
+}
+
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-7px);
+  }
+}
+
+@keyframes sway {
+  0%,
+  100% {
+    transform: rotate(-6deg);
+  }
+  50% {
+    transform: rotate(10deg);
+  }
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent-hover);
+}
+
+input,
+select,
+textarea,
+button {
+  font-family: var(--font-sans);
+  outline: none;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-fainter);
+}
+
+select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%232B2420' stroke-width='2' fill='none' stroke-linecap='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
+}
+
+main::-webkit-scrollbar {
+  width: 12px;
+}
+
+main::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+main::-webkit-scrollbar-thumb {
+  background: var(--surface-tint);
+  border-radius: 20px;
+  border: 2.5px solid var(--bg);
+}
+
+button {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}

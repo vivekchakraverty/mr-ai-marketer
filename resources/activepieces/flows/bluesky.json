@@ -1,0 +1,32 @@
+{
+  "displayName": "Bluesky broadcast",
+  "trigger": {
+    "name": "trigger",
+    "valid": true,
+    "displayName": "Incoming send request",
+    "type": "PIECE_TRIGGER",
+    "settings": {
+      "pieceName": "@activepieces/piece-webhook",
+      "pieceVersion": "0.1.36",
+      "triggerName": "catch_webhook",
+      "input": { "authType": "none" },
+      "propertySettings": {}
+    },
+    "nextAction": {
+      "name": "post_to_bluesky",
+      "valid": true,
+      "displayName": "Post to Bluesky",
+      "type": "PIECE",
+      "settings": {
+        "pieceName": "@activepieces/piece-bluesky",
+        "pieceVersion": "0.1.5",
+        "actionName": "createPost",
+        "input": {
+          "auth": "{{connections.bluesky}}",
+          "text": "{{trigger.body.text}}"
+        },
+        "propertySettings": {}
+      }
+    }
+  }
+}

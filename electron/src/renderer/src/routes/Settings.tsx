@@ -1,0 +1,728 @@
+import { useEffect, useState } from 'react'
+import {
+  getLeadgenSchema,
+  getSocialPostSchema,
+  pushLeadgenEnv,
+  pushSocialPostEnv,
+  verifyHfToken,
+  verifyLeadgen,
+  verifySocialPost,
+  type EnvSetting
+} from '../api/client'
+import { useAppStore } from '../state/store'
+import { label, primaryButtonSmall, secondaryButtonSmall, select, textInput } from '../styles/styleKit'
+import type { AppSettings } from '../../../main/settingsStore'
+import type { UpdateCheckResult } from '../../../main/updateChecker'
+
+const EMPTY: AppSettings = {
+  hfToken: '',
+  youtubeApiKey: '',
+  mastodonInstance: '',
+  mastodonAccessToken: '',
+  googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
+  brandForge: { spaceId: '' },
+  topicScout: {
+    contactEmail: '',
+    githubToken: '',
+    reliefwebAppname: '',
+    fredApiKey: '',
+    twitterAuthToken: '',
+    twitterCt0: '',
+    geo: 'US'
+  }
+}
+
+type Check = { state: 'idle' | 'checking' | 'ok' | 'error'; detail?: string }
+
+export default function Settings(): React.JSX.Element {
+  const goHome = useAppStore((s) => s.goHome)
+  const setHfStatus = useAppStore((s) => s.setHfStatus)
+
+  const [settings, setSettings] = useState<AppSettings>(EMPTY)
+  const [schema, setSchema] = useState<EnvSetting[]>([])
+  const [edits, setEdits] = useState<Record<string, string>>({})
+  const [clears, setClears] = useState<Record<string, boolean>>({})
+  // The Lead Gen Agent has its own env schema (kept separate so a save routes each field to
+  // the right backend); its edits/clears live in their own maps.
+  const [leadgenSchema, setLeadgenSchema] = useState<EnvSetting[]>([])
+  const [lgEdits, setLgEdits] = useState<Record<string, string>>({})
+  const [lgClears, setLgClears] = useState<Record<string, boolean>>({})
+  const [loaded, setLoaded] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState('')
+  const [error, setError] = useState('')
+  const [checks, setChecks] = useState<Record<string, Check>>({})
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
+
+  useEffect(() => {
+    async function boot(): Promise<void> {
+      const s = await window.api.settings.getAll()
+      setSettings(s)
+      try {
+        setSchema(await getSocialPostSchema())
+      } catch {
+        // Backend may still be starting; the shared section is still usable.
+      }
+      try {
+        let lgSchema = await getLeadgenSchema()
+        // The shared HF token powers the Lead Gen Agent too. If the agent doesn't have it yet
+        // but the shared one is set, sync it over now so it "just works" without a save or a
+        // restart (the backend also inherits it at spawn — see main/backend.ts).
+        const lgHf = lgSchema.find((x) => x.name === 'HF_TOKEN')
+        if (s.hfToken.trim() && lgHf && !lgHf.isSet) {
+          await pushLeadgenEnv({ HF_TOKEN: s.hfToken.trim() })
+          lgSchema = await getLeadgenSchema()
+        }
+        setLeadgenSchema(lgSchema)
+      } catch {
+        /* backend may still be starting */
+      }
+      setLoaded(true)
+    }
+    void boot()
+  }, [])
+
+  async function reloadSchema(): Promise<void> {
+    try {
+      setSchema(await getSocialPostSchema())
+    } catch {
+      /* non-fatal */
+    }
+    try {
+      setLeadgenSchema(await getLeadgenSchema())
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  // Shared builders: what handleSave pushes to each backend, extracted so "Test connection"
+  // can push the same values on demand (see pushPendingSocialPost/pushPendingLeadgen below) —
+  // a Test click must never require a separate Save first, or it just reports "not set" for
+  // whatever you literally just typed.
+  function buildSocialPostValues(): Record<string, string> {
+    const values: Record<string, string> = { ...edits }
+    for (const [name, on] of Object.entries(clears)) if (on) values[name] = ''
+    if (settings.hfToken.trim()) values.HF_TOKEN = settings.hfToken.trim()
+    return values
+  }
+
+  function buildLeadgenValues(): Record<string, string> {
+    const values: Record<string, string> = { ...lgEdits }
+    for (const [name, on] of Object.entries(lgClears)) if (on) values[name] = ''
+    if (settings.hfToken.trim()) values.HF_TOKEN = settings.hfToken.trim()
+    return values
+  }
+
+  // Pushes only if there's something un-saved (edits/clears actually set) — a bare Test
+  // click with nothing typed skips straight to verifying, no pointless empty POST.
+  async function pushPendingSocialPost(): Promise<void> {
+    if (Object.keys(edits).length === 0 && Object.keys(clears).length === 0) return
+    await pushSocialPostEnv(buildSocialPostValues())
+    setEdits({})
+    setClears({})
+    await reloadSchema()
+  }
+
+  async function pushPendingLeadgen(): Promise<void> {
+    if (Object.keys(lgEdits).length === 0 && Object.keys(lgClears).length === 0) return
+    await pushLeadgenEnv(buildLeadgenValues())
+    setLgEdits({})
+    setLgClears({})
+    await reloadSchema()
+  }
+
+  async function handleSave(): Promise<void> {
+    setSaving(true)
+    setError('')
+    try {
+      // 1. Shared credentials go to Electron's encrypted per-user store.
+      await window.api.settings.setAll(settings)
+      if (settings.hfToken.trim()) {
+        const res = await verifyHfToken(settings.hfToken.trim())
+        setHfStatus(res.valid, res.username ?? null)
+      } else {
+        setHfStatus(false, null)
+      }
+
+      // 2. Everything the Social Post Generator reads lives in the backend's environment.
+      const values = buildSocialPostValues()
+      if (Object.keys(values).length) await pushSocialPostEnv(values)
+
+      // 3. The Lead Gen Agent reads its own env file.
+      const lgValues = buildLeadgenValues()
+      if (Object.keys(lgValues).length) await pushLeadgenEnv(lgValues)
+
+      setEdits({})
+      setClears({})
+      setLgEdits({})
+      setLgClears({})
+      await reloadSchema()
+      setSaved('Saved ✓')
+      setTimeout(() => setSaved(''), 2200)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function runCheck(target: 'supabase' | 'bluesky' | 'llm' | 'hf'): Promise<void> {
+    setChecks((c) => ({ ...c, [target]: { state: 'checking' } }))
+    try {
+      await pushPendingSocialPost() // save whatever's typed before testing it
+      const res = await verifySocialPost(target)
+      setChecks((c) => ({
+        ...c,
+        [target]: { state: res.valid ? 'ok' : 'error', detail: res.detail }
+      }))
+    } catch (err) {
+      setChecks((c) => ({
+        ...c,
+        [target]: { state: 'error', detail: err instanceof Error ? err.message : String(err) }
+      }))
+    }
+  }
+
+  async function runLeadgenCheck(target: 'llm' | 'smtp' | 'imap' | 'reacher' | 'searxng'): Promise<void> {
+    const key = `lg:${target}`
+    setChecks((c) => ({ ...c, [key]: { state: 'checking' } }))
+    try {
+      await pushPendingLeadgen() // save whatever's typed before testing it
+      const res = await verifyLeadgen(target)
+      setChecks((c) => ({ ...c, [key]: { state: res.valid ? 'ok' : 'error', detail: res.detail } }))
+    } catch (err) {
+      setChecks((c) => ({
+        ...c,
+        [key]: { state: 'error', detail: err instanceof Error ? err.message : String(err) }
+      }))
+    }
+  }
+
+  async function handleCheckForUpdate(): Promise<void> {
+    setCheckingUpdate(true)
+    try {
+      setUpdateInfo(await window.api.checkForUpdate())
+    } finally {
+      setCheckingUpdate(false)
+    }
+  }
+
+  // Settings the shared section already covers, or that the desktop app manages
+  // itself — hiding them keeps the screen about credentials, not plumbing.
+  const HIDDEN = new Set(['HF_TOKEN', 'ALLOW_UI_CONFIG', 'SQLITE_PATH', 'HF_INGEST_TOKEN', 'TELEMETRY_DATASET'])
+  const groups = schema
+    .filter((s) => !HIDDEN.has(s.name))
+    .reduce<Record<string, EnvSetting[]>>((acc, s) => {
+      ;(acc[s.group] ||= []).push(s)
+      return acc
+    }, {})
+
+  // HF_TOKEN is the shared token entered up top; hide it from the leadgen section too.
+  const leadgenGroups = leadgenSchema
+    .filter((s) => s.name !== 'HF_TOKEN')
+    .reduce<Record<string, EnvSetting[]>>((acc, s) => {
+      ;(acc[s.group] ||= []).push(s)
+      return acc
+    }, {})
+
+  // Which verifier(s) to offer per leadgen group.
+  const LEADGEN_CHECKS: Record<string, ('llm' | 'smtp' | 'imap' | 'reacher' | 'searxng')[]> = {
+    'Language model': ['llm'],
+    'Sending mailbox (SMTP)': ['smtp'],
+    'Reply inbox (IMAP)': ['imap'],
+    Discovery: ['searxng', 'reacher']
+  }
+
+  const VERIFIER_FOR: [RegExp, 'supabase' | 'bluesky' | 'llm' | 'hf'][] = [
+    [/supabase/i, 'supabase'],
+    [/bluesky/i, 'bluesky'],
+    [/gemini|llm/i, 'llm']
+  ]
+
+  return (
+    <div style={{ maxWidth: 860, margin: '0 auto', padding: '26px 34px 70px' }}>
+      <div
+        style={{ font: "700 13px 'Quicksand'", color: 'var(--accent)', cursor: 'pointer', marginBottom: 14 }}
+        onClick={goHome}
+      >
+        ← Back
+      </div>
+
+      <div style={{ marginBottom: 22, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <div
+            style={{
+              font: "700 13.5px 'Quicksand'",
+              letterSpacing: '.05em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-faint)',
+              textDecoration: 'underline wavy',
+              textDecorationColor: 'var(--ink-faint)',
+              textUnderlineOffset: 4
+            }}
+          >
+            Settings
+          </div>
+          <div style={{ font: "700 31px 'Kalam'", color: 'var(--ink)', marginTop: 6 }}>Keys, tokens & other secrets</div>
+          <div style={{ font: "600 14px 'Quicksand'", color: 'var(--ink-muted)', marginTop: 4 }}>
+            All yours, all local. Stored encrypted on this machine under your user account — never uploaded anywhere.
+          </div>
+        </div>
+        <div
+          style={{
+            width: 34,
+            height: 34,
+            background: 'var(--tool-plan)',
+            borderRadius: '52% 48% 50% 50%',
+            border: '2.5px solid var(--border)',
+            animation: 'sway 4s ease-in-out infinite',
+            flexShrink: 0
+          }}
+        />
+      </div>
+
+      {!loaded ? (
+        <div style={{ font: "600 14px 'Quicksand'", color: 'var(--ink-muted)' }}>Loading…</div>
+      ) : (
+        <>
+          {/* ---- shared across every tool ------------------------------- */}
+          <Section
+            title="Hugging Face"
+            blurb="The one every generator bills to. Get a token at huggingface.co/settings/tokens."
+            accent="var(--tool-docu)"
+          >
+            <label style={label}>Token</label>
+            <input
+              type="password"
+              value={settings.hfToken}
+              onChange={(e) => setSettings((s) => ({ ...s, hfToken: e.target.value }))}
+              placeholder="hf_••••••••••••••••••••"
+              style={textInput}
+            />
+            <CheckRow check={checks.hf} onRun={() => runCheck('hf')} labelText="Test token" />
+          </Section>
+
+          <Section
+            title="YouTube Data API"
+            optional
+            blurb="Lets Tutorial Maker rank candidate videos by comment sentiment. Without it, it just takes the top search result."
+            accent="var(--tool-tutorial)"
+          >
+            <label style={label}>API key</label>
+            <input
+              type="password"
+              value={settings.youtubeApiKey}
+              onChange={(e) => setSettings((s) => ({ ...s, youtubeApiKey: e.target.value }))}
+              placeholder="Optional"
+              style={textInput}
+            />
+          </Section>
+
+          <Section
+            title="Mastodon"
+            optional
+            blurb="The Mastodon Post Creator needs to know which server you're on — it's what decides the rules and the character limit, and you can also set it on the tool's own screen. The access token is optional: without it the tool still reads public hashtag timelines, but it can't search or link a published post back to its draft."
+            accent="var(--tool-mastodon)"
+          >
+            <label style={label}>Instance</label>
+            <input
+              value={settings.mastodonInstance}
+              onChange={(e) => setSettings((s) => ({ ...s, mastodonInstance: e.target.value }))}
+              placeholder="hachyderm.io"
+              style={textInput}
+            />
+            <label style={{ ...label, marginTop: 10 }}>Access token</label>
+            <input
+              type="password"
+              value={settings.mastodonAccessToken}
+              onChange={(e) => setSettings((s) => ({ ...s, mastodonAccessToken: e.target.value }))}
+              placeholder="Optional — Preferences → Development → New Application on your instance"
+              style={textInput}
+            />
+          </Section>
+
+          <Section
+            title="BrandForge Space"
+            optional
+            blurb="Brand Studio (Research → Brand Studio) works out of the box against the hosted BrandForge Space — no setup needed. Leave this blank unless you want to point it at your own Space (owner/space-name). Your HF token above is used to reach it; brand images use HF text-to-image on the same token."
+            accent="var(--tool-social)"
+          >
+            <label style={label}>Space ID (override)</label>
+            <input
+              value={settings.brandForge.spaceId}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, brandForge: { ...s.brandForge, spaceId: e.target.value } }))
+              }
+              placeholder="vivekchakraverty/brandforge-qwen3-small (default)"
+              style={textInput}
+            />
+          </Section>
+
+          <Section
+            title="Topic Scout sources"
+            optional
+            blurb="Topic Scout works with no setup at all — its default source stack is entirely key-free. Each field here unlocks one extra source whose provider requires identification, a key, or a session. Sentiment uses your HF token above."
+            accent="var(--tool-plan)"
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {(
+                [
+                  ['geo', 'Country code', 'US — for Google Trends, YouTube and TikTok', false],
+                  ['contactEmail', 'Contact email', 'Required by SEC; also gets you the polite pool on OpenAlex and PubMed', false],
+                  ['githubToken', 'GitHub token', 'Optional. Raises GitHub rate limits; never used to write', true],
+                  ['reliefwebAppname', 'ReliefWeb appname', 'ReliefWeb requires a pre-approved appname', false],
+                  ['fredApiKey', 'FRED API key', 'Only needed for the FRED economic context signal', true],
+                  ['twitterAuthToken', 'X auth_token cookie', 'Optional. Enables Twitter/X as a conversation source', true],
+                  ['twitterCt0', 'X ct0 cookie', 'The second half of the X session cookie pair', true]
+                ] as [keyof AppSettings['topicScout'], string, string, boolean][]
+              ).map(([key, labelText, hint, secret]) => (
+                <div key={key}>
+                  <label style={label}>{labelText}</label>
+                  <input
+                    type={secret ? 'password' : 'text'}
+                    value={settings.topicScout[key]}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, topicScout: { ...s.topicScout, [key]: e.target.value } }))
+                    }
+                    placeholder={hint}
+                    style={textInput}
+                  />
+                </div>
+              ))}
+            </div>
+          </Section>
+
+          <Section
+            title="Google Ads API"
+            optional
+            blurb="Real search-volume and CPC data for the Marketing Plan Generator. Without it, keyword research falls back to free estimates."
+            accent="var(--tool-plan)"
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {(
+                [
+                  ['developerToken', 'Developer token', true],
+                  ['clientId', 'Client ID', true],
+                  ['clientSecret', 'Client secret', true],
+                  ['refreshToken', 'Refresh token', true],
+                  ['loginCustomerId', 'Login customer ID', false]
+                ] as const
+              ).map(([key, text, secret]) => (
+                <div key={key}>
+                  <label style={label}>{text}</label>
+                  <input
+                    type={secret ? 'password' : 'text'}
+                    value={settings.googleAds[key]}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, googleAds: { ...s.googleAds, [key]: e.target.value } }))
+                    }
+                    style={textInput}
+                  />
+                </div>
+              ))}
+            </div>
+          </Section>
+
+          {/* ---- social post generator ---------------------------------- */}
+          {Object.entries(groups).map(([group, items]) => {
+            const verifier = VERIFIER_FOR.find(([re]) => re.test(group))?.[1]
+            return (
+              <Section
+                key={group}
+                title={group.replace(/\s*\(.*\)\s*$/, '')}
+                blurb={group.match(/\((.*)\)/)?.[1] ?? 'Used by the Social Post Generator.'}
+                accent="var(--tool-social)"
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {items.map((s) => (
+                    <Field
+                      key={s.name}
+                      setting={s}
+                      value={edits[s.name]}
+                      cleared={Boolean(clears[s.name])}
+                      onChange={(v) => setEdits((e) => ({ ...e, [s.name]: v }))}
+                      onClear={(on) => setClears((c) => ({ ...c, [s.name]: on }))}
+                    />
+                  ))}
+                </div>
+                {verifier && (
+                  <CheckRow
+                    check={checks[verifier]}
+                    onRun={() => runCheck(verifier)}
+                    labelText="Test connection"
+                  />
+                )}
+              </Section>
+            )
+          })}
+
+          {/* ---- lead gen agent ----------------------------------------- */}
+          {Object.entries(leadgenGroups).map(([group, items]) => (
+            <Section
+              key={`lg-${group}`}
+              title={`Lead Gen Agent — ${group}`}
+              blurb="Used by the Lead Gen Agent (Research → Lead Gen Agent)."
+              accent="var(--tool-guest)"
+            >
+              {group === 'Language model' && (
+                <div
+                  style={{
+                    font: "700 12.5px/1.5 'Quicksand'",
+                    color: settings.hfToken.trim() ? 'var(--accent)' : '#a34a3a',
+                    background: 'var(--surface)',
+                    border: '2px solid var(--border)',
+                    borderRadius: 12,
+                    padding: '9px 12px',
+                    marginBottom: 12
+                  }}
+                >
+                  {settings.hfToken.trim()
+                    ? '✓ Using the Hugging Face token from the top of this page — no need to enter it again here.'
+                    : '⚠ Add your Hugging Face token in the “Hugging Face” section at the top of this page; the agent uses it for its reasoning calls.'}
+                </div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {items.map((s) => (
+                  <Field
+                    key={s.name}
+                    setting={s}
+                    value={lgEdits[s.name]}
+                    cleared={Boolean(lgClears[s.name])}
+                    onChange={(v) => setLgEdits((e) => ({ ...e, [s.name]: v }))}
+                    onClear={(on) => setLgClears((c) => ({ ...c, [s.name]: on }))}
+                  />
+                ))}
+              </div>
+              {(LEADGEN_CHECKS[group] ?? []).map((target) => (
+                <CheckRow
+                  key={target}
+                  check={checks[`lg:${target}`]}
+                  onRun={() => runLeadgenCheck(target)}
+                  labelText={`Test ${target}`}
+                />
+              ))}
+            </Section>
+          ))}
+
+          {/* ---- updates ------------------------------------------------ */}
+          <Section title="App updates" blurb={`You're on version ${updateInfo?.currentVersion ?? '0.1.0'}.`} accent="var(--tool-guest)">
+            {updateInfo?.updateAvailable && (
+              <div style={{ font: "700 12.5px 'Quicksand'", color: 'var(--accent-deep)', marginBottom: 10 }}>
+                Version {updateInfo.latestVersion} is out.{' '}
+                <span
+                  style={{ textDecoration: 'underline', cursor: 'pointer' }}
+                  onClick={() => updateInfo.downloadUrl && window.api.openExternal(updateInfo.downloadUrl)}
+                >
+                  Grab it →
+                </span>
+              </div>
+            )}
+            {updateInfo && !updateInfo.updateAvailable && !updateInfo.error && (
+              <div style={{ font: "700 12.5px 'Quicksand'", color: 'var(--accent)', marginBottom: 10 }}>
+                You're up to date ✓
+              </div>
+            )}
+            <div
+              style={{ ...secondaryButtonSmall, opacity: checkingUpdate ? 0.6 : 1, display: 'inline-block' }}
+              onClick={checkingUpdate ? undefined : handleCheckForUpdate}
+            >
+              {checkingUpdate ? 'Checking…' : 'Check for updates'}
+            </div>
+          </Section>
+
+          {error && (
+            <div
+              style={{
+                font: "700 13px 'Quicksand'",
+                color: 'var(--danger-ink)',
+                background: 'var(--accent-soft-bg)',
+                border: '2px solid var(--border)',
+                borderRadius: 14,
+                padding: '11px 14px',
+                marginTop: 16
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          <div
+            style={{
+              position: 'sticky',
+              bottom: 0,
+              display: 'flex',
+              gap: 10,
+              alignItems: 'center',
+              marginTop: 22,
+              padding: '14px 0',
+              background: 'var(--bg)'
+            }}
+          >
+            <div
+              style={{ ...primaryButtonSmall, opacity: saving ? 0.6 : 1 }}
+              onClick={saving ? undefined : handleSave}
+            >
+              {saving ? 'Saving…' : 'Save everything'}
+            </div>
+            {saved && <div style={{ font: "700 13px 'Quicksand'", color: 'var(--accent)' }}>{saved}</div>}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function Section({
+  title,
+  blurb,
+  optional,
+  accent,
+  children
+}: {
+  title: string
+  blurb: string
+  optional?: boolean
+  accent: string
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <div
+      style={{
+        background: 'var(--surface)',
+        border: '2.5px solid var(--border)',
+        borderRadius: 20,
+        padding: 20,
+        boxShadow: 'var(--shadow-md)',
+        marginBottom: 16
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+        <div
+          style={{
+            width: 14,
+            height: 14,
+            background: accent,
+            border: '2px solid var(--border)',
+            borderRadius: '55% 45% 50% 50%',
+            flexShrink: 0
+          }}
+        />
+        <div style={{ font: "700 16px 'Kalam'", color: 'var(--ink)' }}>
+          {title}
+          {optional && (
+            <span style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-faint)' }}> — optional</span>
+          )}
+        </div>
+      </div>
+      <div style={{ font: "600 12.5px/1.55 'Quicksand'", color: 'var(--ink-muted)', marginBottom: 14 }}>{blurb}</div>
+      {children}
+    </div>
+  )
+}
+
+function Field({
+  setting,
+  value,
+  cleared,
+  onChange,
+  onClear
+}: {
+  setting: EnvSetting
+  value: string | undefined
+  cleared: boolean
+  onChange: (v: string) => void
+  onClear: (on: boolean) => void
+}): React.JSX.Element {
+  const help = setting.help.split('\n').slice(0, 2).join(' ')
+
+  if (setting.choices.length) {
+    return (
+      <div>
+        <label style={label}>{setting.name}</label>
+        <select value={value ?? setting.value} onChange={(e) => onChange(e.target.value)} style={select}>
+          {setting.choices.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+        {help && <Help text={help} />}
+      </div>
+    )
+  }
+
+  if (setting.isSecret) {
+    return (
+      <div>
+        <label style={label}>{setting.name}</label>
+        <input
+          type="password"
+          value={value ?? ''}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={setting.isSet ? 'configured — leave blank to keep' : 'not set'}
+          style={textInput}
+          disabled={cleared}
+        />
+        {setting.isSet && (
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              font: "600 11.5px 'Quicksand'",
+              color: 'var(--ink-faint)',
+              marginTop: 5,
+              cursor: 'pointer'
+            }}
+          >
+            <input type="checkbox" checked={cleared} onChange={(e) => onClear(e.target.checked)} />
+            Remove this one
+          </label>
+        )}
+        {help && <Help text={help} />}
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <label style={label}>{setting.name}</label>
+      <input value={value ?? setting.value} onChange={(e) => onChange(e.target.value)} style={textInput} />
+      {help && <Help text={help} />}
+    </div>
+  )
+}
+
+function Help({ text }: { text: string }): React.JSX.Element {
+  return (
+    <div style={{ font: "600 11.5px/1.5 'Quicksand'", color: 'var(--ink-faint)', marginTop: 5 }}>{text}</div>
+  )
+}
+
+function CheckRow({
+  check,
+  onRun,
+  labelText
+}: {
+  check: Check | undefined
+  onRun: () => void
+  labelText: string
+}): React.JSX.Element {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+      <div
+        style={{ ...secondaryButtonSmall, opacity: check?.state === 'checking' ? 0.6 : 1 }}
+        onClick={check?.state === 'checking' ? undefined : onRun}
+      >
+        {check?.state === 'checking' ? 'Testing…' : labelText}
+      </div>
+      {check?.state === 'ok' && (
+        <div style={{ font: "700 12.5px 'Quicksand'", color: 'var(--accent)' }}>{check.detail ?? 'Works ✓'}</div>
+      )}
+      {check?.state === 'error' && (
+        <div style={{ font: "700 12.5px 'Quicksand'", color: 'var(--danger-ink)' }}>{check.detail}</div>
+      )}
+    </div>
+  )
+}

@@ -1,0 +1,167 @@
+{
+  "retrieved_date": "2026-07-02",
+  "disclaimer": "Curated industry-average estimates compiled from commonly published benchmark reports (WordStream/LocalIQ Google Ads benchmarks, Meta for Business, LinkedIn Marketing Solutions, TikTok for Business, YouTube Ads benchmarks). These are directional averages for planning purposes only, not live or guaranteed figures. Actual performance varies by targeting, creative, and competition. Refresh this file periodically via a maintainer review, not via live scraping at request time.",
+  "channels": ["search", "display", "meta", "linkedin", "tiktok", "youtube"],
+  "industries": {
+    "ecommerce_retail": {
+      "search": {"cpc_usd": 1.16, "ctr_pct": 2.69, "cvr_pct": 2.81},
+      "display": {"cpc_usd": 0.63, "ctr_pct": 0.51, "cvr_pct": 0.59},
+      "meta": {"cpc_usd": 1.20, "ctr_pct": 1.61, "cvr_pct": 2.50},
+      "linkedin": {"cpc_usd": 5.50, "ctr_pct": 0.50, "cvr_pct": 1.50},
+      "tiktok": {"cpc_usd": 1.00, "ctr_pct": 1.00, "cvr_pct": 1.30},
+      "youtube": {"cpc_usd": 0.15, "ctr_pct": 0.65, "cvr_pct": 0.90}
+    },
+    "apparel_fashion": {
+      "search": {"cpc_usd": 0.94, "ctr_pct": 3.06, "cvr_pct": 2.55},
+      "display": {"cpc_usd": 0.45, "ctr_pct": 0.55, "cvr_pct": 0.50},
+      "meta": {"cpc_usd": 0.90, "ctr_pct": 1.80, "cvr_pct": 2.20},
+      "linkedin": {"cpc_usd": 6.50, "ctr_pct": 0.40, "cvr_pct": 1.00},
+      "tiktok": {"cpc_usd": 0.85, "ctr_pct": 1.30, "cvr_pct": 1.60},
+      "youtube": {"cpc_usd": 0.12, "ctr_pct": 0.70, "cvr_pct": 0.80}
+    },
+    "b2b_saas": {
+      "search": {"cpc_usd": 3.80, "ctr_pct": 2.41, "cvr_pct": 3.04},
+      "display": {"cpc_usd": 1.10, "ctr_pct": 0.44, "cvr_pct": 0.80},
+      "meta": {"cpc_usd": 2.10, "ctr_pct": 0.90, "cvr_pct": 1.50},
+      "linkedin": {"cpc_usd": 7.50, "ctr_pct": 0.55, "cvr_pct": 2.80},
+      "tiktok": {"cpc_usd": 1.60, "ctr_pct": 0.60, "cvr_pct": 0.90},
+      "youtube": {"cpc_usd": 0.22, "ctr_pct": 0.50, "cvr_pct": 1.00}
+    },
+    "technology_electronics": {
+      "search": {"cpc_usd": 2.69, "ctr_pct": 2.09, "cvr_pct": 2.40},
+      "display": {"cpc_usd": 0.85, "ctr_pct": 0.48, "cvr_pct": 0.60},
+      "meta": {"cpc_usd": 1.50, "ctr_pct": 1.20, "cvr_pct": 1.70},
+      "linkedin": {"cpc_usd": 6.80, "ctr_pct": 0.45, "cvr_pct": 1.90},
+      "tiktok": {"cpc_usd": 1.20, "ctr_pct": 1.00, "cvr_pct": 1.20},
+      "youtube": {"cpc_usd": 0.18, "ctr_pct": 0.60, "cvr_pct": 0.90}
+    },
+    "education": {
+      "search": {"cpc_usd": 2.40, "ctr_pct": 3.78, "cvr_pct": 3.39},
+      "display": {"cpc_usd": 0.55, "ctr_pct": 0.53, "cvr_pct": 0.70},
+      "meta": {"cpc_usd": 1.10, "ctr_pct": 1.40, "cvr_pct": 2.00},
+      "linkedin": {"cpc_usd": 5.80, "ctr_pct": 0.50, "cvr_pct": 2.20},
+      "tiktok": {"cpc_usd": 0.80, "ctr_pct": 1.10, "cvr_pct": 1.30},
+      "youtube": {"cpc_usd": 0.14, "ctr_pct": 0.68, "cvr_pct": 1.00}
+    },
+    "finance_insurance": {
+      "search": {"cpc_usd": 3.44, "ctr_pct": 2.91, "cvr_pct": 5.10},
+      "display": {"cpc_usd": 1.20, "ctr_pct": 0.35, "cvr_pct": 1.00},
+      "meta": {"cpc_usd": 1.80, "ctr_pct": 0.85, "cvr_pct": 2.00},
+      "linkedin": {"cpc_usd": 8.50, "ctr_pct": 0.42, "cvr_pct": 3.00},
+      "tiktok": {"cpc_usd": 1.50, "ctr_pct": 0.70, "cvr_pct": 1.20},
+      "youtube": {"cpc_usd": 0.25, "ctr_pct": 0.45, "cvr_pct": 1.10}
+    },
+    "health_medical": {
+      "search": {"cpc_usd": 2.62, "ctr_pct": 3.27, "cvr_pct": 3.36},
+      "display": {"cpc_usd": 0.70, "ctr_pct": 0.50, "cvr_pct": 0.80},
+      "meta": {"cpc_usd": 1.30, "ctr_pct": 1.10, "cvr_pct": 1.80},
+      "linkedin": {"cpc_usd": 6.20, "ctr_pct": 0.45, "cvr_pct": 2.00},
+      "tiktok": {"cpc_usd": 0.90, "ctr_pct": 0.95, "cvr_pct": 1.10},
+      "youtube": {"cpc_usd": 0.16, "ctr_pct": 0.58, "cvr_pct": 0.95}
+    },
+    "home_improvement": {
+      "search": {"cpc_usd": 3.29, "ctr_pct": 3.32, "cvr_pct": 4.19},
+      "display": {"cpc_usd": 0.75, "ctr_pct": 0.47, "cvr_pct": 0.75},
+      "meta": {"cpc_usd": 1.40, "ctr_pct": 1.15, "cvr_pct": 1.90},
+      "linkedin": {"cpc_usd": 6.00, "ctr_pct": 0.40, "cvr_pct": 1.60},
+      "tiktok": {"cpc_usd": 0.95, "ctr_pct": 0.90, "cvr_pct": 1.10},
+      "youtube": {"cpc_usd": 0.17, "ctr_pct": 0.55, "cvr_pct": 0.90}
+    },
+    "legal": {
+      "search": {"cpc_usd": 6.75, "ctr_pct": 2.93, "cvr_pct": 6.98},
+      "display": {"cpc_usd": 1.50, "ctr_pct": 0.30, "cvr_pct": 0.90},
+      "meta": {"cpc_usd": 2.20, "ctr_pct": 0.80, "cvr_pct": 1.80},
+      "linkedin": {"cpc_usd": 9.00, "ctr_pct": 0.38, "cvr_pct": 2.20},
+      "tiktok": {"cpc_usd": 1.80, "ctr_pct": 0.55, "cvr_pct": 1.00},
+      "youtube": {"cpc_usd": 0.30, "ctr_pct": 0.40, "cvr_pct": 1.00}
+    },
+    "real_estate": {
+      "search": {"cpc_usd": 2.37, "ctr_pct": 3.71, "cvr_pct": 3.09},
+      "display": {"cpc_usd": 0.65, "ctr_pct": 0.48, "cvr_pct": 0.65},
+      "meta": {"cpc_usd": 1.15, "ctr_pct": 1.25, "cvr_pct": 1.70},
+      "linkedin": {"cpc_usd": 5.90, "ctr_pct": 0.42, "cvr_pct": 1.70},
+      "tiktok": {"cpc_usd": 0.85, "ctr_pct": 1.00, "cvr_pct": 1.10},
+      "youtube": {"cpc_usd": 0.15, "ctr_pct": 0.60, "cvr_pct": 0.90}
+    },
+    "travel_hospitality": {
+      "search": {"cpc_usd": 1.53, "ctr_pct": 4.68, "cvr_pct": 3.55},
+      "display": {"cpc_usd": 0.55, "ctr_pct": 0.55, "cvr_pct": 0.60},
+      "meta": {"cpc_usd": 1.05, "ctr_pct": 1.50, "cvr_pct": 2.00},
+      "linkedin": {"cpc_usd": 6.20, "ctr_pct": 0.40, "cvr_pct": 1.30},
+      "tiktok": {"cpc_usd": 0.90, "ctr_pct": 1.20, "cvr_pct": 1.30},
+      "youtube": {"cpc_usd": 0.13, "ctr_pct": 0.72, "cvr_pct": 0.90}
+    },
+    "automotive": {
+      "search": {"cpc_usd": 2.46, "ctr_pct": 4.00, "cvr_pct": 6.03},
+      "display": {"cpc_usd": 0.60, "ctr_pct": 0.50, "cvr_pct": 0.70},
+      "meta": {"cpc_usd": 1.10, "ctr_pct": 1.30, "cvr_pct": 1.90},
+      "linkedin": {"cpc_usd": 6.40, "ctr_pct": 0.38, "cvr_pct": 1.50},
+      "tiktok": {"cpc_usd": 0.95, "ctr_pct": 1.05, "cvr_pct": 1.20},
+      "youtube": {"cpc_usd": 0.16, "ctr_pct": 0.62, "cvr_pct": 0.95}
+    },
+    "beauty_personal_care": {
+      "search": {"cpc_usd": 1.02, "ctr_pct": 3.42, "cvr_pct": 2.80},
+      "display": {"cpc_usd": 0.48, "ctr_pct": 0.58, "cvr_pct": 0.55},
+      "meta": {"cpc_usd": 0.95, "ctr_pct": 1.75, "cvr_pct": 2.30},
+      "linkedin": {"cpc_usd": 6.80, "ctr_pct": 0.35, "cvr_pct": 1.10},
+      "tiktok": {"cpc_usd": 0.75, "ctr_pct": 1.45, "cvr_pct": 1.70},
+      "youtube": {"cpc_usd": 0.13, "ctr_pct": 0.70, "cvr_pct": 0.85}
+    },
+    "restaurants_food": {
+      "search": {"cpc_usd": 1.35, "ctr_pct": 4.20, "cvr_pct": 5.41},
+      "display": {"cpc_usd": 0.50, "ctr_pct": 0.56, "cvr_pct": 0.65},
+      "meta": {"cpc_usd": 1.00, "ctr_pct": 1.60, "cvr_pct": 2.10},
+      "linkedin": {"cpc_usd": 7.00, "ctr_pct": 0.30, "cvr_pct": 0.90},
+      "tiktok": {"cpc_usd": 0.80, "ctr_pct": 1.35, "cvr_pct": 1.40},
+      "youtube": {"cpc_usd": 0.14, "ctr_pct": 0.66, "cvr_pct": 0.85}
+    },
+    "fitness_wellness": {
+      "search": {"cpc_usd": 1.98, "ctr_pct": 3.63, "cvr_pct": 3.31},
+      "display": {"cpc_usd": 0.58, "ctr_pct": 0.52, "cvr_pct": 0.70},
+      "meta": {"cpc_usd": 1.15, "ctr_pct": 1.55, "cvr_pct": 2.10},
+      "linkedin": {"cpc_usd": 6.30, "ctr_pct": 0.40, "cvr_pct": 1.40},
+      "tiktok": {"cpc_usd": 0.85, "ctr_pct": 1.30, "cvr_pct": 1.50},
+      "youtube": {"cpc_usd": 0.15, "ctr_pct": 0.68, "cvr_pct": 0.95}
+    },
+    "nonprofit": {
+      "search": {"cpc_usd": 1.71, "ctr_pct": 4.29, "cvr_pct": 3.75},
+      "display": {"cpc_usd": 0.40, "ctr_pct": 0.60, "cvr_pct": 0.65},
+      "meta": {"cpc_usd": 0.85, "ctr_pct": 1.50, "cvr_pct": 1.80},
+      "linkedin": {"cpc_usd": 5.20, "ctr_pct": 0.45, "cvr_pct": 1.60},
+      "tiktok": {"cpc_usd": 0.60, "ctr_pct": 1.10, "cvr_pct": 1.10},
+      "youtube": {"cpc_usd": 0.10, "ctr_pct": 0.75, "cvr_pct": 0.90}
+    },
+    "professional_services": {
+      "search": {"cpc_usd": 6.40, "ctr_pct": 2.61, "cvr_pct": 3.30},
+      "display": {"cpc_usd": 1.30, "ctr_pct": 0.35, "cvr_pct": 0.85},
+      "meta": {"cpc_usd": 1.90, "ctr_pct": 0.95, "cvr_pct": 1.60},
+      "linkedin": {"cpc_usd": 8.20, "ctr_pct": 0.48, "cvr_pct": 2.50},
+      "tiktok": {"cpc_usd": 1.40, "ctr_pct": 0.65, "cvr_pct": 0.95},
+      "youtube": {"cpc_usd": 0.22, "ctr_pct": 0.48, "cvr_pct": 0.95}
+    },
+    "furniture_home_goods": {
+      "search": {"cpc_usd": 1.28, "ctr_pct": 2.90, "cvr_pct": 2.60},
+      "display": {"cpc_usd": 0.52, "ctr_pct": 0.50, "cvr_pct": 0.55},
+      "meta": {"cpc_usd": 1.05, "ctr_pct": 1.45, "cvr_pct": 2.00},
+      "linkedin": {"cpc_usd": 6.10, "ctr_pct": 0.38, "cvr_pct": 1.30},
+      "tiktok": {"cpc_usd": 0.90, "ctr_pct": 1.15, "cvr_pct": 1.30},
+      "youtube": {"cpc_usd": 0.15, "ctr_pct": 0.60, "cvr_pct": 0.85}
+    },
+    "industrial_manufacturing": {
+      "search": {"cpc_usd": 3.10, "ctr_pct": 2.61, "cvr_pct": 2.90},
+      "display": {"cpc_usd": 0.90, "ctr_pct": 0.40, "cvr_pct": 0.70},
+      "meta": {"cpc_usd": 1.60, "ctr_pct": 0.85, "cvr_pct": 1.50},
+      "linkedin": {"cpc_usd": 8.80, "ctr_pct": 0.50, "cvr_pct": 2.60},
+      "tiktok": {"cpc_usd": 1.30, "ctr_pct": 0.60, "cvr_pct": 0.90},
+      "youtube": {"cpc_usd": 0.20, "ctr_pct": 0.50, "cvr_pct": 0.90}
+    },
+    "consumer_services": {
+      "search": {"cpc_usd": 3.66, "ctr_pct": 3.09, "cvr_pct": 6.30},
+      "display": {"cpc_usd": 0.80, "ctr_pct": 0.45, "cvr_pct": 0.90},
+      "meta": {"cpc_usd": 1.50, "ctr_pct": 1.10, "cvr_pct": 2.00},
+      "linkedin": {"cpc_usd": 6.60, "ctr_pct": 0.40, "cvr_pct": 1.70},
+      "tiktok": {"cpc_usd": 1.05, "ctr_pct": 1.00, "cvr_pct": 1.30},
+      "youtube": {"cpc_usd": 0.18, "ctr_pct": 0.55, "cvr_pct": 0.95}
+    }
+  }
+}

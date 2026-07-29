@@ -1,0 +1,34 @@
+{
+  "displayName": "Instagram broadcast",
+  "trigger": {
+    "name": "trigger",
+    "valid": true,
+    "displayName": "Incoming send request",
+    "type": "PIECE_TRIGGER",
+    "settings": {
+      "pieceName": "@activepieces/piece-webhook",
+      "pieceVersion": "0.1.36",
+      "triggerName": "catch_webhook",
+      "input": { "authType": "none" },
+      "propertySettings": {}
+    },
+    "nextAction": {
+      "name": "post_to_instagram",
+      "valid": true,
+      "displayName": "Upload to Instagram",
+      "type": "PIECE",
+      "settings": {
+        "pieceName": "@activepieces/piece-instagram-business",
+        "pieceVersion": "0.2.5",
+        "actionName": "upload_photo",
+        "input": {
+          "auth": "{{connections.instagram}}",
+          "page": "{{trigger.body.pageId}}",
+          "photo": "{{trigger.body.imageUrl}}",
+          "caption": "{{trigger.body.text}}"
+        },
+        "propertySettings": {}
+      }
+    }
+  }
+}

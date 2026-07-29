@@ -1,0 +1,85 @@
+name: Build desktop app
+
+# Builds the packaged installer for all three platforms. PyInstaller can't cross-compile, so
+# the backend and the Electron installer are both built natively per-OS in this matrix.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+            ffmpeg_dir: win
+          - os: macos-latest
+            platform: mac
+            ffmpeg_dir: mac
+          - os: ubuntu-latest
+            platform: linux
+            ffmpeg_dir: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          ${{ matrix.platform == 'win' && '.venv\\Scripts\\pip' || '.venv/bin/pip' }} install -r requirements.txt pyinstaller
+
+      # See resources/ffmpeg/README.md — static binaries aren't committed, fetched here instead.
+      # NOTE: exact download URLs are illustrative; pin to specific verified release versions
+      # before relying on this job for a real release.
+      - name: Fetch ffmpeg (Windows)
+        if: matrix.platform == 'win'
+        run: |
+          echo "TODO: download a static ffmpeg/ffprobe build into resources/ffmpeg/win/ (see resources/ffmpeg/README.md)"
+        shell: bash
+
+      - name: Fetch ffmpeg (macOS)
+        if: matrix.platform == 'mac'
+        run: |
+          echo "TODO: download a static ffmpeg/ffprobe build into resources/ffmpeg/mac/ (see resources/ffmpeg/README.md)"
+
+      - name: Fetch ffmpeg (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          echo "TODO: download a static ffmpeg/ffprobe build into resources/ffmpeg/linux/ (see resources/ffmpeg/README.md)"
+
+      - name: Build backend (PyInstaller)
+        working-directory: backend
+        run: |
+          ${{ matrix.platform == 'win' && '.venv\\Scripts\\python' || '.venv/bin/python' }} -m PyInstaller backend.spec --noconfirm
+
+      - name: Install frontend dependencies
+        working-directory: electron
+        run: npm install
+
+      - name: Build installer
+        working-directory: electron
+        run: npm run build:${{ matrix.platform }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mr-ai-marketer-${{ matrix.platform }}
+          path: |
+            electron/release/*.exe
+            electron/release/*.dmg
+            electron/release/*.AppImage
+            electron/release/*.deb
+          if-no-files-found: warn

@@ -1,0 +1,66 @@
+{
+  "retrieved_date": "2026-07-08",
+  "disclaimer": "Curated from published 2026 social media benchmark reports: Socialinsider's 2026 Engagement Benchmarks (analysis of ~70M posts), the Rival IQ/Quid 2026 Social Media Industry Benchmark Report (18 industries tracked), DataReportal's Digital 2026 report, and Sprout Social's 2026 Best Times to Post study (~2B engagements across ~307,000 profiles, Nov 2025-Feb 2026). Two engagement-rate figures are given per platform where the two benchmark reports disagree (they use different methodologies/sample sets) - both are real published numbers, not an invented average. Directional planning figures, not guarantees; refresh periodically via maintainer review, not live scraping.",
+  "sources": [
+    "Socialinsider 2026 Social Media Engagement Benchmarks",
+    "Rival IQ / Quid 2026 Social Media Industry Benchmark Report",
+    "DataReportal Digital 2026 Global Digital Insights",
+    "Sprout Social 2026 Best Times to Post on Social Media"
+  ],
+  "platforms": {
+    "instagram": {
+      "engagement_rate_pct_socialinsider": 0.48,
+      "engagement_rate_pct_rivaliq": 0.30,
+      "posts_per_week_benchmark": 3.7,
+      "best_posting_window": "Tue-Wed, 11am-1pm (audience local time)",
+      "demographic_note": "No single dominant age band; skews younger in most Western markets - Instagram is frequently cited as the 'favourite' platform among younger users",
+      "dominant_format": "Reels/short-form video - Reels drive over 20% of total time spent on the platform"
+    },
+    "tiktok": {
+      "engagement_rate_pct_socialinsider": 3.70,
+      "engagement_rate_pct_rivaliq": 2.01,
+      "posts_per_week_benchmark": 2.0,
+      "best_posting_window": "Tue/Thu 2-5pm, plus general evening peak 6-10pm",
+      "demographic_note": "Youngest average user age of any major platform (26.5 yrs); 66% of users aged 18-34; fastest-growing segment is 50+ (+240% since 2023)",
+      "dominant_format": "Short-form video"
+    },
+    "facebook": {
+      "engagement_rate_pct_socialinsider": 0.15,
+      "posts_per_week_benchmark": 3.0,
+      "best_posting_window": "Wed-Thu, 9-11am",
+      "demographic_note": "Only major platform where users 35+ outnumber under-35s; strongest with 65+ but broadly popular across all age groups",
+      "dominant_format": "Mixed video and community/group content"
+    },
+    "linkedin": {
+      "best_posting_window": "Tue-Thu, 8-10am",
+      "demographic_note": "25-34 age group makes up 60% of users; the strongest B2B platform - an estimated 65M decision-makers and 10M C-level executives are active on it",
+      "dominant_format": "Text posts and document/carousel posts, thought-leadership style"
+    },
+    "youtube": {
+      "engagement_rate_pct_rivaliq": 0.21,
+      "demographic_note": "Broad reach across nearly all age groups",
+      "dominant_format": "Long-form plus Shorts"
+    },
+    "x": {
+      "engagement_rate_pct_socialinsider": 0.12,
+      "engagement_rate_pct_rivaliq": 0.03,
+      "posts_per_week_benchmark": 70,
+      "demographic_note": "General audience; posting volume up ~40% YoY in 2026 even as per-post engagement stayed low",
+      "dominant_format": "Text threads and real-time commentary"
+    }
+  },
+  "industry_engagement_notes": {
+    "_note": "Qualitative relative-performance signal from the Rival IQ/Quid 2026 report (18 tracked industries), mapped to this app's industry keys where a reasonable match exists. Industries not listed here have no specific signal in that report - treat as platform-median.",
+    "education": "Leads Facebook engagement and dominates TikTok, at roughly 2x the platform median engagement rate.",
+    "b2b_saas": "Leads LinkedIn engagement at roughly 1.5x the platform median engagement rate - the strongest-performing category on that platform.",
+    "beauty_personal_care": "Had the lowest engagement across platforms in the 2026 report, in a saturated content category.",
+    "ecommerce_retail": "Tracked as 'Retail' - had the lowest engagement across platforms alongside Beauty in the 2026 report.",
+    "restaurants_food": "Highest YouTube engagement of any tracked industry, by a significant margin.",
+    "technology_electronics": "Underperforms the median on YouTube specifically.",
+    "finance_insurance": "Underperforms the median on YouTube specifically.",
+    "travel_hospitality": "Tracked as 'Hotels & Resorts' - a consistently strong-performing category alongside Sports and Higher Education.",
+    "automotive": "Directly tracked in the 2026 report; performance is mid-pack, no standout over/under-performance flagged.",
+    "apparel_fashion": "Tracked as 'Fashion' in the 2026 report; performance is mid-pack, no standout over/under-performance flagged.",
+    "nonprofit": "Tracked as 'Nonprofits' in the 2026 report; performance is mid-pack, no standout over/under-performance flagged."
+  }
+}

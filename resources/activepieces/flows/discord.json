@@ -1,0 +1,33 @@
+{
+  "displayName": "Discord channel announcement",
+  "trigger": {
+    "name": "trigger",
+    "valid": true,
+    "displayName": "Incoming send request",
+    "type": "PIECE_TRIGGER",
+    "settings": {
+      "pieceName": "@activepieces/piece-webhook",
+      "pieceVersion": "0.1.36",
+      "triggerName": "catch_webhook",
+      "input": { "authType": "none" },
+      "propertySettings": {}
+    },
+    "nextAction": {
+      "name": "post_to_discord",
+      "valid": true,
+      "displayName": "Send Discord message",
+      "type": "PIECE",
+      "settings": {
+        "pieceName": "@activepieces/piece-discord",
+        "pieceVersion": "0.5.3",
+        "actionName": "sendMessageWithBot",
+        "input": {
+          "auth": "{{connections.discord}}",
+          "channel_id": "{{trigger.body.channelId}}",
+          "message": "{{trigger.body.text}}"
+        },
+        "propertySettings": {}
+      }
+    }
+  }
+}

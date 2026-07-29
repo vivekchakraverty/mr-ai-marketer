@@ -1,0 +1,32 @@
+{
+  "displayName": "X broadcast",
+  "trigger": {
+    "name": "trigger",
+    "valid": true,
+    "displayName": "Incoming send request",
+    "type": "PIECE_TRIGGER",
+    "settings": {
+      "pieceName": "@activepieces/piece-webhook",
+      "pieceVersion": "0.1.36",
+      "triggerName": "catch_webhook",
+      "input": { "authType": "none" },
+      "propertySettings": {}
+    },
+    "nextAction": {
+      "name": "post_to_x",
+      "valid": true,
+      "displayName": "Post to X",
+      "type": "PIECE",
+      "settings": {
+        "pieceName": "@activepieces/piece-twitter",
+        "pieceVersion": "0.3.5",
+        "actionName": "create-tweet",
+        "input": {
+          "auth": "{{connections.twitter}}",
+          "text": "{{trigger.body.text}}"
+        },
+        "propertySettings": {}
+      }
+    }
+  }
+}

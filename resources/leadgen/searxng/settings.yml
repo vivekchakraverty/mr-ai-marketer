@@ -1,0 +1,27 @@
+# Bundled SearXNG settings TEMPLATE for the Lead Gen Agent's discovery backend.
+#
+# electron/src/main/leadgen.ts copies this to the per-user state dir on first run and
+# replaces __SEARXNG_SECRET__ with a generated secret before mounting it into the
+# container — so the shipped file stays a static template and the running secret is
+# per-user (mirrors how activepieces.ts generates AP_ENCRYPTION_KEY once).
+#
+# use_default_settings merges this over SearXNG's full built-in defaults, so we only
+# declare the handful of things the pipeline needs rather than a full config.
+use_default_settings: true
+
+server:
+  # Replaced per-user by leadgen.ts. Low-risk here regardless: the service is bound to
+  # 127.0.0.1 only (see docker-compose.yml), not exposed off the machine.
+  secret_key: "__SEARXNG_SECRET__"
+  limiter: false          # single local user — the bot-rate limiter would only get in the way
+  image_proxy: false
+
+search:
+  # The discovery client calls SearXNG's JSON API; that format is OFF in the defaults,
+  # so it must be enabled here or every request 403s.
+  formats:
+    - html
+    - json
+
+# General-purpose web results are all the discovery client needs; keep the default
+# engine set. (Left to defaults intentionally — no engine overrides here.)

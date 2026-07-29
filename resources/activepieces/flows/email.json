@@ -1,0 +1,36 @@
+{
+  "displayName": "Email broadcast",
+  "trigger": {
+    "name": "trigger",
+    "valid": true,
+    "displayName": "Incoming send request",
+    "type": "PIECE_TRIGGER",
+    "settings": {
+      "pieceName": "@activepieces/piece-webhook",
+      "pieceVersion": "0.1.36",
+      "triggerName": "catch_webhook",
+      "input": { "authType": "none" },
+      "propertySettings": {}
+    },
+    "nextAction": {
+      "name": "send_email",
+      "valid": true,
+      "displayName": "Send email",
+      "type": "PIECE",
+      "settings": {
+        "pieceName": "@activepieces/piece-smtp",
+        "pieceVersion": "0.4.2",
+        "actionName": "send-email",
+        "input": {
+          "auth": "{{connections.email}}",
+          "from": "{{trigger.body.from}}",
+          "to": "{{trigger.body.to}}",
+          "subject": "{{trigger.body.subject}}",
+          "body_type": "text",
+          "body": "{{trigger.body.text}}"
+        },
+        "propertySettings": {}
+      }
+    }
+  }
+}

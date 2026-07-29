@@ -1,0 +1,82 @@
+{
+  "displayName": "Discord conversation reply (human-gated)",
+  "trigger": {
+    "name": "trigger",
+    "valid": true,
+    "displayName": "Incoming send request",
+    "type": "PIECE_TRIGGER",
+    "settings": {
+      "pieceName": "@activepieces/piece-webhook",
+      "pieceVersion": "0.1.36",
+      "triggerName": "catch_webhook",
+      "input": { "authType": "none" },
+      "propertySettings": {}
+    },
+    "nextAction": {
+      "name": "create_links",
+      "valid": true,
+      "displayName": "Create Approval Links",
+      "type": "PIECE",
+      "settings": {
+        "pieceName": "@activepieces/piece-approval",
+        "pieceVersion": "0.1.20",
+        "actionName": "create_approval_links",
+        "input": {},
+        "propertySettings": {}
+      },
+      "nextAction": {
+        "name": "wait_for_approval",
+        "valid": true,
+        "displayName": "Wait for Approval",
+        "type": "PIECE",
+        "settings": {
+          "pieceName": "@activepieces/piece-approval",
+          "pieceVersion": "0.1.20",
+          "actionName": "wait_for_approval",
+          "input": {},
+          "propertySettings": {}
+        },
+        "nextAction": {
+          "name": "route_on_approval",
+          "valid": true,
+          "displayName": "If approved",
+          "type": "ROUTER",
+          "children": [
+            {
+              "name": "post_to_discord",
+              "valid": true,
+              "displayName": "Send Discord reply",
+              "type": "PIECE",
+              "settings": {
+                "pieceName": "@activepieces/piece-discord",
+                "pieceVersion": "0.5.3",
+                "actionName": "sendMessageWithBot",
+                "input": {
+                  "auth": "{{connections.discord}}",
+                  "channel_id": "{{trigger.body.channelId}}",
+                  "message": "{{trigger.body.text}}"
+                },
+                "propertySettings": {}
+              }
+            },
+            null
+          ],
+          "settings": {
+            "branches": [
+              {
+                "branchName": "Approved",
+                "branchType": "CONDITION",
+                "conditions": [[{ "operator": "BOOLEAN_IS_TRUE", "firstValue": "{{wait_for_approval.approved}}" }]]
+              },
+              {
+                "branchName": "Rejected",
+                "branchType": "FALLBACK"
+              }
+            ],
+            "executionType": "EXECUTE_FIRST_MATCH"
+          }
+        }
+      }
+    }
+  }
+}
