@@ -1,0 +1,33 @@
+{
+  "displayName": "Facebook broadcast",
+  "trigger": {
+    "name": "trigger",
+    "valid": true,
+    "displayName": "Incoming send request",
+    "type": "PIECE_TRIGGER",
+    "settings": {
+      "pieceName": "@activepieces/piece-webhook",
+      "pieceVersion": "0.1.36",
+      "triggerName": "catch_webhook",
+      "input": { "authType": "none" },
+      "propertySettings": {}
+    },
+    "nextAction": {
+      "name": "post_to_facebook",
+      "valid": true,
+      "displayName": "Post to Facebook Page",
+      "type": "PIECE",
+      "settings": {
+        "pieceName": "@activepieces/piece-facebook-pages",
+        "pieceVersion": "0.2.5",
+        "actionName": "create_post",
+        "input": {
+          "auth": "{{connections.facebook}}",
+          "page": "{{trigger.body.pageId}}",
+          "message": "{{trigger.body.text}}"
+        },
+        "propertySettings": {}
+      }
+    }
+  }
+}

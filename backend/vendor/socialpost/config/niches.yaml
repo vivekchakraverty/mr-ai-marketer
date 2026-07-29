@@ -1,0 +1,45 @@
+# SEED TEMPLATE ONLY — this file is not the source of truth.
+#
+# Niches live in the `niches` database table so they can be managed at runtime:
+#
+#     Streamlit -> the "Niches" tab
+#     python -m src.jobs.niches --list
+#     python -m src.jobs.niches --add "rust gamedev" --keywords "bevy engine" "wgpu"
+#
+# This file is imported ONCE, the first time something reads niches and finds the
+# table empty. After that the table wins and edits here do nothing until you run:
+#
+#     python -m src.jobs.niches --import-config
+#
+# It exists so a fresh install ships with something sensible, and so anyone who
+# forks this repo starts with working defaults rather than an empty app.
+#
+# ---------------------------------------------------------------------------
+#
+# Each keyword becomes one call to app.bsky.feed.searchPosts. Keep keywords
+# reasonably specific: single common words ("ai") return mostly noise and burn
+# rate limit. Multi-word keywords are treated as a phrase-ish query by Bluesky's
+# search, which is what we want.
+#
+# The niche name is denormalised onto posts, authors, exemplars, generations and
+# performance_baselines. Do NOT rename one by editing this file — use the Niches
+# tab or `--rename`, which migrates all five and keeps the niche's history.
+
+niches:
+  ai tools:
+    keywords:
+      - "ai tools"
+      - "llm workflow"
+      - "claude code"
+      - "prompt engineering"
+      - "ai agents"
+      - "local llm"
+
+  indie makers:
+    keywords:
+      - "indie hackers"
+      - "building in public"
+      - "solo founder"
+      - "bootstrapped saas"
+      - "shipped it"
+      - "side project launch"

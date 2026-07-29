@@ -1,0 +1,43 @@
+# Curated RSS/Atom feeds for the platform-knowledge base.
+#
+# Every item fetched from these feeds is passed to llm.summarize_kb(), which
+# returns "SKIP" unless the item describes a CONCRETE, ACTIONABLE platform or
+# algorithm change. So it is fine for a feed to be mostly noise — noise costs one
+# cheap Gemini call and is then dropped. It is NOT fine for a feed to be dead:
+# ingest_kb logs a warning and moves on, so a rotted URL fails silently forever.
+#
+# platform_tags here is only a FALLBACK. The real tags are chosen per-article by
+# llm.summarize_kb() from the article's content, because source-level tags are too
+# coarse to retrieve on: a general marketing blog covers every platform, so tagging
+# its TikTok article "bluesky" injects TikTok trivia into Bluesky posts. These
+# values are used only if the model omits its PLATFORMS header.
+#
+# Recognised tags: bluesky, x, linkedin, instagram, tiktok, facebook, general.
+#
+# All four verified returning entries on 2026-07-17. Re-check any time with:
+#   python -m src.jobs.ingest_kb --check-feeds
+#
+# Note on feeds that are NOT here: Buffer (buffer.com/resources) and Later
+# (later.com/blog) both block non-browser clients, so feedparser cannot read them.
+# Do not re-add them without checking --check-feeds first.
+
+sources:
+  # First-party and authoritative. These are the ones that actually announce
+  # algorithm and product changes; the marketing blogs below are commentary.
+  - name: Bluesky Blog
+    url: https://bsky.social/about/rss.xml
+    platform_tags: [bluesky, general]
+
+  - name: AT Protocol Blog
+    url: https://atproto.com/feed.xml
+    platform_tags: [bluesky, atproto]
+
+  # Third-party social-media marketing blogs. High volume, low signal density —
+  # the SKIP filter earns its keep here.
+  - name: Hootsuite Blog
+    url: https://blog.hootsuite.com/feed/
+    platform_tags: [general, bluesky, x, linkedin, instagram]
+
+  - name: Sprout Social Insights
+    url: https://sproutsocial.com/insights/feed/
+    platform_tags: [general, x, linkedin, instagram]

@@ -1,0 +1,33 @@
+{
+  "displayName": "LinkedIn broadcast",
+  "trigger": {
+    "name": "trigger",
+    "valid": true,
+    "displayName": "Incoming send request",
+    "type": "PIECE_TRIGGER",
+    "settings": {
+      "pieceName": "@activepieces/piece-webhook",
+      "pieceVersion": "0.1.36",
+      "triggerName": "catch_webhook",
+      "input": { "authType": "none" },
+      "propertySettings": {}
+    },
+    "nextAction": {
+      "name": "post_to_linkedin",
+      "valid": true,
+      "displayName": "Share on LinkedIn",
+      "type": "PIECE",
+      "settings": {
+        "pieceName": "@activepieces/piece-linkedin",
+        "pieceVersion": "0.2.7",
+        "actionName": "create_share_update",
+        "input": {
+          "auth": "{{connections.linkedin}}",
+          "text": "{{trigger.body.text}}",
+          "visibility": "PUBLIC"
+        },
+        "propertySettings": {}
+      }
+    }
+  }
+}

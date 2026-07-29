@@ -1,0 +1,32 @@
+{
+  "displayName": "Mastodon broadcast",
+  "trigger": {
+    "name": "trigger",
+    "valid": true,
+    "displayName": "Incoming send request",
+    "type": "PIECE_TRIGGER",
+    "settings": {
+      "pieceName": "@activepieces/piece-webhook",
+      "pieceVersion": "0.1.36",
+      "triggerName": "catch_webhook",
+      "input": { "authType": "none" },
+      "propertySettings": {}
+    },
+    "nextAction": {
+      "name": "post_to_mastodon",
+      "valid": true,
+      "displayName": "Post to Mastodon",
+      "type": "PIECE",
+      "settings": {
+        "pieceName": "@activepieces/piece-mastodon",
+        "pieceVersion": "0.5.6",
+        "actionName": "post_status",
+        "input": {
+          "auth": "{{connections.mastodon}}",
+          "status": "{{trigger.body.text}}"
+        },
+        "propertySettings": {}
+      }
+    }
+  }
+}

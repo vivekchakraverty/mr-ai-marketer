@@ -1,0 +1,37 @@
+# Node / Electron
+node_modules/
+electron/out/
+electron/dist/
+electron/dist-electron/
+
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/dist/
+backend/build/
+# (backend.spec itself is hand-authored and tracked — only PyInstaller's build/dist output above is ignored)
+
+# Packaging output
+electron/release/
+# ffmpeg/ffprobe binaries are fetched per-platform at build time (see resources/ffmpeg/README),
+# not committed — ~400MB and license-bearing binaries don't belong in git history.
+resources/ffmpeg/*/*.exe
+resources/ffmpeg/*/ffmpeg
+resources/ffmpeg/*/ffprobe
+
+# Local data / secrets — never commit tokens, credentials, or generated user content
+backend/data/
+backend/vendor/*/data/*.db
+*.env
+.env
+config.json
+mr-ai-marketer.sqlite3
+
+# Dev-only junction to the real (2.3GB) RAG index — M8 downloads this from a private
+# HF Dataset at runtime instead; this local link only exists for dev-machine testing.
+backend/vendor/dmstrategy/rag_index/
+
+# OS
+.DS_Store
+Thumbs.db

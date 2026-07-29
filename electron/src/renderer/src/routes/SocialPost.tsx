@@ -1,0 +1,565 @@
+import { useEffect, useState } from 'react'
+import {
+  collectSocialNiche,
+  generateSocialPost,
+  getSocialStatus,
+  listSocialNiches,
+  markSocialPublished,
+  saveSocialNiche,
+  type SocialGenerateResponse,
+  type SocialNiche,
+  type SocialStatus
+} from '../api/client'
+import { refreshLibrary } from '../state/actions'
+import { useAppStore } from '../state/store'
+import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, textInput } from '../styles/styleKit'
+
+const PLATFORMS = ['bluesky', 'x', 'linkedin', 'mastodon']
+
+// Bluesky is the only platform we can actually measure, so it is the only one with
+// a hard limit worth enforcing in the UI.
+const CHAR_LIMIT: Record<string, number> = { bluesky: 300, x: 280 }
+
+export default function SocialPost(): React.JSX.Element {
+  const fields = useAppStore((s) => s.fields.social)
+  const setSocialField = useAppStore((s) => s.setSocialField)
+  const goCreate = useAppStore((s) => s.goCreate)
+  const goSettings = useAppStore((s) => s.goSettings)
+
+  const [status, setStatus] = useState<SocialStatus | null>(null)
+  const [niches, setNiches] = useState<SocialNiche[]>([])
+  const [result, setResult] = useState<SocialGenerateResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  const [postedUrl, setPostedUrl] = useState('')
+  const [linking, setLinking] = useState(false)
+  const [linked, setLinked] = useState('')
+
+  const [showNiches, setShowNiches] = useState(false)
+  const [newNiche, setNewNiche] = useState('')
+  const [newKeywords, setNewKeywords] = useState('')
+  const [busyNiche, setBusyNiche] = useState<string | null>(null)
+
+  async function refresh(): Promise<void> {
+    try {
+      const [s, n] = await Promise.all([getSocialStatus(), listSocialNiches()])
+      setStatus(s)
+      setNiches(n)
+      if (!fields.niche && n.length) setSocialField('niche', n[0].name)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  useEffect(() => {
+    void refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function handleGenerate(): Promise<void> {
+    if (!fields.userInput.trim() || !fields.niche) return
+    setLoading(true)
+    setError('')
+    setResult(null)
+    setLinked('')
+    setPostedUrl('')
+    try {
+      const res = await generateSocialPost(
+        fields.userInput,
+        fields.niche,
+        fields.platform,
+        fields.sourceUrl
+      )
+      setResult(res)
+      void refreshLibrary()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleAddNiche(): Promise<void> {
+    const keywords = newKeywords
+      .split(/[\n,]/)
+      .map((k) => k.trim())
+      .filter(Boolean)
+    if (!newNiche.trim() || !keywords.length) return
+    try {
+      await saveSocialNiche(newNiche, keywords)
+      setNewNiche('')
+      setNewKeywords('')
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function handleCollect(name: string): Promise<void> {
+    setBusyNiche(name)
+    setError('')
+    try {
+      await collectSocialNiche(name)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusyNiche(null)
+    }
+  }
+
+  async function handleLink(): Promise<void> {
+    if (!result?.generationId || !postedUrl.trim()) return
+    setLinking(true)
+    setError('')
+    try {
+      const res = await markSocialPublished(result.generationId, postedUrl.trim(), fields.niche)
+      setLinked(res.postedUri)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLinking(false)
+    }
+  }
+
+  const limit = CHAR_LIMIT[fields.platform]
+  const over = result ? Boolean(limit && result.characters > limit) : false
+
+  return (
+    <div style={{ maxWidth: 1120, margin: '0 auto', padding: '22px 34px 60px' }}>
+      <div
+        style={{ font: "700 13px 'Quicksand'", color: 'var(--accent)', cursor: 'pointer', marginBottom: 14 }}
+        onClick={goCreate}
+      >
+        ← Create
+      </div>
+
+      <div style={{ marginBottom: 20, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ font: "700 30px 'Kalam'", color: 'var(--ink)' }}>Social Post Generator</div>
+          <div style={{ font: "600 14px 'Quicksand'", color: 'var(--ink-muted)', marginTop: 4 }}>
+            Learns from posts that actually did numbers in your corner of the internet, then writes like they do —
+            without stealing their homework.
+          </div>
+        </div>
+        <div
+          style={{
+            width: 34,
+            height: 34,
+            background: 'var(--tool-social)',
+            borderRadius: '53% 47% 47% 53%',
+            border: '2.5px solid var(--border)',
+            animation: 'bob 3.4s ease-in-out infinite',
+            flexShrink: 0
+          }}
+        />
+      </div>
+
+      {/* --- setup nudges ------------------------------------------------- */}
+      {status && !status.configured && (
+        <Banner
+          tone="warn"
+          title="It needs a key before it can write anything"
+          body={`Missing: ${status.missing.join(', ')}. Pop them into Settings and come back.`}
+          actionLabel="Open Settings"
+          onAction={goSettings}
+        />
+      )}
+      {status?.configured && !status.readyToGround && (
+        <Banner
+          tone="info"
+          title="Writing blind for now"
+          body="No exemplars yet, so drafts lean on platform norms alone. Collect some posts below, then give them 48 hours to prove themselves — that's when the grounding kicks in."
+        />
+      )}
+      {status?.needsConsent && (
+        <Banner
+          tone="info"
+          title="One-time consent needed"
+          body="This tool pools anonymous performance metrics to get better for everyone. Approve it in Settings to start generating."
+          actionLabel="Open Settings"
+          onAction={goSettings}
+        />
+      )}
+
+      {/* --- composer ----------------------------------------------------- */}
+      <div
+        style={{
+          background: 'var(--surface)',
+          border: '2.5px solid var(--border)',
+          borderRadius: 20,
+          padding: 18,
+          boxShadow: 'var(--shadow-md)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 14
+        }}
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
+          <div>
+            <label style={label}>Niche</label>
+            <select
+              value={fields.niche}
+              onChange={(e) => setSocialField('niche', e.target.value)}
+              style={select}
+            >
+              {!niches.length && <option value="">No niches yet — add one below</option>}
+              {niches.map((n) => (
+                <option key={n.name} value={n.name}>
+                  {n.name} ({n.exemplars} exemplars)
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={label}>Platform</label>
+            <select
+              value={fields.platform}
+              onChange={(e) => setSocialField('platform', e.target.value)}
+              style={select}
+            >
+              {PLATFORMS.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label style={label}>What's the post about?</label>
+          <textarea
+            rows={3}
+            value={fields.userInput}
+            onChange={(e) => setSocialField('userInput', e.target.value)}
+            placeholder="e.g. announce that my CLI tool finally works on Windows, mildly smug tone"
+            style={textarea}
+          />
+        </div>
+
+        <div>
+          <label style={label}>Link to write about — optional</label>
+          <input
+            value={fields.sourceUrl}
+            onChange={(e) => setSocialField('sourceUrl', e.target.value)}
+            placeholder="https://… a release note, article or changelog to pull the facts from"
+            style={textInput}
+          />
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div
+            style={{ ...primaryButtonSmall, opacity: loading || !fields.niche ? 0.6 : 1 }}
+            onClick={loading || !fields.niche ? undefined : handleGenerate}
+          >
+            {loading ? (fields.sourceUrl.trim() ? 'Reading the link…' : 'Thinking…') : 'Write it'}
+          </div>
+          <div
+            style={{ ...secondaryButtonSmall }}
+            onClick={() => setShowNiches((v) => !v)}
+          >
+            {showNiches ? 'Hide niches' : 'Manage niches'}
+          </div>
+          {status && (
+            <div style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-faint)', marginLeft: 'auto' }}>
+              {status.provider}/{status.model.split('/').pop()} · {status.posts} posts watched
+            </div>
+          )}
+        </div>
+      </div>
+
+      {error && (
+        <div
+          style={{
+            marginTop: 14,
+            font: "700 13px 'Quicksand'",
+            color: 'var(--danger-ink)',
+            background: 'var(--accent-soft-bg)',
+            border: '2px solid var(--border)',
+            borderRadius: 14,
+            padding: '11px 14px'
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {/* --- niches ------------------------------------------------------- */}
+      {showNiches && (
+        <div
+          style={{
+            marginTop: 16,
+            background: 'var(--surface-paper)',
+            border: '2.5px solid var(--border-paper)',
+            borderRadius: 20,
+            padding: 18,
+            boxShadow: 'var(--shadow-paper)'
+          }}
+        >
+          <div style={{ font: "700 18px 'Kalam'", color: 'var(--ink)', marginBottom: 2 }}>Niches</div>
+          <div style={{ font: "600 12.5px/1.5 'Quicksand'", color: 'var(--ink-muted)', marginBottom: 14 }}>
+            A niche is a name plus the search terms that find it. Be specific — “ai” drags in the whole internet.
+          </div>
+
+          {niches.map((n) => (
+            <div
+              key={n.name}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '10px 0',
+                borderTop: '2px dashed var(--border-soft)'
+              }}
+            >
+              <div style={{ flex: 1 }}>
+                <div style={{ font: "700 14px 'Quicksand'", color: 'var(--ink)' }}>{n.name}</div>
+                <div style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-faint)', marginTop: 2 }}>
+                  {n.keywords.join(' · ')}
+                </div>
+              </div>
+              <div style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-muted)', whiteSpace: 'nowrap' }}>
+                {n.posts} posts · {n.exemplars} exemplars
+              </div>
+              <div
+                style={{ ...secondaryButtonSmall, opacity: busyNiche === n.name ? 0.6 : 1 }}
+                onClick={busyNiche ? undefined : () => handleCollect(n.name)}
+              >
+                {busyNiche === n.name ? 'Collecting…' : 'Collect now'}
+              </div>
+            </div>
+          ))}
+
+          <div style={{ borderTop: '2px dashed var(--border-soft)', paddingTop: 14, marginTop: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr auto', gap: 10, alignItems: 'end' }}>
+              <div>
+                <label style={label}>New niche</label>
+                <input
+                  value={newNiche}
+                  onChange={(e) => setNewNiche(e.target.value)}
+                  placeholder="rust gamedev"
+                  style={textInput}
+                />
+              </div>
+              <div>
+                <label style={label}>Keywords (comma or newline)</label>
+                <input
+                  value={newKeywords}
+                  onChange={(e) => setNewKeywords(e.target.value)}
+                  placeholder="bevy engine, wgpu, rust gamedev"
+                  style={textInput}
+                />
+              </div>
+              <div style={primaryButtonSmall} onClick={handleAddNiche}>
+                Add
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- draft -------------------------------------------------------- */}
+      {result && (
+        <div style={{ marginTop: 18 }}>
+          <div
+            style={{
+              background: 'var(--surface-paper)',
+              border: '2.5px solid var(--border-paper)',
+              borderRadius: 20,
+              padding: 20,
+              boxShadow: 'var(--shadow-paper)'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <div style={{ font: "700 18px 'Kalam'", color: 'var(--ink)' }}>Here you go</div>
+              <div
+                style={{
+                  font: "700 12px 'Quicksand'",
+                  color: over ? 'var(--danger-ink)' : 'var(--ink-faint)'
+                }}
+              >
+                {result.characters}
+                {limit ? ` / ${limit}` : ''} characters{over ? ' — too long, trim it' : ''}
+              </div>
+            </div>
+
+            <div
+              style={{
+                font: "600 15px/1.6 'Quicksand'",
+                color: 'var(--ink)',
+                background: 'var(--surface)',
+                border: '2px solid var(--border)',
+                borderRadius: 14,
+                padding: '14px 16px',
+                whiteSpace: 'pre-wrap'
+              }}
+            >
+              {result.text}
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+              <div
+                style={primaryButtonSmall}
+                onClick={() => {
+                  void navigator.clipboard.writeText(result.text)
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 1600)
+                }}
+              >
+                {copied ? 'Copied ✓' : 'Copy'}
+              </div>
+              <div style={secondaryButtonSmall} onClick={handleGenerate}>
+                Try again
+              </div>
+            </div>
+          </div>
+
+          {/* --- what informed it ---------------------------------------- */}
+          <details
+            style={{
+              marginTop: 14,
+              background: 'var(--surface)',
+              border: '2px solid var(--border)',
+              borderRadius: 16,
+              padding: '12px 16px'
+            }}
+          >
+            <summary style={{ font: "700 13px 'Quicksand'", color: 'var(--ink)', cursor: 'pointer' }}>
+              Where this came from — {result.exemplars.length} exemplars, {result.kbArticles.length} platform notes
+              {result.source ? ', 1 linked source' : ''}
+            </summary>
+            <div style={{ marginTop: 12 }}>
+              {result.source && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ font: "700 11.5px 'Quicksand'", color: 'var(--accent-deep)' }}>
+                    Source material
+                    <span
+                      style={{ color: 'var(--accent)', cursor: 'pointer', marginLeft: 8 }}
+                      onClick={() => window.api.openExternal(result.source!.url)}
+                    >
+                      {result.source.title || result.source.url} →
+                    </span>
+                  </div>
+                  <div style={{ font: "600 12px/1.5 'Quicksand'", color: 'var(--ink-muted)', marginTop: 3 }}>
+                    {result.source.excerpt}
+                    {result.source.truncated ? '…' : ''}
+                  </div>
+                </div>
+              )}
+              {result.exemplars.length === 0 && !result.source && (
+                <div style={{ font: "600 12.5px 'Quicksand'", color: 'var(--ink-faint)' }}>
+                  Nothing to show yet — this one ran on platform norms alone.
+                </div>
+              )}
+              {result.exemplars.map((e, i) => (
+                <div key={e.id} style={{ marginBottom: 12 }}>
+                  <div style={{ font: "700 11.5px 'Quicksand'", color: 'var(--accent-deep)' }}>
+                    {i + 1}. similarity {e.similarity} · score {e.score}
+                    {e.webUrl && (
+                      <span
+                        style={{ color: 'var(--accent)', cursor: 'pointer', marginLeft: 8 }}
+                        onClick={() => window.api.openExternal(e.webUrl)}
+                      >
+                        view original →
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ font: "600 12.5px/1.5 'Quicksand'", color: 'var(--ink-muted)', marginTop: 3 }}>
+                    {e.text}
+                  </div>
+                </div>
+              ))}
+              {result.kbArticles.map((k) => (
+                <div key={k.id} style={{ marginTop: 10 }}>
+                  <div style={{ font: "700 11.5px 'Quicksand'", color: 'var(--accent-deep)' }}>
+                    {k.source} · weight {k.decayWeight}
+                  </div>
+                  <div style={{ font: "600 12.5px/1.5 'Quicksand'", color: 'var(--ink-muted)' }}>{k.summary}</div>
+                </div>
+              ))}
+            </div>
+          </details>
+
+          {/* --- close the loop ------------------------------------------ */}
+          <div
+            style={{
+              marginTop: 14,
+              background: 'var(--surface)',
+              border: '2px solid var(--border)',
+              borderRadius: 16,
+              padding: 16
+            }}
+          >
+            <div style={{ font: "700 14px 'Kalam'", color: 'var(--ink)' }}>Did you actually post it?</div>
+            <div style={{ font: "600 12.5px/1.5 'Quicksand'", color: 'var(--ink-muted)', margin: '4px 0 10px' }}>
+              Paste the link and it'll watch how the post does, then use that to write better ones. This is the only
+              way it learns from <i>you</i> rather than strangers.
+            </div>
+            {linked ? (
+              <div style={{ font: "700 12.5px 'Quicksand'", color: 'var(--accent)' }}>
+                Linked ✓ — engagement gets measured at 1h, 24h and 48h.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 10 }}>
+                <input
+                  value={postedUrl}
+                  onChange={(e) => setPostedUrl(e.target.value)}
+                  placeholder="https://bsky.app/profile/you.bsky.social/post/3k…"
+                  style={{ ...textInput, flex: 1 }}
+                />
+                <div
+                  style={{ ...secondaryButtonSmall, opacity: linking || !postedUrl.trim() ? 0.6 : 1 }}
+                  onClick={linking || !postedUrl.trim() ? undefined : handleLink}
+                >
+                  {linking ? 'Linking…' : 'Link it'}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Banner({
+  tone,
+  title,
+  body,
+  actionLabel,
+  onAction
+}: {
+  tone: 'warn' | 'info'
+  title: string
+  body: string
+  actionLabel?: string
+  onAction?: () => void
+}): React.JSX.Element {
+  return (
+    <div
+      style={{
+        marginBottom: 14,
+        background: tone === 'warn' ? 'var(--accent-soft-bg)' : 'var(--tip-bg)',
+        border: '2px solid var(--border)',
+        borderRadius: 16,
+        padding: '12px 16px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 14
+      }}
+    >
+      <div style={{ flex: 1 }}>
+        <div style={{ font: "700 13.5px 'Quicksand'", color: 'var(--ink)' }}>{title}</div>
+        <div style={{ font: "600 12.5px/1.5 'Quicksand'", color: 'var(--ink-muted)', marginTop: 2 }}>{body}</div>
+      </div>
+      {actionLabel && onAction && (
+        <div style={secondaryButtonSmall} onClick={onAction}>
+          {actionLabel}
+        </div>
+      )}
+    </div>
+  )
+}
