@@ -1,0 +1,10 @@
+<div class="dm-player" style="display:flex;flex-direction:column;gap:6px;">
+  <video id="dm-video" controls preload="metadata"
+         src="/gradio_api/file=__VIDEO_PATH__"
+         onerror="if(!this.dataset.fb){this.dataset.fb='1';this.src='/file=__VIDEO_PATH__';}"
+         style="width:100%;max-height:430px;background:#000;border-radius:8px;"></video>
+  <p style="margin:0;font-size:12px;opacity:0.75;">
+    Use the seek bar to find the exact moment, then click
+    <b>"📸 Capture current frame"</b> below to snapshot it.
+  </p>
+</div>

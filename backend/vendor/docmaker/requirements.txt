@@ -1,0 +1,31 @@
+# DocuMaker — single requirements file (HuggingFace Spaces installs only this one).
+
+# ---- PyTorch CPU wheels: keeps the Spaces / CPU image small. ----
+# For a local NVIDIA GPU instead, reinstall torch from the CUDA index:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# Core app / UI
+gradio>=6.0
+python-dotenv>=1.0
+
+# Transcription (local, CTranslate2 — no torch needed)
+faster-whisper>=1.0.3
+
+# Frame extraction / scene detection / dedup
+# headless OpenCV: no system GUI libs (libGL) required — important on Spaces.
+scenedetect>=0.6.4
+opencv-python-headless>=4.9
+Pillow>=10.2
+imagehash>=4.3
+numpy>=1.26
+
+# HuggingFace Inference API (text LLM) + token validation
+huggingface_hub>=0.27
+
+# Local BLIP image captioner (vision)
+transformers>=4.44
+torch>=2.2
+
+# DOCX output
+python-docx>=1.1
