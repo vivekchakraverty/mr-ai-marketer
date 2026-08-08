@@ -9,6 +9,7 @@ import secrets
 import time
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 import requests
 
@@ -124,6 +125,139 @@ def _get_session() -> dict:
     return {"token": _cached_token, "projectId": _cached_project_id}
 
 
+_cached_pieces: Optional[list[dict]] = None
+_cached_pieces_at: float = 0
+
+# The webhook trigger every flow starts with. Identical across the ten bundled flow
+# templates, so a generated flow uses the same one rather than inventing a shape.
+_WEBHOOK_TRIGGER = {
+    "pieceName": "@activepieces/piece-webhook",
+    "pieceVersion": "0.1.36",
+    "triggerName": "catch_webhook",
+}
+
+
+def list_pieces(force: bool = False) -> list[dict]:
+    """The engine's whole piece catalogue (~750 entries).
+
+    Cached for a few minutes because it is ~800KB and completely static for a given
+    Activepieces version — the Add-a-channel browser re-reads it on every keystroke.
+    """
+    global _cached_pieces, _cached_pieces_at
+    if _cached_pieces is not None and not force and time.time() - _cached_pieces_at < 300:
+        return _cached_pieces
+    session = _get_session()
+    result = _request("GET", "/api/v1/pieces", token=session["token"])
+    _cached_pieces = result if isinstance(result, list) else result.get("data", [])
+    _cached_pieces_at = time.time()
+    return _cached_pieces
+
+
+def get_piece(piece_name: str) -> dict:
+    """One piece with its full auth schema and every action's typed props.
+
+    The list endpoint reports `actions` as a bare count; only this per-piece endpoint
+    returns the actual prop definitions the connect/mapping forms are generated from.
+    """
+    session = _get_session()
+    return _request("GET", f"/api/v1/pieces/{quote(piece_name, safe='')}", token=session["token"])
+
+
+def build_flow_spec(
+    channel: str,
+    label: str,
+    piece_name: str,
+    piece_version: str,
+    action_name: str,
+    input_map: dict,
+) -> dict:
+    """Assembles the same flow shape the bundled templates hand-write, for any piece.
+
+    Every bundled flow is structurally one thing — catch a webhook, run a single piece
+    action whose `auth` points at {{connections.<channel>}} — so a generated flow is that
+    shape with the piece coordinates and input substituted in. No code generation involved:
+    the props come from the piece's own schema and the bindings from the user's mapping.
+    """
+    return {
+        "displayName": label,
+        "trigger": {
+            "name": "trigger",
+            "valid": True,
+            "displayName": "Incoming send request",
+            "type": "PIECE_TRIGGER",
+            "settings": {**_WEBHOOK_TRIGGER, "input": {"authType": "none"}, "propertySettings": {}},
+            "nextAction": {
+                "name": f"post_to_{channel.replace('-', '_')}",
+                "valid": True,
+                "displayName": label,
+                "type": "PIECE",
+                "settings": {
+                    "pieceName": piece_name,
+                    "pieceVersion": piece_version,
+                    "actionName": action_name,
+                    "input": {"auth": f"{{{{connections.{channel}}}}}", **input_map},
+                    "propertySettings": {},
+                },
+            },
+        },
+    }
+
+
+def import_custom_flow(channel: str, spec: dict, existing: Optional[dict] = None) -> str:
+    """Imports and publishes a generated flow, replacing any earlier one of the same name.
+
+    Matching on displayName mirrors ensure_flows_imported: it is the only handle we have
+    that survives a re-add, and without it editing a channel would leave the previous
+    flow published and still firing alongside the new one.
+    """
+    if existing is None:
+        existing = {f["version"]["displayName"]: f for f in list_flows()}
+    found = existing.get(spec["displayName"])
+    updated = _import_flow(spec, flow_id=found["id"] if found else None)
+    _publish_flow(updated["id"])
+    _cached_flow_ids[channel] = updated["id"]
+    return updated["id"]
+
+
+def ensure_custom_flows_imported(rows: list[dict]) -> dict[str, str]:
+    """Same contract as ensure_flows_imported, for the user's own channels.
+
+    Kept separate rather than folded into that function so this module stays unaware of
+    the database: the caller reads the rows and hands them over. Already-ENABLED flows are
+    left alone, so this is a single list_flows round-trip in the steady state.
+    """
+    if not rows:
+        return {}
+    existing = {f["version"]["displayName"]: f for f in list_flows()}
+    result: dict[str, str] = {}
+    for row in rows:
+        spec = build_flow_spec(
+            row["channel"],
+            row["label"],
+            row["piece_name"],
+            row["piece_version"],
+            row["action_name"],
+            row["input_map"],
+        )
+        found = existing.get(spec["displayName"])
+        if found and found["status"] == "ENABLED":
+            result[row["channel"]] = found["id"]
+            _cached_flow_ids[row["channel"]] = found["id"]
+            continue
+        result[row["channel"]] = import_custom_flow(row["channel"], spec, existing=existing)
+    return result
+
+
+def delete_flow_by_display_name(display_name: str) -> None:
+    """Removes a generated flow when its channel is deleted, so a webhook that nothing
+    points at any more stops being live."""
+    session = _get_session()
+    found = next((f for f in list_flows() if f["version"]["displayName"] == display_name), None)
+    if not found:
+        return
+    _request("DELETE", f"/api/v1/flows/{found['id']}", token=session["token"])
+
+
 def list_flows() -> list[dict]:
     session = _get_session()
     result = _request("GET", f"/api/v1/flows?projectId={session['projectId']}", token=session["token"])
@@ -141,15 +275,23 @@ def get_flow_run(run_id: str) -> dict:
     return _request("GET", f"/api/v1/flow-runs/{run_id}", token=session["token"])
 
 
-def create_connection(channel: str, connection_type: str, value: dict) -> dict:
+def create_connection(
+    channel: str,
+    connection_type: str,
+    value: dict,
+    piece: Optional[tuple[str, str]] = None,
+) -> dict:
     """Creates (or replaces) the app-connection a channel's flow references as
     {{connections.<channel>}}. `connection_type` is one of Activepieces' own connection
     kinds (CUSTOM_AUTH or SECRET_TEXT here — OAUTH2 channels connect via Activepieces' own
     screen instead). Confirmed live against a real instance's OpenAPI schema: SECRET_TEXT
     takes its field (`secret_text`) at the top level of `value`, but CUSTOM_AUTH requires
     the piece's own fields nested one level deeper under `value.props` — sending them
-    spread at the top level (as SECRET_TEXT does) 400s with FST_ERR_VALIDATION."""
-    piece_name, piece_version = {**CUSTOM_AUTH_PIECES, **SECRET_TEXT_PIECES}[channel]
+    spread at the top level (as SECRET_TEXT does) 400s with FST_ERR_VALIDATION.
+
+    `piece` supplies the coordinates for a user-added channel, which by definition is not
+    in the hardcoded maps above."""
+    piece_name, piece_version = piece or {**CUSTOM_AUTH_PIECES, **SECRET_TEXT_PIECES}[channel]
     session = _get_session()
     connection_value = (
         {"type": connection_type, "props": value} if connection_type == "CUSTOM_AUTH" else {"type": connection_type, **value}

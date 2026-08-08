@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from .. import db
+from ..services import hf_assets
 from vendor.guestpostsuggester.pipeline import availability, catalog, crawler, openpagerank, search, suggest
 from vendor.guestpostsuggester.pipeline import config as gp_config
 
@@ -18,10 +19,38 @@ _by_domain: dict[str, catalog.Site] = {}
 _index: search.CatalogSearchIndex | None = None
 
 
+def _point_vendor_at_assets() -> None:
+    """Redirect the vendored pipeline to the fetched catalogue files.
+
+    Its config module reads these paths from the environment at *import* time, which is long
+    past by the time the app can download anything — but `catalog.py` and `openpagerank.py`
+    both read the config attributes at *call* time. So rebinding the attributes works, and
+    vendor/guestpostsuggester stays exactly as upstream wrote it, the same way the Marketing
+    Plan's retrieval is redirected rather than forked.
+    """
+    catalog_path = hf_assets.path_for("guest-post-db", required=False)
+    if catalog_path is not None:
+        gp_config.CATALOG_XLSX_PATH = catalog_path
+    scores_path = hf_assets.path_for("opr-scores", required=False)
+    if scores_path is not None:
+        gp_config.OPR_SCORES_PATH = scores_path
+
+
 def initialize() -> None:
-    """Load the ~32k-site catalog and build the TF-IDF index once at startup."""
+    """Load the ~32k-site catalog and build the TF-IDF index once at startup.
+
+    Never raises: the catalogue now comes from Hugging Face on a fresh install, and a gated
+    repo or an offline first launch must not stop the backend from starting. The tool reports
+    its own unavailability instead, and `ensure_loaded()` retries on the next request — by
+    which point a token has usually arrived.
+    """
     global _sites, _by_domain, _index
-    sites = catalog.load_catalog()
+    try:
+        _point_vendor_at_assets()
+        sites = catalog.load_catalog()
+    except Exception as err:  # noqa: BLE001
+        logger.warning("Guest post catalog unavailable for now: %s", err)
+        return
     opr_scores = openpagerank.load_cached_scores()
     for s in sites:
         s.page_rank = opr_scores.get(s.domain, 0.0)
@@ -43,10 +72,21 @@ class SearchResponse(BaseModel):
     libraryId: str
 
 
+def ensure_loaded() -> None:
+    """Retry the one-time load if startup could not do it."""
+    if _index is None:
+        initialize()
+
+
 @router.post("/search", response_model=SearchResponse)
 def do_search(body: SearchRequest) -> SearchResponse:
+    ensure_loaded()
     if _index is None:
-        raise HTTPException(status_code=503, detail="Catalog is still loading — try again in a moment.")
+        raise HTTPException(
+            status_code=503,
+            detail="The site catalogue isn't loaded yet. If this persists, check that "
+                   "HF_ASSETS_GUEST_POST_REPO points at a Hugging Face dataset you can read.",
+        )
 
     topic = body.topic.strip()
     if not topic:

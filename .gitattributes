@@ -1,0 +1,50 @@
+# Line endings and diff behaviour.
+#
+# This repo is authored on Windows but half of it runs on Linux: the Hugging Face Spaces in
+# resources/*-space/ build from Dockerfiles, and scripts/finetune/*.sh are shipped to a rented
+# GPU box. A CRLF that reaches either of those is not a cosmetic problem — `#!/usr/bin/env bash\r`
+# fails with "bad interpreter: no such file or directory", which is a confusing way to lose an
+# afternoon. Normalising in the repo is what stops that happening.
+
+# Normalise every text file to LF in the repository. Git still checks out CRLF on Windows
+# where core.autocrlf says to; what this guarantees is that the committed blob is LF.
+* text=auto eol=lf
+
+# Files that must be LF on disk even on Windows, because something other than Windows reads them.
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+*.Dockerfile    text eol=lf
+
+# Windows-only scripts, conversely, must keep CRLF — cmd.exe mis-parses LF-only .bat files.
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+*.ps1           text eol=crlf
+
+# Explicitly binary. Without this git may try to normalise or diff them, which corrupts the
+# file and produces useless multi-megabyte diffs in review.
+*.mp4           binary
+*.mp3           binary
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.ico           binary
+*.woff          binary
+*.woff2         binary
+*.ttf           binary
+*.onnx          binary
+*.joblib        binary
+*.pkl           binary
+*.xlsx          binary
+*.sqlite3       binary
+*.gguf          binary
+*.safetensors   binary
+
+# GitHub language statistics. Without these the repo reports as whatever the vendored code and
+# the generated lockfiles happen to be, rather than what anyone actually maintains here.
+backend/vendor/**       linguist-vendored
+package-lock.json       linguist-generated
+requirements.lock.txt   linguist-generated
+
+# Docs shouldn't count toward the language bar, but should still render.
+docs/**                 linguist-documentation

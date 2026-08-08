@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { backendUrl, generateTutorial, type GenerateTutorialResponse } from '../api/client'
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
+import ScreenBackdrop from '../components/ScreenBackdrop'
 import { label, paperCard, primaryButtonSmall, primaryButton, secondaryButtonSmall, select, textInput, textarea } from '../styles/styleKit'
+import SaveButton from '../components/SaveButton'
 
 const SHOT_OPTIONS = [4, 6, 8, 10]
 
@@ -34,6 +36,7 @@ export default function TutorialMaker(): React.JSX.Element {
 
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '22px 34px 60px' }}>
+      <ScreenBackdrop video="tutorial" />
       <div style={{ font: "700 13px 'Quicksand'", color: 'var(--accent)', cursor: 'pointer', marginBottom: 14 }} onClick={goCreate}>
         ← Create
       </div>
@@ -121,7 +124,14 @@ export default function TutorialMaker(): React.JSX.Element {
         <div style={{ flex: 1 }}>
           {result && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, alignItems: 'center' }}>
+                <SaveButton
+                  libraryId={result.libraryId}
+                  tool="Tutorial"
+                  title={result.title}
+                  subtitle="Tutorial"
+                  content={result.intro}
+                />
                 <div
                   style={result.docxPath ? secondaryButtonSmall : { ...secondaryButtonSmall, opacity: 0.5, cursor: 'default' }}
                   onClick={() => result.docxPath && window.api.openFile(result.docxPath)}
@@ -142,6 +152,20 @@ export default function TutorialMaker(): React.JSX.Element {
                 {result.answer && (
                   <div style={{ background: 'var(--tip-bg)', border: '2px solid var(--border)', borderRadius: 14, padding: '14px 16px', margin: '16px 0 0' }}>
                     <div style={{ font: "700 13.5px 'Quicksand'", color: 'var(--tip-ink)' }}>{result.answer}</div>
+                  </div>
+                )}
+                {result.sentimentNote && (
+                  <div
+                    style={{
+                      border: '2px dashed var(--border)',
+                      borderRadius: 14,
+                      padding: '11px 14px',
+                      margin: '14px 0 0',
+                      font: "600 12.5px/1.6 'Quicksand'",
+                      color: 'var(--ink-muted)'
+                    }}
+                  >
+                    {result.sentimentNote}
                   </div>
                 )}
                 <p style={{ font: "600 15px/1.7 'Quicksand'", color: 'var(--ink-body)', margin: '14px 0 22px' }}>{result.intro}</p>

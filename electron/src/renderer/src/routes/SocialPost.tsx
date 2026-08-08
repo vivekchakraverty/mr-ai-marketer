@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
 import {
+  backendUrl,
   collectSocialNiche,
   generateSocialPost,
+  generateSocialPostImage,
   getSocialStatus,
   listSocialNiches,
   markSocialPublished,
   saveSocialNiche,
+  type SocialGeneratedImage,
   type SocialGenerateResponse,
   type SocialNiche,
   type SocialStatus
@@ -13,6 +16,9 @@ import {
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, textInput } from '../styles/styleKit'
+import HashtagSuggester from '../components/HashtagSuggester'
+import ScreenBackdrop from '../components/ScreenBackdrop'
+import SaveButton from '../components/SaveButton'
 
 const PLATFORMS = ['bluesky', 'x', 'linkedin', 'mastodon']
 
@@ -32,6 +38,9 @@ export default function SocialPost(): React.JSX.Element {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
+  const [postImage, setPostImage] = useState<SocialGeneratedImage | null>(null)
+  const [imageLoading, setImageLoading] = useState(false)
+  const [imageError, setImageError] = useState('')
 
   const [postedUrl, setPostedUrl] = useState('')
   const [linking, setLinking] = useState(false)
@@ -63,6 +72,8 @@ export default function SocialPost(): React.JSX.Element {
     setLoading(true)
     setError('')
     setResult(null)
+    setPostImage(null)
+    setImageError('')
     setLinked('')
     setPostedUrl('')
     try {
@@ -78,6 +89,19 @@ export default function SocialPost(): React.JSX.Element {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleGenerateImage(): Promise<void> {
+    if (!result?.text.trim()) return
+    setImageLoading(true)
+    setImageError('')
+    try {
+      setPostImage(await generateSocialPostImage(result.text, fields.niche, fields.platform))
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setImageLoading(false)
     }
   }
 
@@ -129,6 +153,7 @@ export default function SocialPost(): React.JSX.Element {
 
   return (
     <div style={{ maxWidth: 1120, margin: '0 auto', padding: '22px 34px 60px' }}>
+      <ScreenBackdrop video="social" />
       <div
         style={{ font: "700 13px 'Quicksand'", color: 'var(--accent)', cursor: 'pointer', marginBottom: 14 }}
         onClick={goCreate}
@@ -375,6 +400,14 @@ export default function SocialPost(): React.JSX.Element {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <div style={{ font: "700 18px 'Kalam'", color: 'var(--ink)' }}>Here you go</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <SaveButton
+                libraryId={result.libraryId}
+                tool="Social"
+                title={`${fields.platform} post · ${fields.niche}`}
+                subtitle="Social post"
+                content={result.text}
+              />
               <div
                 style={{
                   font: "700 12px 'Quicksand'",
@@ -383,6 +416,7 @@ export default function SocialPost(): React.JSX.Element {
               >
                 {result.characters}
                 {limit ? ` / ${limit}` : ''} characters{over ? ' — too long, trim it' : ''}
+              </div>
               </div>
             </div>
 
@@ -400,7 +434,7 @@ export default function SocialPost(): React.JSX.Element {
               {result.text}
             </div>
 
-            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+            <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
               <div
                 style={primaryButtonSmall}
                 onClick={() => {
@@ -414,7 +448,33 @@ export default function SocialPost(): React.JSX.Element {
               <div style={secondaryButtonSmall} onClick={handleGenerate}>
                 Try again
               </div>
+              <div
+                style={{ ...secondaryButtonSmall, opacity: imageLoading ? 0.6 : 1 }}
+                onClick={imageLoading ? undefined : handleGenerateImage}
+              >
+                {imageLoading ? 'Generating image…' : postImage ? 'Regenerate image' : 'Generate image'}
+              </div>
             </div>
+            {imageError && (
+              <div style={{ marginTop: 10, font: "700 12.5px 'Quicksand'", color: 'var(--danger-ink)' }}>{imageError}</div>
+            )}
+            {postImage && (
+              <div style={{ marginTop: 14 }}>
+                <img
+                  src={backendUrl + postImage.url}
+                  alt="Generated visual for the post"
+                  style={{
+                    width: '100%',
+                    maxHeight: 640,
+                    objectFit: 'contain',
+                    background: 'var(--surface)',
+                    border: '2px solid var(--border)',
+                    borderRadius: 8,
+                    display: 'block'
+                  }}
+                />
+              </div>
+            )}
           </div>
 
           {/* --- what informed it ---------------------------------------- */}
@@ -520,6 +580,17 @@ export default function SocialPost(): React.JSX.Element {
             )}
           </div>
         </div>
+      )}
+
+      {/* --- hashtag suggester ------------------------------------------- */}
+      {(fields.niche || fields.userInput.trim()) && (
+        <HashtagSuggester
+          draft={(result?.text ?? '').trim() || fields.userInput}
+          postText={result?.text ?? ''}
+          niche={fields.niche}
+          platform={fields.platform}
+          charLimit={limit}
+        />
       )}
     </div>
   )

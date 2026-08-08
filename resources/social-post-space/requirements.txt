@@ -1,0 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+gradio==6.18.0
+torch==2.7.1
+transformers==5.14.1
+sentencepiece>=0.2.0
+Pillow>=10.4
+modal>=1.0,<2

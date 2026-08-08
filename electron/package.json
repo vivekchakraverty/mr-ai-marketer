@@ -4,6 +4,7 @@
   "description": "Mr. AI Marketer — desktop marketing studio",
   "main": "./out/main/index.js",
   "author": "Vivek Chakraverty",
+  "license": "MIT",
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
@@ -22,6 +23,13 @@
     "directories": {
       "output": "release"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "vivekchakraverty",
+        "repo": "mr-ai-marketer"
+      }
+    ],
     "files": [
       "out/**/*"
     ],
@@ -44,8 +52,16 @@
       }
     ],
     "win": {
-      "target": "nsis",
-      "icon": "../build/icon.ico"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "../build/icon.ico",
+      "artifactName": "${name}-Setup-${version}-${arch}.${ext}"
     },
     "mac": {
       "target": "dmg",
@@ -62,12 +78,23 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Mr. AI Marketer",
+      "uninstallDisplayName": "${productName} ${version}",
+      "license": "../LICENSE",
+      "runAfterFinish": true,
+      "menuCategory": false,
+      "include": "installer.nsh"
     }
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "electron-updater": "^6.8.9",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",

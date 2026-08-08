@@ -141,6 +141,101 @@ CREATE TABLE IF NOT EXISTS mastodon_post_meta (
     web_url TEXT NOT NULL DEFAULT '',
     account_acct TEXT NOT NULL DEFAULT ''
 );
+
+-- Tracker Studio (the Manage screen). One row per sheet, holding that sheet's
+-- rows as a JSON array — deliberately a document store rather than a column per
+-- field. The two source workbooks address cells by letter (Daily Performance
+-- runs A..W, and the influencer tracker leaves F/J/N/R empty on purpose), so
+-- rows are kept keyed by those same letters. Mirroring ~90 spreadsheet columns
+-- as SQL columns would buy nothing: nothing here is ever queried by field, the
+-- whole sheet is read and written as a unit, and a schema migration would be
+-- needed every time a source workbook grew a column.
+CREATE TABLE IF NOT EXISTS tracker_docs (
+    key TEXT PRIMARY KEY,
+    doc TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- The Community section: a Telegram group the user owns, its paid tiers, and who is in
+-- them. The bot cannot create the group (Telegram only lets a human do that), so
+-- `chat_id` is filled in when the user adds the bot to a group they made and links it.
+--
+-- Money is recorded in Telegram Stars (XTR). Telegram requires digital goods to be sold in
+-- Stars, and the Bot API reports amounts as integers in that currency, so there is no
+-- fractional-currency rounding to get wrong here.
+CREATE TABLE IF NOT EXISTS community_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    bot_token TEXT NOT NULL DEFAULT '',
+    bot_username TEXT NOT NULL DEFAULT '',
+    -- The open group: admins add people by hand, everyone in it sees everything posted.
+    chat_id TEXT NOT NULL DEFAULT '',
+    chat_title TEXT NOT NULL DEFAULT '',
+    invite_link TEXT NOT NULL DEFAULT '',
+    -- The paid channel. A second chat is not a design preference — a Telegram group shows
+    -- every message to every member, with no per-post visibility, so "only paid members see
+    -- this post" can only mean "this post is somewhere only paid members can be".
+    gated_chat_id TEXT NOT NULL DEFAULT '',
+    gated_chat_title TEXT NOT NULL DEFAULT '',
+    gated_invite_link TEXT NOT NULL DEFAULT '',
+    last_update_id INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS community_tiers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    stars INTEGER NOT NULL,
+    period_days INTEGER NOT NULL DEFAULT 30,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+
+-- One row per Telegram user who has interacted. `expires_at` NULL means "never subscribed";
+-- a past date means lapsed. Kept rather than deleted so a returning member keeps their
+-- history and the join-request handler can tell a renewal from a first-time join.
+CREATE TABLE IF NOT EXISTS community_members (
+    telegram_id TEXT PRIMARY KEY,
+    username TEXT NOT NULL DEFAULT '',
+    first_name TEXT NOT NULL DEFAULT '',
+    tier_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    expires_at TEXT,
+    in_group INTEGER NOT NULL DEFAULT 0,
+    joined_at TEXT,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS community_payments (
+    id TEXT PRIMARY KEY,
+    telegram_id TEXT NOT NULL,
+    tier_id TEXT,
+    stars INTEGER NOT NULL,
+    charge_id TEXT NOT NULL DEFAULT '',
+    is_recurring INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_community_members_status
+    ON community_members (status, expires_at);
+CREATE INDEX IF NOT EXISTS idx_community_payments_member
+    ON community_payments (telegram_id, created_at);
+
+-- Channels the user added themselves from the Activepieces piece catalogue, as opposed
+-- to the ten that ship hardcoded with a hand-authored flow in resources/activepieces/flows.
+-- input_map is JSON of {piece prop name: value}, where a value is either an Activepieces
+-- template binding ("{{trigger.body.text}}") or a literal the user typed once at setup —
+-- it is stored rather than derived because it is a user decision, not a fact about the piece.
+CREATE TABLE IF NOT EXISTS custom_channels (
+    channel TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    piece_name TEXT NOT NULL,
+    piece_version TEXT NOT NULL,
+    action_name TEXT NOT NULL,
+    auth_type TEXT NOT NULL,
+    input_map TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -153,6 +248,10 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str)
 def init_db() -> None:
     with _connect() as conn:
         conn.executescript(_SCHEMA)
+        # CREATE TABLE IF NOT EXISTS is a no-op on an existing table, so columns added after
+        # a release need widening explicitly or an upgraded install keeps the old shape.
+        for column in ("gated_chat_id", "gated_chat_title", "gated_invite_link"):
+            _ensure_column(conn, "community_config", column, "TEXT NOT NULL DEFAULT ''")
 
 
 @contextmanager
@@ -205,6 +304,13 @@ def get_item(item_id: str) -> Optional[dict]:
 def count_items() -> int:
     with _connect() as conn:
         return conn.execute("SELECT COUNT(*) FROM library").fetchone()[0]
+
+
+def delete_item(item_id: str) -> None:
+    """Remove one Library entry. The file at output_path, if any, is left alone — it is the
+    user's document, and deleting the note about it should not delete it."""
+    with _connect() as conn:
+        conn.execute("DELETE FROM library WHERE id = ?", (item_id,))
 
 
 def add_distribution_job(
@@ -488,6 +594,46 @@ def get_mastodon_post_meta(post_uris: list[str]) -> dict[str, dict]:
     return out
 
 
+# --- Tracker Studio (Manage screen) ---------------------------------------
+
+
+def get_tracker_docs() -> dict:
+    """Every stored sheet, keyed by sheet id. Empty dict on a fresh install."""
+    with _connect() as conn:
+        rows = conn.execute("SELECT key, doc FROM tracker_docs").fetchall()
+    out: dict = {}
+    for row in rows:
+        try:
+            out[row["key"]] = json.loads(row["doc"])
+        except json.JSONDecodeError:
+            # A corrupt row shouldn't take the whole screen down — the router
+            # re-seeds anything missing, so skipping it degrades to defaults.
+            continue
+    return out
+
+
+def put_tracker_docs(docs: dict) -> None:
+    """Upsert the given sheets. Keys absent from `docs` are left untouched."""
+    if not docs:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    rows = [
+        {"key": key, "doc": json.dumps(value, ensure_ascii=False), "updated_at": now}
+        for key, value in docs.items()
+    ]
+    with _connect() as conn:
+        conn.executemany(
+            "INSERT INTO tracker_docs (key, doc, updated_at) VALUES (:key, :doc, :updated_at) "
+            "ON CONFLICT(key) DO UPDATE SET doc = excluded.doc, updated_at = excluded.updated_at",
+            rows,
+        )
+
+
+def clear_tracker_docs() -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM tracker_docs")
+
+
 def mail_tracking_stats(source: Optional[str] = None) -> dict:
     query = (
         "SELECT COUNT(DISTINCT m.id) AS sent, "
@@ -520,3 +666,222 @@ def mail_tracking_stats(source: Optional[str] = None) -> dict:
         "clickRate": rate(clicked),
         "bounceRate": rate(bounced),
     }
+
+
+# --- custom distribution channels ------------------------------------------
+
+
+def add_custom_channel(
+    channel: str,
+    label: str,
+    piece_name: str,
+    piece_version: str,
+    action_name: str,
+    auth_type: str,
+    input_map: dict,
+) -> dict:
+    """Records a channel the user built from the piece catalogue.
+
+    Upserts on the channel key so re-adding the same platform edits it in place rather
+    than failing — the flow and connection in Activepieces are keyed by that same string,
+    so a second row could never have meant a second channel anyway.
+    """
+    row = {
+        "channel": channel,
+        "label": label,
+        "piece_name": piece_name,
+        "piece_version": piece_version,
+        "action_name": action_name,
+        "auth_type": auth_type,
+        "input_map": json.dumps(input_map, ensure_ascii=False),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO custom_channels "
+            "(channel, label, piece_name, piece_version, action_name, auth_type, input_map, created_at) "
+            "VALUES (:channel, :label, :piece_name, :piece_version, :action_name, :auth_type, :input_map, :created_at) "
+            "ON CONFLICT(channel) DO UPDATE SET "
+            "label = excluded.label, "
+            "piece_name = excluded.piece_name, "
+            "piece_version = excluded.piece_version, "
+            "action_name = excluded.action_name, "
+            "auth_type = excluded.auth_type, "
+            "input_map = excluded.input_map",
+            row,
+        )
+    return _decode_custom_channel(row)
+
+
+def _decode_custom_channel(row: dict) -> dict:
+    out = dict(row)
+    out["input_map"] = json.loads(out["input_map"]) if isinstance(out["input_map"], str) else out["input_map"]
+    return out
+
+
+def list_custom_channels() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute("SELECT * FROM custom_channels ORDER BY created_at").fetchall()
+    return [_decode_custom_channel(dict(row)) for row in rows]
+
+
+def get_custom_channel(channel: str) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM custom_channels WHERE channel = ?", (channel,)).fetchone()
+    return _decode_custom_channel(dict(row)) if row else None
+
+
+def delete_custom_channel(channel: str) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM custom_channels WHERE channel = ?", (channel,))
+
+
+# --- Community (Telegram group, tiers, members, payments) -------------------
+
+
+def get_community_config() -> dict:
+    """The single config row, created empty on first read so callers never see None."""
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM community_config WHERE id = 1").fetchone()
+        if row is None:
+            conn.execute(
+                "INSERT INTO community_config (id, updated_at) VALUES (1, ?)",
+                (datetime.now(timezone.utc).isoformat(),),
+            )
+            row = conn.execute("SELECT * FROM community_config WHERE id = 1").fetchone()
+        return dict(row)
+
+
+def update_community_config(**fields) -> dict:
+    allowed = {
+        "bot_token", "bot_username", "chat_id", "chat_title", "invite_link", "last_update_id",
+        "gated_chat_id", "gated_chat_title", "gated_invite_link",
+    }
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    get_community_config()  # ensure the row exists
+    if updates:
+        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+        sets = ", ".join(f"{k} = :{k}" for k in updates)
+        with _connect() as conn:
+            conn.execute(f"UPDATE community_config SET {sets} WHERE id = 1", updates)
+    return get_community_config()
+
+
+def list_community_tiers(active_only: bool = False) -> list[dict]:
+    sql = "SELECT * FROM community_tiers"
+    if active_only:
+        sql += " WHERE active = 1"
+    sql += " ORDER BY stars"
+    with _connect() as conn:
+        return [dict(r) for r in conn.execute(sql).fetchall()]
+
+
+def save_community_tier(name: str, stars: int, description: str = "",
+                        period_days: int = 30, tier_id: str | None = None,
+                        active: bool = True) -> dict:
+    row = {
+        "id": tier_id or str(uuid.uuid4()),
+        "name": name,
+        "description": description,
+        "stars": int(stars),
+        "period_days": int(period_days),
+        "active": 1 if active else 0,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO community_tiers (id, name, description, stars, period_days, active, created_at) "
+            "VALUES (:id, :name, :description, :stars, :period_days, :active, :created_at) "
+            "ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description, "
+            "stars = excluded.stars, period_days = excluded.period_days, active = excluded.active",
+            row,
+        )
+    return row
+
+
+def delete_community_tier(tier_id: str) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM community_tiers WHERE id = ?", (tier_id,))
+
+
+def upsert_community_member(telegram_id: str, **fields) -> dict:
+    """Records or updates a member. Never deletes: a lapsed member's history is what tells
+    a renewal apart from a first-time join when they next knock."""
+    allowed = {"username", "first_name", "tier_id", "status", "expires_at", "in_group", "joined_at"}
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO community_members (telegram_id, updated_at) VALUES (?, ?) "
+            "ON CONFLICT(telegram_id) DO NOTHING",
+            (str(telegram_id), now),
+        )
+        if updates:
+            updates["telegram_id"] = str(telegram_id)
+            updates["updated_at"] = now
+            sets = ", ".join(f"{k} = :{k}" for k in updates if k not in ("telegram_id",))
+            conn.execute(
+                f"UPDATE community_members SET {sets} WHERE telegram_id = :telegram_id", updates
+            )
+        row = conn.execute(
+            "SELECT * FROM community_members WHERE telegram_id = ?", (str(telegram_id),)
+        ).fetchone()
+    return dict(row)
+
+
+def get_community_member(telegram_id: str) -> Optional[dict]:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM community_members WHERE telegram_id = ?", (str(telegram_id),)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_community_members(limit: int = 500) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM community_members ORDER BY updated_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_expired_members() -> list[dict]:
+    """Active members whose subscription has run out — the removal queue."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM community_members WHERE status = 'active' "
+            "AND expires_at IS NOT NULL AND expires_at < ?",
+            (now,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_community_payment(telegram_id: str, stars: int, tier_id: str | None,
+                          charge_id: str = "", is_recurring: bool = False) -> dict:
+    row = {
+        "id": str(uuid.uuid4()),
+        "telegram_id": str(telegram_id),
+        "tier_id": tier_id,
+        "stars": int(stars),
+        "charge_id": charge_id,
+        "is_recurring": 1 if is_recurring else 0,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO community_payments (id, telegram_id, tier_id, stars, charge_id, is_recurring, created_at) "
+            "VALUES (:id, :telegram_id, :tier_id, :stars, :charge_id, :is_recurring, :created_at)",
+            row,
+        )
+    return row
+
+
+def community_revenue() -> dict:
+    with _connect() as conn:
+        total = conn.execute("SELECT COALESCE(SUM(stars), 0) FROM community_payments").fetchone()[0]
+        count = conn.execute("SELECT COUNT(*) FROM community_payments").fetchone()[0]
+        active = conn.execute(
+            "SELECT COUNT(*) FROM community_members WHERE status = 'active'"
+        ).fetchone()[0]
+    return {"totalStars": total, "payments": count, "activeMembers": active}

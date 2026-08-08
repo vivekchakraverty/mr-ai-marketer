@@ -1,0 +1,6 @@
+gradio>=4.44
+chromadb>=0.5
+sentence-transformers>=3.0
+# >=1.22 is load-bearing, not cautious: the bucket API (sync_bucket) this Space boots from
+# does not exist in earlier releases, and an older pin means a Space that crashes on start.
+huggingface_hub>=1.22

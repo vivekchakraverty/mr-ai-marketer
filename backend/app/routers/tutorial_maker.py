@@ -7,9 +7,16 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from .. import config, db
+from ..services import piped, ytsearch
 from vendor.tutorialmaker.pipeline import captions, docx_builder, frames, search, sentiment, transcribe, tutorial
 
 router = APIRouter(prefix="/tutorial-maker", tags=["tutorial-maker"])
+
+# Comment sentiment a video must clear before we spend a download on it. `positive_share`
+# is the fraction of fetched comments the classifier scores positive, and neutral comments
+# (questions, "first", timestamps) count against that share — so this sits well below half
+# deliberately. It is a floor against documenting a badly-received video, not a quality bar.
+DEFAULT_MIN_SENTIMENT = 0.35
 
 
 class GenerateTutorialRequest(BaseModel):
@@ -20,6 +27,7 @@ class GenerateTutorialRequest(BaseModel):
     maxScreenshots: int = 6
     hfToken: str = ""
     youtubeApiKey: str = ""
+    minSentiment: float = DEFAULT_MIN_SENTIMENT
 
 
 class TutorialStep(BaseModel):
@@ -40,6 +48,8 @@ class GenerateTutorialResponse(BaseModel):
     docxPath: str | None
     docxUrl: str | None
     libraryId: str
+    # Why there are no screenshots, when the sentiment floor is what stopped them.
+    sentimentNote: str | None = None
 
 
 def _outputs_url(path) -> str:
@@ -59,13 +69,36 @@ def generate_tutorial_endpoint(body: GenerateTutorialRequest) -> GenerateTutoria
     run_dir.mkdir(parents=True, exist_ok=True)
 
     api_key = body.youtubeApiKey.strip() or None
-    # No proxy here: the desktop backend already runs on the user's own machine, so the
-    # tier-1 scrape exits from their residential IP natively. The API key still enables
-    # the tier-2 fallback and the videos.list enrichment below.
-    try:
-        videos = search.search_top5(body.topic, api_key=api_key)
-    except Exception as err:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(err)) from err
+
+    # Search tiers, in order of how much has to be working for them to answer:
+    #
+    # 1. yt-dlp's own search — no third-party instance, no API quota, and it exits from
+    #    this machine, the same egress the download stage uses.
+    # 2. Piped, instance chosen automatically (services/piped.py). Kept because it takes
+    #    the request off this IP entirely, but demoted: a live probe of all fifteen
+    #    documented instances found one still serving its API, so it cannot be the tier
+    #    everything depends on.
+    # 3. The vendored tiers — direct scrape, then Data API search.list, then the Space.
+    videos: list[dict] = []
+    for label, fetch in (
+        ("yt-dlp", lambda: ytsearch.search(body.topic)),
+        ("Piped", lambda: piped.search(body.topic)[0]),
+    ):
+        try:
+            videos = fetch()
+            print(f"[tutorial-maker] search via {label} ({len(videos)} results)")
+            break
+        except Exception as err:  # noqa: BLE001
+            print(f"[tutorial-maker] {label} search unavailable, falling back: {err}")
+
+    # No proxy on the vendored tiers either: the desktop backend already runs on the
+    # user's own machine, so the direct scrape exits from their residential IP natively.
+    # The API key still enables the Data API fallback and the videos.list enrichment below.
+    if not videos:
+        try:
+            videos = search.search_top5(body.topic, api_key=api_key)
+        except Exception as err:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=str(err)) from err
     if not videos:
         raise HTTPException(status_code=502, detail=f"No videos found for '{body.topic}' — try a broader topic.")
 
@@ -82,9 +115,17 @@ def generate_tutorial_endpoint(body: GenerateTutorialRequest) -> GenerateTutoria
     # YouTube Data API key in Settings; otherwise fall back to the top search result,
     # exactly like the source pipeline does when no key is configured.
     best = videos[0]
+    # None means "never scored" (no key, or the ranking failed) — which must not be
+    # confused with "scored badly": the download gate below only fires on a real score.
+    sentiment_score: float | None = None
     if api_key:
         try:
             best, _scored = sentiment.rank_by_sentiment(videos, api_key)
+            sentiment_score = best.get("positive_share")
+            print(
+                f"[tutorial-maker] sentiment winner {best['video_id']}: "
+                f"{sentiment_score:.0%} positive over {best.get('n_comments', 0)} comments"
+            )
         except Exception as err:  # noqa: BLE001
             print(f"[tutorial-maker] sentiment ranking failed, falling back to top result: {err}")
 
@@ -106,15 +147,34 @@ def generate_tutorial_endpoint(body: GenerateTutorialRequest) -> GenerateTutoria
     except Exception as err:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(err)) from err
 
-    # Screenshots are best-effort — a failure here (blocked download, no ffmpeg, etc.)
-    # should still produce a text-only tutorial rather than fail the whole request.
+    # Screenshots need the video itself, so this is the one stage that downloads anything.
+    # Two things gate it:
+    #
+    # 1. Sentiment. A video whose comments came back below `minSentiment` is not worth the
+    #    bandwidth or the request to YouTube, so it yields a text-only tutorial. Skipped
+    #    when nothing scored it — an absent score is not a bad one.
+    # 2. Where the download comes from. capture_shots is called with no proxy, so yt-dlp
+    #    resolves and fetches from this machine over the user's own connection. That is
+    #    deliberate: a shared datacenter egress is what actually collects rate limits and
+    #    blocks, and the Space-era YT_PROXY/YT_MEDIA_PROXY hops do not apply on desktop.
     selected: dict[int, dict] = {}
-    try:
-        times = frames.compute_shot_times(tut["steps"], segs, max_shots=body.maxScreenshots)
-        if times:
-            selected = frames.capture_shots(times, best["video_id"], str(frames_dir))
-    except Exception as err:  # noqa: BLE001
-        print(f"[tutorial-maker] screenshot capture failed, continuing without images: {err}")
+    sentiment_note: str | None = None
+    if sentiment_score is not None and sentiment_score < body.minSentiment:
+        sentiment_note = (
+            f"No screenshots: viewers rated the best match {sentiment_score:.0%} positive "
+            f"across {best.get('n_comments', 0)} comments, below the {body.minSentiment:.0%} "
+            f"floor, so the video wasn't downloaded."
+        )
+        print(f"[tutorial-maker] {sentiment_note}")
+    else:
+        # Best-effort — a failure here (blocked download, no ffmpeg, etc.) should still
+        # produce a text-only tutorial rather than fail the whole request.
+        try:
+            times = frames.compute_shot_times(tut["steps"], segs, max_shots=body.maxScreenshots)
+            if times:
+                selected = frames.capture_shots(times, best["video_id"], str(frames_dir))
+        except Exception as err:  # noqa: BLE001
+            print(f"[tutorial-maker] screenshot capture failed, continuing without images: {err}")
 
     caption_map: dict[int, str] = {}
     if selected:
@@ -161,4 +221,5 @@ def generate_tutorial_endpoint(body: GenerateTutorialRequest) -> GenerateTutoria
         docxPath=docx_path,
         docxUrl=docx_url,
         libraryId=item["id"],
+        sentimentNote=sentiment_note,
     )

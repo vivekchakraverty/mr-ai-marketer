@@ -15,7 +15,11 @@
 # electron/src/main/leadgen.ts and supplied via `docker compose --env-file <generated .env>`.
 services:
   reacher:
-    image: reacherhq/backend:latest
+    # Pinned, not :latest. An unpinned tag means the image can change under the app with
+    # no diff to review — and these run with the user's lead data flowing through them.
+    # Each pin below is the digest :latest resolved to when it was set, so pinning changed
+    # nothing at the time; bump deliberately.
+    image: reacherhq/backend:v0.11.7
     container_name: mr-ai-marketer-leadgen-reacher
     restart: unless-stopped
     ports:
@@ -28,7 +32,7 @@ services:
       # we only ever need Reacher's live per-call result, not its separate history.
 
   searxng:
-    image: searxng/searxng:latest
+    image: searxng/searxng:2026.8.4-c63835bd2
     container_name: mr-ai-marketer-leadgen-searxng
     restart: unless-stopped
     ports:
@@ -44,7 +48,7 @@ services:
       - "${LEADGEN_SEARXNG_CONFIG_DIR}:/etc/searxng:ro"
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.32.6
     container_name: mr-ai-marketer-leadgen-ollama
     restart: unless-stopped
     profiles: ["ollama"] # opt-in only — `docker compose --profile ollama up -d`; not started by default

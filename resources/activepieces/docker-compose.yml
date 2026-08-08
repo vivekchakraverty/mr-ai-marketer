@@ -14,7 +14,12 @@ services:
     container_name: mr-ai-marketer-activepieces
     restart: unless-stopped
     ports:
-      - "8081:8081"
+      # Loopback only. Docker publishes on 0.0.0.0 by default, and WSL2 forwards that to the
+      # Windows host's interfaces — which put this container's web UI on the local network.
+      # It holds the OAuth connections for every social account the user has linked, so there
+      # is no version of "reachable from the coffee-shop wifi" that is acceptable. The Lead
+      # Gen stack next door already binds this way and the backend reaches it fine.
+      - "127.0.0.1:8081:8081"
     environment:
       AP_DB_TYPE: PGLITE
       AP_REDIS_TYPE: MEMORY

@@ -1,54 +1,93 @@
-fastapi>=0.115
-uvicorn[standard]>=0.32
-python-multipart>=0.0.12
-huggingface_hub>=0.27
+# Direct dependencies, pinned.
+#
+# Every version here is the one this app is actually tested against — captured from a working
+# environment, not chosen from a changelog. Ranges (`>=`) were the previous style and they
+# cost more than they gave:
+#
+#   * two installs a week apart got different libraries, so "works on my machine" was
+#     literally true and useless;
+#   * a vulnerability scanner reads `>=` and resolves nothing, so `trivy fs` reported a clean
+#     Python bill of health that was pure artifact — 16 real findings were invisible until the
+#     installed set was scanned directly.
+#
+# Transitive dependencies are pinned separately in requirements.lock.txt. Install from this
+# file to develop, from the lock to reproduce a build exactly.
+#
+# To move a pin: change it here, reinstall, run the app, then regenerate the lock with
+#   python -m pip freeze --exclude-editable > requirements.lock.txt
+
+# --- Security floors ------------------------------------------------------------
+# Neither is a direct dependency — both arrive transitively — but they are named here so the
+# version is chosen rather than inherited from whatever a resolver happened to pick.
+pyasn1==0.6.4          # >=0.6.4 clears CVE-2026-59884/59885/59886 (DoS via crafted BER/OID/REAL)
+# 78.1.1 is the lowest version clear of CVE-2024-6345 (RCE via package download) and
+# CVE-2025-47273 (path traversal); torch 2.12 declares setuptools<82, so the usable window is
+# 78.1.1–81.x. Installing the latest (83.x) resolves cleanly and then breaks torch at runtime.
+setuptools==81.0.0
+
+fastapi==0.139.0
+uvicorn[standard]==0.50.2
+python-multipart==0.0.32
+huggingface_hub==1.22.0
 
 # Guest Post Suggester (vendor/guestpostsuggester)
-pandas>=2.2.0
-openpyxl>=3.1.0
-scikit-learn>=1.4.0
-tldextract>=5.1.0
-httpx>=0.27.0
-requests>=2.32.0
-feedparser>=6.0.11
-beautifulsoup4>=4.12.0
-lxml>=5.2.0
+pandas==3.0.3
+openpyxl==3.1.5
+scikit-learn==1.9.0
+tldextract==5.3.1
+httpx==0.28.1
+requests==2.34.2
+feedparser==6.0.12
+beautifulsoup4==4.15.0
+lxml==6.1.1
 
 # Marketing Plan Generator (vendor/dmstrategy)
-sentence-transformers>=3.0
-chromadb>=0.5
-trafilatura>=1.9
-google-ads>=25.0
-python-dotenv>=1.0
-playwright>=1.44
-pytrends>=4.9
+sentence-transformers==5.6.0
+# 1.5.9 carries an unfixed CVE-2026-45829 (pre-auth RCE) that applies only to Chroma's HTTP
+# server mode. This app never runs one — every call site is chromadb.PersistentClient, which
+# is embedded and has no listener. Revisit when a fixed release exists.
+chromadb==1.5.9
+trafilatura==2.1.0
+google-ads==31.1.0
+python-dotenv==1.2.2
+playwright==1.61.0
+pytrends==4.9.2
 
-# Blog Writer (calls the hosted vivekchakraverty/BlogWriter Space)
-gradio_client>=1.0
+# Blog Writer (calls the Hugging Face Space you deploy — see BLOG_WRITER_SPACE)
+gradio_client==2.5.0
+
+# Brand Studio's optional own-GPU path: deploys a small inference app into the
+# user's own Modal workspace and calls it by name. Only used when they add a
+# Modal API token in Settings — the hosted Space path never touches this.
+modal==1.5.3
 
 # Tutorial Maker (vendor/tutorialmaker)
-yt-dlp>=2024.12.13
-youtube-transcript-api>=1.0
-transformers>=4.46
-numpy>=1.26
-Pillow>=10.4
-python-docx>=1.1.2
+yt-dlp==2026.7.4
+youtube-transcript-api==1.2.4
+transformers==5.13.0
+numpy==2.4.6
+Pillow==12.3.0
+python-docx==1.2.0
 
 # DocuMaker (vendor/docmaker)
-faster-whisper>=1.0.3
-scenedetect>=0.6.4
-opencv-python-headless>=4.9
-imagehash>=4.3
+faster-whisper==1.2.1
+scenedetect==0.7
+opencv-python-headless==5.0.0.93
+imagehash==4.3.2
 
 # Social Post Generator (vendor/socialpost)
 # sentence-transformers, feedparser, python-dotenv, requests and numpy are already
 # required above and are reused. The HF LLM provider needs no SDK — it calls the
-# OpenAI-compatible router over plain requests — so google-generativeai is only
-# needed if a user switches LLM_PROVIDER to gemini.
-atproto>=0.0.69
-PyYAML>=6.0
-supabase>=2.9          # only used when DB_BACKEND=supabase; local mode is SQLite
-google-generativeai>=0.8
+# OpenAI-compatible router over plain requests. Generation is Hugging Face only — the
+# vendored project's Gemini path is not offered, so no Google SDK is needed.
+atproto==0.0.69
+PyYAML==6.0.3
+
+# Community (Telegram)
+# The bot half needs nothing beyond `requests`, which is already required above. Telethon is
+# for the account half only: a bot cannot create a group or add anyone to one, so creating
+# and populating groups has to speak MTProto as the signed-in user.
+telethon==1.44.0
 
 # Lead Gen Agent (vendor/leadgen)
 # Deliberately almost dependency-free: discovery is Overpass/SearXNG over httpx, enrichment
@@ -57,4 +96,4 @@ google-generativeai>=0.8
 # SMTP/IMAP are stdlib — all already required above. Email verification (Reacher) and search
 # (SearXNG) are self-hosted Docker services, not Python packages. The only net-new dependency
 # is the test runner.
-pytest>=8.0            # dev-only; runs backend/vendor/leadgen/tests
+pytest==9.1.1          # dev-only; runs backend/vendor/leadgen/tests

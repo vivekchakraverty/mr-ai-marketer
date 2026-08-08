@@ -74,4 +74,94 @@ if not LEADGEN_ENV_FILE.exists():
 
 # Matches ACTIVEPIECES_PORT in electron/src/main/activepieces.ts — the Distribution engine's
 # container port is fixed, not env-configured, same as BACKEND_PORT in electron/src/main/backend.ts.
-ACTIVEPIECES_URL = "http://localhost:8081"
+#
+# 127.0.0.1 rather than localhost, deliberately. On Windows, `localhost` resolves to ::1 first
+# and WSL2's port relay sometimes re-binds IPv4-only after the container restarts — at which
+# point `requests` raises on the first address instead of falling back, and every call to the
+# engine fails with a bare connection error. Reproduced on a healthy engine that curl reached
+# on 127.0.0.1 and not on localhost. The engine is only ever addressed through that local
+# forward, so pinning the family costs nothing.
+ACTIVEPIECES_URL = "http://127.0.0.1:8081"
+
+
+# ---------------------------------------------------------------------------
+# Hosted model endpoints
+# ---------------------------------------------------------------------------
+# Three tools (Blog Writer, Email Writer, Brand Studio) run their fine-tuned models on a
+# Hugging Face Space, one tool reads a RAG index from an HF Dataset, and mail tracking uses
+# a small Space as its pixel/redirect host. Each of those is *your own* deployment.
+#
+# There are deliberately no defaults. An earlier version hardcoded the original author's
+# Space ids, which meant anyone who cloned this repo silently sent their generation traffic
+# to someone else's account — burning that person's quota, and breaking the moment they
+# rotated or deleted anything. Deploy your own (see the README) and point these at them.
+#
+# Empty is a valid state: the tool that needs one says so clearly instead of failing deep
+# inside an HTTP call.
+BLOG_WRITER_SPACE = os.environ.get("BLOG_WRITER_SPACE", "").strip()
+EMAIL_WRITER_SPACE = os.environ.get("EMAIL_WRITER_SPACE", "").strip()
+BRANDFORGE_SPACE = os.environ.get("BRANDFORGE_SPACE", "").strip()
+MARKETING_PLAN_RAG_DATASET = os.environ.get("MARKETING_PLAN_RAG_DATASET", "").strip()
+# --- Local API authentication -------------------------------------------------
+#
+# Set by Electron when it spawns this process, and required on every request. The reason is
+# not paranoia about the network: this API binds to 127.0.0.1, which sounds private but is
+# reachable from any web page the user happens to have open. A page on some other site can
+# fetch http://127.0.0.1:8756/library and — with the permissive CORS policy this app needs
+# for a file:// renderer — read the response. That was demonstrated, not theorised.
+#
+# A per-session token fixes it because a web page cannot learn one. Origin checks cannot do
+# the job on their own: the packaged renderer runs from file:// and sends `Origin: null`,
+# which any sandboxed iframe can also claim.
+#
+# Empty disables the check, which is what makes `uvicorn app.main:app` still work for
+# development. main.py says so loudly at startup rather than failing open in silence.
+API_TOKEN = os.environ.get("MRAIM_API_TOKEN", "").strip()
+
+# Local tools that are not the renderer — the health monitor, scripts — read the token from
+# here rather than being handed one. A file is the right channel: the threat is a web page,
+# and a web page cannot read the filesystem.
+API_TOKEN_FILE = DATA_DIR / "api-token"
+
+MAIL_TRACKER_URL = os.environ.get("MAIL_TRACKER_URL", "").strip().rstrip("/")
+# Shared secret the tracking Space checks on its /events feed. Must match that Space's own
+# value. No default: a secret with a default is a secret everyone who installs the app has.
+MAIL_TRACKER_SYNC_SECRET = os.environ.get("MAIL_TRACKER_SYNC_SECRET", "").strip()
+
+# Optional: a retrieval Space to search the marketing corpus instead of downloading it
+# (see resources/rag-retrieval-space). Empty means local retrieval, which is the default
+# and keeps every query on the user's own machine. Set this only if you host the Space —
+# a shared endpoint routes every user's plan through whoever deployed it.
+RAG_SERVICE_URL = os.environ.get("RAG_SERVICE_URL", "").strip().rstrip("/")
+# Shared key the retrieval Space checks. Must match its RAG_APP_KEY. Without it the Space —
+# if it has a key configured — refuses, because a "protected" Space hides its repo but leaves
+# the running app queryable by anyone with the URL.
+RAG_SERVICE_KEY = os.environ.get("RAG_SERVICE_KEY", "").strip()
+
+# Datasets and models are not shipped in the build — they live in Hugging Face repos and are
+# fetched on first use (see services/hf_assets.py, which reads these names from the
+# environment at call time). Nothing is defaulted here: a repo id is not a credential, but
+# whose repo it is remains the operator's decision, and a build with none set falls back to
+# whatever the checkout still has on disk.
+#
+#   HF_ASSETS_CTR_MODEL_REPO    model   ctr_model.joblib, ctr_reference_stats.json
+#   HF_ASSETS_INFLUENCER_REPO   dataset influencer_database.xlsx
+#   HF_ASSETS_GUEST_POST_REPO   dataset guest_post_database.xlsx, opr_scores.json
+#
+# The CTR model's *training data* is deliberately absent from that list. Users need the
+# fitted model; the campaign data behind it is only needed to retrain, so it stays in a
+# private repo that scripts/hf/publish_assets.py knows about and the app never reads.
+
+
+class NotConfiguredError(RuntimeError):
+    """Raised when a tool needs a hosted endpoint the user has not set up yet."""
+
+
+def require_space(value: str, env_var: str, tool: str) -> str:
+    if not value:
+        raise NotConfiguredError(
+            f"{tool} needs its own Hugging Face Space. Set {env_var} in your environment "
+            f"(or backend/.env) to the Space you deployed — see the README for how to "
+            f"deploy one in a couple of clicks."
+        )
+    return value

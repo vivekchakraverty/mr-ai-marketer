@@ -1,0 +1,50 @@
+# Secret scanning config. Run before pushing:
+#
+#   gitleaks git .          # history + tracked content — the one that matters for a push
+#   gitleaks dir .          # everything on disk, including files git ignores
+#
+# The `dir` scan will flag your own backend/.env, and that is correct: the file holds real
+# secrets. It is gitignored and untracked, so it never reaches a remote — but it is not
+# allowlisted here, because allowlisting a path is how a genuinely committed .env gets
+# missed later.
+
+[extend]
+useDefault = true
+
+# Two credential shapes this app handles that the default ruleset does not recognise.
+
+[[rules]]
+id = "hf-token"
+description = "Hugging Face access token"
+regex = '''\bhf_[A-Za-z0-9]{30,}\b'''
+keywords = ["hf_"]
+
+[[rules]]
+id = "telegram-bot-token"
+description = "Telegram bot token (@BotFather)"
+regex = '''\b\d{8,10}:AA[A-Za-z0-9_-]{30,}\b'''
+keywords = ["AA"]
+
+[[rules]]
+id = "telethon-session"
+description = "Telethon StringSession (full Telegram account access)"
+# Version byte '1' followed by a long urlsafe-base64 blob. These are worth catching on sight:
+# unlike a bot token, one of these is the account itself.
+regex = '''\b1[A-Za-z0-9+/=_-]{300,}\b'''
+keywords = ["StringSession", "session"]
+
+[allowlist]
+description = "Build output, dependencies and binary assets — not source, and not pushed."
+paths = [
+  '''(^|/)node_modules/''',
+  '''(^|/)\.venv/''',
+  '''(^|/)venv/''',
+  '''(^|/)dist/''',
+  '''(^|/)release/''',
+  '''(^|/)out/''',
+  '''(^|/)__pycache__/''',
+  '''(^|/)backend/data/''',
+  '''(^|/)healthmon/reports/''',
+  '''\.(mp4|png|jpg|jpeg|gif|ico|woff2?|ttf|map|onnx|joblib|xlsx|sqlite3)$''',
+  '''package-lock\.json$''',
+]

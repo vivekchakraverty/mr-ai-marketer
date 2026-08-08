@@ -8,6 +8,11 @@ on:
     tags:
       - "v*"
 
+# Read-only by default. The release job below widens this for itself alone, so a compromised
+# build step can't publish anything.
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:
@@ -35,44 +40,117 @@ jobs:
         with:
           node-version: "20"
 
+      # Installs from the lock, not requirements.txt. requirements.txt pins the direct
+      # dependencies; the lock pins everything they drag in. Resolving transitives fresh on
+      # each run means a release built today and one built next week can ship different
+      # libraries — a fresh resolve currently picks protobuf 6.x where this app is tested
+      # against 5.29.6, which is exactly the drift a release job should never invent.
       - name: Install backend dependencies
         working-directory: backend
         run: |
           python -m venv .venv
-          ${{ matrix.platform == 'win' && '.venv\\Scripts\\pip' || '.venv/bin/pip' }} install -r requirements.txt pyinstaller
+          ${{ matrix.platform == 'win' && '.venv\\Scripts\\pip' || '.venv/bin/pip' }} install -r requirements.lock.txt pyinstaller
 
-      # See resources/ffmpeg/README.md — static binaries aren't committed, fetched here instead.
-      # NOTE: exact download URLs are illustrative; pin to specific verified release versions
-      # before relying on this job for a real release.
+      # See resources/ffmpeg/README.md — the static binaries aren't committed (large, and
+      # license-bearing), so they're fetched here. DocuMaker and TutorialMaker shell out to
+      # ffmpeg/ffprobe via PATH, and spawnPackagedBackend() prepends this directory, so an
+      # installer built without them looks fine until a user opens one of those two tools.
+      # The verification step below exists to make that a build failure rather than a bug
+      # report: these steps used to be `echo TODO`, which shipped a broken app quietly.
+      #
+      # Windows uses the "essentials" build (~111MB) rather than "full" (~420MB) — this app
+      # only does audio extraction and frame grabs, and full costs every user 300MB.
       - name: Fetch ffmpeg (Windows)
         if: matrix.platform == 'win'
-        run: |
-          echo "TODO: download a static ffmpeg/ffprobe build into resources/ffmpeg/win/ (see resources/ffmpeg/README.md)"
         shell: bash
+        run: |
+          set -euo pipefail
+          ver=9.0
+          url="https://github.com/GyanD/codexffmpeg/releases/download/${ver}/ffmpeg-${ver}-essentials_build.zip"
+          curl -fsSL "$url" -o ffmpeg.zip
+          unzip -q ffmpeg.zip
+          mkdir -p resources/ffmpeg/win
+          cp "ffmpeg-${ver}-essentials_build/bin/ffmpeg.exe"  resources/ffmpeg/win/
+          cp "ffmpeg-${ver}-essentials_build/bin/ffprobe.exe" resources/ffmpeg/win/
 
+      # evermeet.cx publishes signed static builds. UNVERIFIED: macos-latest runners are arm64
+      # and evermeet has historically served x86_64 — if it still does, these binaries run
+      # under Rosetta on the runner (so the verification step below passes) but ship an Intel
+      # ffmpeg inside an arm64 app. Check `file resources/ffmpeg/mac/ffmpeg` in the job output
+      # the first time this runs for real, and switch to a per-arch source if it says x86_64.
+      # This is the least-tested leg of the matrix; Windows is the supported platform today.
       - name: Fetch ffmpeg (macOS)
         if: matrix.platform == 'mac'
+        shell: bash
         run: |
-          echo "TODO: download a static ffmpeg/ffprobe build into resources/ffmpeg/mac/ (see resources/ffmpeg/README.md)"
+          set -euo pipefail
+          mkdir -p resources/ffmpeg/mac
+          curl -fsSL "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip"  -o ffmpeg.zip
+          curl -fsSL "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" -o ffprobe.zip
+          unzip -qo ffmpeg.zip  -d resources/ffmpeg/mac
+          unzip -qo ffprobe.zip -d resources/ffmpeg/mac
+          chmod +x resources/ffmpeg/mac/ffmpeg resources/ffmpeg/mac/ffprobe
 
+      # johnvansickle's "release" URL is a floating pointer to the current stable, not a pinned
+      # version — there is no stable per-version URL. The published .md5 is checked so a
+      # truncated or tampered download fails here instead of at runtime on a user's machine.
       - name: Fetch ffmpeg (Linux)
         if: matrix.platform == 'linux'
+        shell: bash
         run: |
-          echo "TODO: download a static ffmpeg/ffprobe build into resources/ffmpeg/linux/ (see resources/ffmpeg/README.md)"
+          set -euo pipefail
+          base="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+          curl -fsSL "$base"      -o ffmpeg.tar.xz
+          curl -fsSL "${base}.md5" -o ffmpeg.tar.xz.md5
+          # The published .md5 names the file as it sits on their server; check against ours.
+          echo "$(cut -d' ' -f1 ffmpeg.tar.xz.md5)  ffmpeg.tar.xz" | md5sum -c -
+          mkdir -p resources/ffmpeg/linux extracted
+          tar -xJf ffmpeg.tar.xz -C extracted --strip-components=1
+          cp extracted/ffmpeg extracted/ffprobe resources/ffmpeg/linux/
+          chmod +x resources/ffmpeg/linux/ffmpeg resources/ffmpeg/linux/ffprobe
+
+      # Both binaries must exist AND run. A zero-byte file or an HTML error page saved under
+      # the right name would otherwise sail through and ship.
+      - name: Verify ffmpeg is present and executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="resources/ffmpeg/${{ matrix.ffmpeg_dir }}"
+          ext=""
+          [ "${{ matrix.platform }}" = "win" ] && ext=".exe"
+          for bin in ffmpeg ffprobe; do
+            path="$dir/$bin$ext"
+            [ -s "$path" ] || { echo "::error::$path is missing or empty"; exit 1; }
+            "$path" -version | head -1
+          done
 
       - name: Build backend (PyInstaller)
         working-directory: backend
         run: |
           ${{ matrix.platform == 'win' && '.venv\\Scripts\\python' || '.venv/bin/python' }} -m PyInstaller backend.spec --noconfirm
 
+      # `npm ci`, not `npm install`: a release must build what the lockfile says, and must fail
+      # rather than silently resolve a newer version when package.json and the lock disagree.
       - name: Install frontend dependencies
         working-directory: electron
-        run: npm install
+        run: npm ci
 
+      # `--publish never` because the release job below owns publishing. Left to itself,
+      # electron-builder's default policy uploads from inside each of the three matrix jobs,
+      # which race to create the same release.
       - name: Build installer
         working-directory: electron
-        run: npm run build:${{ matrix.platform }}
+        run: npm run build:${{ matrix.platform }} -- --publish never
 
+      # `error`, not `warn`. A release job that finishes green having produced no installer is
+      # worse than one that fails, because nobody looks at a green run.
+      #
+      # The .yml and .blockmap files are NOT optional extras — they are the auto-updater.
+      # electron-updater reads latest.yml to learn what the newest version is, and the
+      # .blockmap next to each installer is what lets it download only the changed blocks
+      # instead of the whole ~600MB again. Ship the installer without them and in-app updates
+      # silently never find anything: no error, just an app that claims it's up to date
+      # forever.
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -80,6 +158,34 @@ jobs:
           path: |
             electron/release/*.exe
             electron/release/*.dmg
+            electron/release/*.zip
             electron/release/*.AppImage
             electron/release/*.deb
-          if-no-files-found: warn
+            electron/release/*.blockmap
+            electron/release/latest*.yml
+          if-no-files-found: error
+
+  # Tag pushes get a real GitHub Release; a manual workflow_dispatch just leaves artifacts
+  # attached to the run, which is what you want when testing the pipeline itself.
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          draft: true
+          generate_release_notes: true
+          # Draft, deliberately. These installers are unsigned — Windows SmartScreen and macOS
+          # Gatekeeper will both warn on them — so the release notes need a line telling people
+          # what they'll see and that it's expected, written before anyone can download.

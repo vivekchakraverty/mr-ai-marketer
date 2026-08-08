@@ -1,7 +1,7 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
-import type { AppSettings } from '../main/settingsStore'
+import type { AppSettings, SettingsPatch } from '../main/settingsStore'
 import type { DockerRuntimeStatus } from '../main/dockerRuntime'
-import type { UpdateCheckResult } from '../main/updateChecker'
+import type { UpdateState } from '../main/updater'
 
 export interface DistributionStatus extends DockerRuntimeStatus {
   activepiecesRunning: boolean
@@ -13,16 +13,23 @@ export interface LeadgenStatus extends DockerRuntimeStatus {
 
 export interface MrAiMarketerApi {
   backendUrl: string
+  apiToken: string
   debugRoute: string | null
   settings: {
     getHfToken: () => Promise<string | null>
     setHfToken: (token: string | null) => Promise<void>
     getAll: () => Promise<AppSettings>
-    setAll: (partial: Partial<AppSettings>) => Promise<AppSettings>
+    setAll: (partial: SettingsPatch) => Promise<AppSettings>
   }
   openFile: (path: string) => Promise<string>
   openExternal: (url: string) => Promise<void>
-  checkForUpdate: () => Promise<UpdateCheckResult>
+  update: {
+    check: () => Promise<UpdateState>
+    download: () => Promise<UpdateState>
+    getState: () => Promise<UpdateState>
+    install: () => Promise<void>
+    onState: (callback: (state: UpdateState) => void) => () => void
+  }
   distribution: {
     detectStatus: () => Promise<DistributionStatus>
     bootstrap: () => Promise<{ ok: boolean; rebootRequired?: boolean; message?: string }>

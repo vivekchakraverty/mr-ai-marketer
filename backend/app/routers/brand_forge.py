@@ -8,11 +8,13 @@ Lives in Research/Strategy on the frontend.
 """
 from __future__ import annotations
 
+import io
 import uuid
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
+from PIL import Image
 from pydantic import BaseModel
 
 from .. import config, db
@@ -84,6 +86,26 @@ class GenerateSectionRequest(BaseModel):
     sectionName: str
     spaceId: str = ""
     hfToken: str = ""
+    # Bring-your-own Modal. When both are present the section runs on the user's
+    # own GPU; blank falls back to the hosted Space, so the no-setup path is
+    # unchanged for anyone who never opens these settings.
+    modalTokenId: str = ""
+    modalTokenSecret: str = ""
+
+
+class ModalProvisionRequest(BaseModel):
+    modalTokenId: str = ""
+    modalTokenSecret: str = ""
+    hfToken: str = ""
+
+
+class ModalStatusOut(BaseModel):
+    status: str
+    message: str = ""
+    elapsedSeconds: int = 0
+    hint: str = ""
+    appPageUrl: str = ""
+    logsUrl: str = ""
 
 
 class AssembleRequest(BaseModel):
@@ -96,6 +118,9 @@ class BrandImagesRequest(BaseModel):
     visualBrief: str = ""
     hfToken: str = ""
     imageModel: Optional[str] = None
+    modalTokenId: str = ""
+    modalTokenSecret: str = ""
+    useModal: bool = False
 
 
 class SectionOut(BaseModel):
@@ -163,6 +188,32 @@ def _run_dir() -> Path:
     return d
 
 
+_IMAGE_DIMENSIONS = {
+    "Logo Mark Concept": (1024, 1024),
+    "Brand Mood Board": (1024, 1024),
+    "Social Media Header": (1536, 512),
+}
+
+
+def _modal_runtime():
+    """Imported lazily so the whole router still loads when the modal SDK is
+    absent — the hosted Space path has no need of it."""
+    try:
+        from ..brandforge import modal_runtime
+    except ImportError as err:
+        raise HTTPException(
+            status_code=500,
+            detail="The Modal SDK isn't installed in this build, so a personal GPU backend can't be used.",
+        ) from err
+    return modal_runtime
+
+
+def _modal_config(runtime, token_id: str, token_secret: str, hf_token: str):
+    return runtime.ModalConfig(
+        token_id=token_id.strip(), token_secret=token_secret.strip(), hf_token=hf_token.strip()
+    )
+
+
 # --- endpoints --------------------------------------------------------------
 
 @router.get("/meta")
@@ -188,11 +239,40 @@ def generate_section(body: GenerateSectionRequest) -> SectionOut:
     if body.sectionName not in SECTION_SPECS:
         raise HTTPException(status_code=400, detail=f"Unknown section: {body.sectionName}")
     intake = _build_intake(body.intake)
+
+    use_modal = bool(body.modalTokenId.strip() and body.modalTokenSecret.strip())
     try:
-        content = space.generate_section(body.spaceId, body.hfToken, intake.model_dump(), body.sectionName)
+        if use_modal:
+            runtime = _modal_runtime()
+            cfg = _modal_config(runtime, body.modalTokenId, body.modalTokenSecret, body.hfToken)
+            content = runtime.generate_section(cfg, intake.model_dump(), body.sectionName)
+        else:
+            content = space.generate_section(body.spaceId, body.hfToken, intake.model_dump(), body.sectionName)
     except BrandForgeError as err:
         raise HTTPException(status_code=502, detail=str(err)) from err
     return SectionOut(name=body.sectionName, phase=PHASE_OF[body.sectionName], content=content)
+
+
+@router.post("/modal/provision", response_model=ModalStatusOut)
+def modal_provision(body: ModalProvisionRequest) -> ModalStatusOut:
+    """Deploy the BrandForge GPU backend into the user's own Modal workspace.
+
+    Returns immediately — the deploy runs in a background thread because the
+    first one builds a container image. Poll /modal/status for progress."""
+    runtime = _modal_runtime()
+    cfg = _modal_config(runtime, body.modalTokenId, body.modalTokenSecret, body.hfToken)
+    try:
+        state = runtime.start_provision(cfg)
+    except BrandForgeError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    return ModalStatusOut(**{k: v for k, v in state.items() if k in ModalStatusOut.model_fields})
+
+
+@router.get("/modal/status", response_model=ModalStatusOut)
+def modal_status() -> ModalStatusOut:
+    runtime = _modal_runtime()
+    state = runtime.provision_status()
+    return ModalStatusOut(**{k: v for k, v in state.items() if k in ModalStatusOut.model_fields})
 
 
 @router.post("/assemble", response_model=AssembleResponse)
@@ -245,14 +325,34 @@ def generate_images(body: BrandImagesRequest) -> BrandImagesResponse:
     run_dir = _run_dir()
 
     images: list[BrandImageOut] = []
+    use_modal = bool(body.useModal and body.modalTokenId.strip() and body.modalTokenSecret.strip())
+    runtime = _modal_runtime() if use_modal else None
+    modal_cfg = (
+        _modal_config(runtime, body.modalTokenId, body.modalTokenSecret, body.hfToken)
+        if runtime is not None
+        else None
+    )
     for i, asset_type in enumerate(ASSET_PROMPT_SPECS):
         prompt = build_image_prompt(asset_type, intake, body.visualBrief, palette)
         try:
-            image = text_to_image(body.hfToken, prompt, model=model) if model else text_to_image(body.hfToken, prompt)
+            if runtime is not None and modal_cfg is not None:
+                width, height = _IMAGE_DIMENSIONS[asset_type]
+                png = runtime.generate_image(modal_cfg, prompt, width, height)
+                with Image.open(io.BytesIO(png)) as response_image:
+                    response_image.load()
+                    image = response_image.copy()
+            else:
+                image = text_to_image(body.hfToken, prompt, model=model) if model else text_to_image(body.hfToken, prompt)
         except BrandForgeError as err:
             if i == 0:
                 raise HTTPException(status_code=502, detail=str(err)) from err
             images.append(BrandImageOut(assetType=asset_type, promptUsed=prompt, error=str(err)))
+            continue
+        except (OSError, ValueError) as err:
+            detail = f"The image backend returned invalid PNG data: {err}"
+            if i == 0:
+                raise HTTPException(status_code=502, detail=detail) from err
+            images.append(BrandImageOut(assetType=asset_type, promptUsed=prompt, error=detail))
             continue
         dest = run_dir / (asset_type.lower().replace(" ", "-") + ".png")
         image.save(dest)

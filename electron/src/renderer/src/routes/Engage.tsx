@@ -20,10 +20,19 @@ import {
   type EngageStatus,
   type FeedPost
 } from '../api/client'
+import MastodonEngage from '../components/MastodonEngage'
+import ScreenBackdrop from '../components/ScreenBackdrop'
 import { useAppStore } from '../state/store'
 import { primaryButtonSmall, secondaryButtonSmall, segGroup, segItem, sectionEyebrow, textarea } from '../styles/styleKit'
+import SaveButton from '../components/SaveButton'
 
+type Network = 'bluesky' | 'mastodon'
 type Feed = 'notifications' | 'timeline'
+
+const NETWORKS: { key: Network; label: string }[] = [
+  { key: 'bluesky', label: 'Bluesky' },
+  { key: 'mastodon', label: 'Mastodon' }
+]
 type PostAction = 'like' | 'repost' | 'bookmark' | 'threadMute'
 type ActorAction = 'follow' | 'mute' | 'block'
 type TextAction = 'reply' | 'quote'
@@ -123,7 +132,15 @@ function InlineComposer({
         <span style={{ font: "700 11px 'Quicksand'", color: 'var(--ink-fainter)' }}>
           {text.length}/{POST_TEXT_LIMIT}
         </span>
-        <span style={{ display: 'flex', gap: 8 }}>
+        <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {/* A reply you spent time on is worth keeping even if you don't send it — and
+              nothing else in Engage writes to the Library. */}
+          <SaveButton
+            tool="Engage"
+            title={`${mode === 'reply' ? 'Reply' : 'Quote'} draft`}
+            subtitle="Bluesky draft"
+            content={text}
+          />
           <div style={actionButton(false, busy)} onClick={busy ? undefined : onCancel}>
             Cancel
           </div>
@@ -316,6 +333,7 @@ function FeedCard({
 export default function Engage(): React.JSX.Element {
   const goSettings = useAppStore((s) => s.goSettings)
 
+  const [network, setNetwork] = useState<Network>('bluesky')
   const [status, setStatus] = useState<EngageStatus | null>(null)
   const [feed, setFeed] = useState<Feed>('notifications')
   const [posts, setPosts] = useState<FeedPost[]>([])
@@ -325,11 +343,14 @@ export default function Engage(): React.JSX.Element {
   const [busyKey, setBusyKey] = useState('')
   const [error, setError] = useState('')
 
+  // Only asked for once the Bluesky side is actually being looked at — opening
+  // Engage on the Mastodon tab should not log into Bluesky in the background.
   useEffect(() => {
+    if (network !== 'bluesky' || status) return
     getEngageStatus()
       .then(setStatus)
       .catch(() => setStatus({ configured: false, handle: null }))
-  }, [])
+  }, [network, status])
 
   async function loadFeed(which: Feed = feed): Promise<void> {
     setFeed(which)
@@ -447,16 +468,29 @@ export default function Engage(): React.JSX.Element {
   }
 
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto', padding: '30px 34px 60px' }}>
-      <div style={{ marginBottom: 22 }}>
+    <div style={{ maxWidth: network === 'mastodon' ? 1120 : 900, margin: '0 auto', padding: '30px 34px 60px' }}>
+      <ScreenBackdrop video="engage" />
+      <div style={{ marginBottom: 18 }}>
         <div style={sectionEyebrow}>Engage</div>
         <div style={{ font: "700 30px 'Kalam'", color: 'var(--ink)', marginTop: 4 }}>What's happening with you</div>
         <div style={{ font: "600 14px 'Quicksand'", color: 'var(--ink-muted)', marginTop: 4 }}>
-          Your own Bluesky account - who's talking to you, and what's moving through your feed.
+          {network === 'bluesky'
+            ? "Your own Bluesky account - who's talking to you, and what's moving through your feed."
+            : "Your own Mastodon community - its house rules, the server itself, and the everyday things you do there."}
         </div>
       </div>
 
-      {status && !status.configured && (
+      <div style={{ ...segGroup, maxWidth: 260, marginBottom: 18 }}>
+        {NETWORKS.map((n) => (
+          <div key={n.key} style={segItem(network === n.key)} onClick={() => setNetwork(n.key)}>
+            {n.label}
+          </div>
+        ))}
+      </div>
+
+      {network === 'mastodon' && <MastodonEngage />}
+
+      {network === 'bluesky' && status && !status.configured && (
         <div
           style={{
             marginBottom: 18,
@@ -481,7 +515,7 @@ export default function Engage(): React.JSX.Element {
         </div>
       )}
 
-      {status?.configured && (
+      {network === 'bluesky' && status?.configured && (
         <>
           <div style={composerBox}>
             <textarea

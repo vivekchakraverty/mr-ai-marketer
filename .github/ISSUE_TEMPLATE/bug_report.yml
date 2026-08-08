@@ -1,0 +1,100 @@
+name: Bug report
+description: Something in the app doesn't work the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. One thing before you start: **please don't paste tokens, API
+        keys, or your `.env` file here.** Logs from this app can contain them. Replace
+        anything that looks like a credential with `REDACTED`.
+
+        Found a security problem rather than a bug? Please use
+        [SECURITY.md](../blob/main/SECURITY.md) instead of a public issue.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, and what the app did instead of what you expected.
+      placeholder: |
+        I clicked Generate on the Blog Writer with a topic filled in. The spinner ran for
+        about 30 seconds and then the screen went back to empty with no message.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: If it only happens sometimes, say roughly how often.
+      placeholder: |
+        1. Open Create → Blog Writer
+        2. Enter "…" as the topic
+        3. Click Generate
+        4. Wait ~30s
+    validations:
+      required: true
+
+  - type: dropdown
+    id: screen
+    attributes:
+      label: Which screen
+      options:
+        - Home
+        - Research / Strategy
+        - Create
+        - Engage
+        - Analytics
+        - Manage
+        - Community
+        - Distribute
+        - Library
+        - Settings
+        - Installer / first launch
+        - Something else, or not screen-specific
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Shown in Settings. If you're running from source, the commit SHA instead.
+      placeholder: "0.1.3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-type
+    attributes:
+      label: How are you running it
+      options:
+        - Installed from the Windows installer
+        - From source (npm run dev)
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11 Pro 24H2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Errors or logs
+      description: >
+        Anything red in the app, plus the backend console if you're running from source.
+        This box renders as code, so no backticks needed. Check it for credentials first.
+      render: text

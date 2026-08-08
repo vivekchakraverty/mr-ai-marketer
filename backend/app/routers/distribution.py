@@ -30,10 +30,26 @@ def _statuses(names: list[str], connected: set[str]) -> list[dict]:
     ]
 
 
+def _custom_statuses(rows: list[dict], connected: set[str]) -> list[dict]:
+    return [
+        {
+            "channel": row["channel"],
+            "label": row["label"],
+            "authType": row["auth_type"],
+            "pieceName": row["piece_name"],
+            "connected": row["channel"] in connected,
+            "custom": True,
+        }
+        for row in rows
+    ]
+
+
 @router.get("/channels")
 def list_channels() -> dict:
+    custom = db.list_custom_channels()
     try:
         activepieces_client.ensure_flows_imported()
+        activepieces_client.ensure_custom_flows_imported(custom)
         # Flows reference their connection as {{connections.<externalId>}}; we create/expect
         # one connection per channel with externalId == channel key.
         connected = {c["externalId"] for c in activepieces_client.list_connections()}
@@ -46,12 +62,14 @@ def list_channels() -> dict:
             "detail": str(err),
             "channels": _statuses(_CHANNELS, set()),
             "communityChannels": _statuses(_COMMUNITY_CHANNELS, set()),
+            "customChannels": _custom_statuses(custom, set()),
         }
 
     return {
         "ready": True,
         "channels": _statuses(_CHANNELS, connected),
         "communityChannels": _statuses(_COMMUNITY_CHANNELS, connected),
+        "customChannels": _custom_statuses(custom, connected),
     }
 
 
@@ -62,10 +80,16 @@ class ConnectionRequest(BaseModel):
 
 @router.post("/connections/{channel}")
 def connect_channel(channel: str, body: ConnectionRequest) -> dict:
+    piece = None
     if channel not in {**activepieces_client.CUSTOM_AUTH_PIECES, **activepieces_client.SECRET_TEXT_PIECES}:
-        raise HTTPException(status_code=404, detail=f"Unknown or OAuth-only channel '{channel}'")
+        # A user-added channel carries its own piece coordinates; anything else really is
+        # unknown here (or is OAuth-only, which connects through Activepieces' own screen).
+        custom = db.get_custom_channel(channel)
+        if not custom:
+            raise HTTPException(status_code=404, detail=f"Unknown or OAuth-only channel '{channel}'")
+        piece = (custom["piece_name"], custom["piece_version"])
     try:
-        activepieces_client.create_connection(channel, body.type, body.value)
+        activepieces_client.create_connection(channel, body.type, body.value, piece=piece)
     except ActivepiecesError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
     return {"connected": True}
@@ -73,7 +97,7 @@ def connect_channel(channel: str, body: ConnectionRequest) -> dict:
 
 @router.delete("/connections/{channel}")
 def disconnect_channel(channel: str) -> dict:
-    if channel not in _CHANNELS and channel not in _COMMUNITY_CHANNELS:
+    if channel not in _CHANNELS and channel not in _COMMUNITY_CHANNELS and not db.get_custom_channel(channel):
         raise HTTPException(status_code=404, detail=f"Unknown channel '{channel}'")
     # discord-conversation shares its bot connection with the discord broadcast channel —
     # disconnecting either one removes the one underlying connection both rely on.
@@ -83,6 +107,212 @@ def disconnect_channel(channel: str) -> dict:
     except ActivepiecesError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
     return {"connected": False}
+
+
+# The fields a send request can carry (see SendRequest/_payload_for below). A generated
+# flow binds a piece's props to these by name, so this list is what the mapping UI offers.
+PAYLOAD_FIELDS = ["text", "title", "imageUrl", "channelId", "pageId", "subreddit", "to", "subject", "from"]
+
+# Prop names that conventionally carry the post body, best-guess first. Used only to
+# pre-select a mapping the user can change — a wrong guess costs a dropdown change, and
+# reading the piece's own prop names beats asking a model to infer them.
+_TEXT_PROP_HINTS = ["text", "message", "content", "status", "body", "caption", "description", "comment"]
+
+
+def _auth_block(piece: dict) -> dict:
+    """A piece's auth descriptor, normalised to a dict.
+
+    Not every piece in the catalogue reports one the same way — some carry no auth at all,
+    and a few report it as a list — so this collapses those to an empty dict rather than
+    letting one odd piece break the whole listing.
+    """
+    auth = piece.get("auth")
+    return auth if isinstance(auth, dict) else {}
+
+
+def _normalize_props(props: Optional[dict]) -> list[dict]:
+    """Flattens Activepieces' prop map into the ordered, typed list the forms render from."""
+    out = []
+    for key, spec in (props or {}).items():
+        spec = spec or {}
+        options = ((spec.get("options") or {}).get("options")) or []
+        out.append(
+            {
+                "key": key,
+                "label": spec.get("displayName") or key,
+                "description": spec.get("description") or "",
+                "type": spec.get("type") or "SHORT_TEXT",
+                "required": bool(spec.get("required")),
+                "defaultValue": spec.get("defaultValue"),
+                "options": [{"label": o.get("label"), "value": o.get("value")} for o in options],
+            }
+        )
+    return out
+
+
+def _suggest_binding(prop_key: str) -> Optional[str]:
+    """The payload field a prop most likely wants, or None to leave it for the user."""
+    key = prop_key.lower()
+    if key in _TEXT_PROP_HINTS:
+        return "text"
+    for field in PAYLOAD_FIELDS:
+        if key == field.lower():
+            return field
+    if "title" in key:
+        return "title"
+    if "image" in key or "photo" in key or "media" in key:
+        return "imageUrl"
+    return None
+
+
+@router.get("/catalogue")
+def catalogue(q: str = "", limit: int = 60) -> dict:
+    """Every piece the engine can post through, for the Add-a-channel browser.
+
+    Served from the engine rather than a list of our own: the catalogue is whatever this
+    Activepieces version actually ships, and a hardcoded copy would silently rot the first
+    time it updated. Pieces with no actions are dropped — there would be nothing to send.
+    """
+    try:
+        pieces = activepieces_client.list_pieces()
+    except ActivepiecesError as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
+
+    added = {row["piece_name"] for row in db.list_custom_channels()}
+    builtin = {name for name, _ in {**activepieces_client.CUSTOM_AUTH_PIECES, **activepieces_client.SECRET_TEXT_PIECES}.values()}
+    builtin |= {name for name, _ in activepieces_client.OAUTH_PIECES.values()}
+
+    needle = q.strip().lower()
+    rows = []
+    for piece in pieces:
+        if not piece.get("actions"):
+            continue
+        name, display = piece.get("name", ""), piece.get("displayName", "")
+        if needle and needle not in display.lower() and needle not in name.lower():
+            continue
+        rows.append(
+            {
+                "name": name,
+                "displayName": display,
+                "description": (piece.get("description") or "")[:200],
+                "logoUrl": piece.get("logoUrl"),
+                "version": piece.get("version"),
+                "authType": _auth_block(piece).get("type"),
+                "actionCount": piece.get("actions"),
+                "categories": piece.get("categories") or [],
+                "alreadyAdded": name in added,
+                "builtIn": name in builtin,
+            }
+        )
+    rows.sort(key=lambda r: r["displayName"].lower())
+    return {"total": len(rows), "pieces": rows[:limit]}
+
+
+@router.get("/catalogue/{piece_name:path}")
+def catalogue_piece(piece_name: str) -> dict:
+    """One piece's auth schema and actions, with a suggested payload binding per prop."""
+    try:
+        piece = activepieces_client.get_piece(piece_name)
+    except ActivepiecesError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+    auth = _auth_block(piece)
+    actions = []
+    for name, spec in (piece.get("actions") or {}).items():
+        props = _normalize_props(spec.get("props"))
+        for prop in props:
+            prop["suggestedBinding"] = _suggest_binding(prop["key"])
+        actions.append(
+            {
+                "name": name,
+                "label": spec.get("displayName") or name,
+                "description": spec.get("description") or "",
+                "props": props,
+            }
+        )
+    actions.sort(key=lambda a: a["label"].lower())
+
+    return {
+        "name": piece.get("name"),
+        "displayName": piece.get("displayName"),
+        "version": piece.get("version"),
+        "logoUrl": piece.get("logoUrl"),
+        "auth": {
+            "type": auth.get("type"),
+            "label": auth.get("displayName") or "",
+            "description": auth.get("description") or "",
+            "props": _normalize_props(auth.get("props")),
+        },
+        "actions": actions,
+        "payloadFields": PAYLOAD_FIELDS,
+    }
+
+
+class CustomChannelRequest(BaseModel):
+    channel: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,38}$")
+    label: str
+    pieceName: str
+    pieceVersion: str
+    actionName: str
+    authType: str
+    # {prop key: {"field": "<payload field>"} | {"value": "<literal>"}}
+    inputMap: dict[str, dict]
+
+
+def _resolve_input_map(raw: dict[str, dict]) -> dict:
+    """Turns the UI's per-prop choice into the Activepieces bindings a flow carries.
+
+    A payload binding becomes {{trigger.body.<field>}} — the same template the ten bundled
+    flows use — and anything else is passed through as the literal the user typed.
+    """
+    resolved = {}
+    for key, choice in raw.items():
+        field = (choice or {}).get("field")
+        if field:
+            if field not in PAYLOAD_FIELDS:
+                raise HTTPException(status_code=400, detail=f"Unknown payload field '{field}' for prop '{key}'")
+            resolved[key] = f"{{{{trigger.body.{field}}}}}"
+        elif (choice or {}).get("value") not in (None, ""):
+            resolved[key] = choice["value"]
+    return resolved
+
+
+@router.post("/custom-channels")
+def create_custom_channel(body: CustomChannelRequest) -> dict:
+    if body.channel in _CHANNELS or body.channel in _COMMUNITY_CHANNELS:
+        raise HTTPException(status_code=400, detail=f"'{body.channel}' is a built-in channel name")
+
+    input_map = _resolve_input_map(body.inputMap)
+    try:
+        spec = activepieces_client.build_flow_spec(
+            body.channel, body.label, body.pieceName, body.pieceVersion, body.actionName, input_map
+        )
+        activepieces_client.import_custom_flow(body.channel, spec)
+    except ActivepiecesError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    # Written only once the flow is live, so a failed import can't leave a channel row
+    # whose send button points at a webhook that was never published.
+    row = db.add_custom_channel(
+        body.channel, body.label, body.pieceName, body.pieceVersion, body.actionName, body.authType, input_map
+    )
+    return {"channel": row["channel"], "label": row["label"]}
+
+
+@router.delete("/custom-channels/{channel}")
+def delete_custom_channel(channel: str) -> dict:
+    row = db.get_custom_channel(channel)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Unknown channel '{channel}'")
+    try:
+        activepieces_client.delete_flow_by_display_name(row["label"])
+        activepieces_client.delete_connection(channel)
+    except ActivepiecesError:
+        # The row goes regardless: leaving it behind would show the user a channel they
+        # already deleted, and an orphaned flow is re-created on the next add anyway.
+        pass
+    db.delete_custom_channel(channel)
+    return {"deleted": True}
 
 
 @router.get("/console-url")
@@ -210,8 +440,9 @@ def send(body: SendRequest) -> dict:
     payload = _payload_for(body)
     scheduled_at = _normalize_scheduled_at(body.scheduledAt)
     jobs = []
+    known_custom = {row["channel"] for row in db.list_custom_channels()}
     for channel in body.channels:
-        if channel not in _CHANNELS and channel not in _COMMUNITY_CHANNELS:
+        if channel not in _CHANNELS and channel not in _COMMUNITY_CHANNELS and channel not in known_custom:
             raise HTTPException(status_code=400, detail=f"Unknown channel '{channel}'")
         status = "scheduled" if scheduled_at else "sending"
         job = db.add_distribution_job(

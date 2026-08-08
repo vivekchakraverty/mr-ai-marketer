@@ -11,23 +11,24 @@ from __future__ import annotations
 
 from gradio_client import Client
 
+from .. import config
 from . import ctr_predictor
 
 # The marketing-email model (a QLoRA fine-tune of Qwen2.5-7B) runs on the user's own free
 # Hugging Face CPU Space, called exactly the way blog_writer.py calls its Space. Public, runs
 # on its own CPU, so no HF token is passed.
-_SPACE_ID = "vivekchakraverty/marketing-email-writer"
+
 _client: Client | None = None
 
 
 def _get_client() -> Client:
     global _client
     if _client is None:
-        _client = Client(_SPACE_ID)
+        _client = Client(config.require_space(config.EMAIL_WRITER_SPACE, "EMAIL_WRITER_SPACE", "Email Writer"))
     return _client
 
 
-def generate_marketing_email(instruction: str) -> dict:
+def generate_marketing_email(instruction: str, hf_token: str | None = None) -> dict:
     """Generate a finished email from one freeform instruction, with a CTR estimate.
 
     Returns {"text", "predictedClickRate", "ctrBucket"}. Raises on an empty instruction or a
@@ -43,5 +44,7 @@ def generate_marketing_email(instruction: str) -> dict:
     if not text:
         raise RuntimeError("The model returned an empty email — try again.")
 
-    ctr = ctr_predictor.predict_ctr(text)
+    # The token only matters on the first call of a fresh install, where the CTR model has
+    # to be fetched from Hugging Face; after that it is already on disk.
+    ctr = ctr_predictor.predict_ctr(text, hf_token=hf_token)
     return {"text": text, "predictedClickRate": ctr.predictedClickRate, "ctrBucket": ctr.bucket}

@@ -1,10 +1,16 @@
-from fastapi import FastAPI
+import secrets
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import config, db  # imports app.config as a side effect, which sets up the vendor sys.path
 from .routers import (
+    backup,
     blog_writer,
+    community,
+    community_account,
     brand_forge,
     bluesky_analytics,
     distribution,
@@ -12,23 +18,67 @@ from .routers import (
     email_writer,
     engage,
     guest_post,
+    hashtags,
     influencer_db,
     leadgen,
     library,
     mail,
     mail_tracking,
     marketing_plan,
+    mastodon_engage,
     mastodon_post,
     settings,
     social_post,
     topic_scout,
+    tracker,
     tutorial_maker,
 )
 
 app = FastAPI(title="Mr. AI Marketer backend")
 
-# Backend only ever binds to 127.0.0.1 and is spawned/owned by the Electron app itself,
-# so a permissive CORS policy here doesn't expose anything beyond the local machine.
+# Endpoints that answer without a token. `/health` is how Electron knows the backend has
+# finished starting, and it returns nothing but the word "ok"; the docs routes describe the
+# API surface, which is public in this repo anyway.
+_OPEN_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"})
+
+# The header the renderer sends. A custom name rather than Authorization so it can never be
+# confused with a credential for one of the upstream services this app talks to.
+API_TOKEN_HEADER = "x-mraim-token"
+
+
+@app.middleware("http")
+async def require_local_token(request: Request, call_next):
+    """Reject anything that cannot prove it is this app.
+
+    Binding to 127.0.0.1 is not access control. Any web page the user has open can fetch
+    http://127.0.0.1:8756/… , and because the packaged renderer runs from file:// the CORS
+    policy below has to stay permissive — so the browser will hand that page the response.
+    Confirmed against a running backend: a request carrying `Origin: https://evil.example`
+    got 200 and `access-control-allow-origin: *` from /library, and a POST preflight to
+    /community/broadcast was approved.
+
+    A shared per-session token closes it, because a page on another site has no way to read
+    one. Preflights pass through untouched — the browser sends them without custom headers by
+    definition, and CORSMiddleware answers them before the real request is allowed to run.
+    """
+    if not config.API_TOKEN:
+        return await call_next(request)  # dev mode; see the warning printed at startup
+    if request.method == "OPTIONS" or request.url.path in _OPEN_PATHS:
+        return await call_next(request)
+    supplied = request.headers.get(API_TOKEN_HEADER, "")
+    # compare_digest, not ==, so a wrong token cannot be narrowed down by timing.
+    if not supplied or not secrets.compare_digest(supplied, config.API_TOKEN):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "This API only answers the app that started it."},
+        )
+    return await call_next(request)
+
+
+# Permissive by necessity, not by choice: the packaged renderer loads from file:// and sends
+# `Origin: null`, so an origin allowlist would have to accept a value any sandboxed iframe can
+# also send. The token middleware above is the actual boundary — this only decides which
+# browser reads are *attempted*, not which succeed.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,8 +87,36 @@ app.add_middleware(
 )
 
 
+def _publish_token() -> None:
+    """Write the session token where local tools can find it.
+
+    The health monitor and the maintenance scripts are not the renderer and never get handed
+    a token, but they are entitled to one — they run on this machine with the user's own
+    permissions. A file is the correct channel precisely because the attacker this protects
+    against is a web page, and a web page cannot read files.
+
+    Rewritten every start: the token changes each session, and a stale one would send local
+    tools into a confusing 401 instead of a clean reconnect.
+    """
+    try:
+        if config.API_TOKEN:
+            config.API_TOKEN_FILE.write_text(config.API_TOKEN, encoding="utf-8")
+        elif config.API_TOKEN_FILE.exists():
+            # No token this run: remove the old one rather than leave a file implying a
+            # protection that is not in force.
+            config.API_TOKEN_FILE.unlink()
+    except OSError as err:
+        print(f"[auth] could not publish the API token for local tools: {err}")
+
+
 @app.on_event("startup")
 def on_startup() -> None:
+    if config.API_TOKEN:
+        _publish_token()
+    else:
+        print("[auth] MRAIM_API_TOKEN is not set — this API will answer ANY local caller, "
+              "including any web page open in a browser. Expected for `uvicorn app.main:app` "
+              "during development; a packaged app always sets it.")
     db.init_db()
     guest_post.initialize()
     marketing_plan.initialize()
@@ -57,6 +135,7 @@ def on_startup() -> None:
 
     from .services import email_writer as email_writer_service
     from .services import mail_bounce as mail_bounce_service
+    from .services import telegram_community
     from .services import mail_tracking as mail_tracking_service
 
     leadgen_scheduler.start_scheduler(
@@ -71,6 +150,9 @@ def on_startup() -> None:
     mail_tracking_service.start_sync_loop()
     mail_bounce_service.start_bounce_poller()
     bluesky_analytics.start_scheduler()
+    # The Community section's Telegram bot. Long-polls for join requests and payments;
+    # inert until a bot token is configured in that screen.
+    telegram_community.start_poller()
 
 
 @app.get("/health")
@@ -79,10 +161,13 @@ def health() -> dict:
 
 
 app.include_router(settings.router)
+app.include_router(backup.router)
 app.include_router(library.router)
 app.include_router(marketing_plan.router)
 app.include_router(brand_forge.router)
 app.include_router(blog_writer.router)
+app.include_router(community.router)
+app.include_router(community_account.router)
 app.include_router(email_writer.router)
 app.include_router(guest_post.router)
 app.include_router(tutorial_maker.router)
@@ -90,13 +175,16 @@ app.include_router(docu_maker.router)
 app.include_router(distribution.router)
 app.include_router(social_post.router)
 app.include_router(mastodon_post.router)
+app.include_router(hashtags.router)
 app.include_router(topic_scout.router)
 app.include_router(influencer_db.router)
 app.include_router(engage.router)
+app.include_router(mastodon_engage.router)
 app.include_router(bluesky_analytics.router)
 app.include_router(mail.router)
 app.include_router(mail_tracking.router)
 app.include_router(leadgen.router)
+app.include_router(tracker.router)
 
 # Serves generated images/docs (backend/app/config.OUTPUTS_DIR) so the renderer can load
 # them over http://127.0.0.1:<port>/outputs/... instead of file:// (unreliable from a

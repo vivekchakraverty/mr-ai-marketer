@@ -21,6 +21,9 @@ import numpy as np
 import pandas as pd
 from joblib import load
 
+# The model and its stats are fetched from Hugging Face on first use rather than shipped in
+# the build — see services/hf_assets.py. These paths remain as the dev-checkout fallback and
+# as the identity of the files; hf_assets prefers them when they exist.
 _ML_DIR = Path(__file__).resolve().parent.parent / "ml"
 _MODEL_PATH = _ML_DIR / "ctr_model.joblib"
 _STATS_PATH = _ML_DIR / "ctr_reference_stats.json"
@@ -118,11 +121,14 @@ def extract_features(email_text: str, cta_len_fallback: float) -> dict[str, floa
 
 
 class _Predictor:
-    def __init__(self) -> None:
-        bundle = load(_MODEL_PATH)
+    def __init__(self, hf_token: str | None = None) -> None:
+        from . import hf_assets
+
+        bundle = load(hf_assets.path_for("ctr-model", token=hf_token))
         self._model = bundle["model"]
         self._feature_order = bundle["features"]
-        self._stats = json.loads(_STATS_PATH.read_text(encoding="utf-8"))
+        stats_path = hf_assets.path_for("ctr-stats", token=hf_token)
+        self._stats = json.loads(Path(stats_path).read_text(encoding="utf-8"))
 
     def predict(self, email_text: str) -> CtrPrediction:
         features = extract_features(email_text, self._stats["mean_cta_len_fallback"])
@@ -149,8 +155,13 @@ class _Predictor:
 _predictor: _Predictor | None = None
 
 
-def predict_ctr(email_text: str) -> CtrPrediction:
+def predict_ctr(email_text: str, hf_token: str | None = None) -> CtrPrediction:
+    """Score one draft.
+
+    `hf_token` is only needed the first time on a machine that has to fetch the model, and
+    only if the model repo is private or gated. Once loaded, the predictor is reused.
+    """
     global _predictor
     if _predictor is None:
-        _predictor = _Predictor()
+        _predictor = _Predictor(hf_token=hf_token)
     return _predictor.predict(email_text)

@@ -1,7 +1,7 @@
 """Palette parsing + brand-image prompt composition, ported from the
-BrandForge Space (src/imagegen.py) minus the fal.ai call — in mr-ai-marketer
-the images are generated via Hugging Face Inference (see brandforge.client),
-billed to the user's own HF token.
+BrandForge Space (src/imagegen.py) minus the fal.ai call. In mr-ai-marketer
+images use the user's provisioned Modal worker, with Hugging Face Inference as
+the setup-free fallback.
 
 The Visual Direction Brief section is instructed (sections.SECTION_SPECS) to
 end with a fenced ```palette block of JSON swatches; extract_palette() parses

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { UpdateCheckResult } from '../../../main/updateChecker'
+import type { UpdateState } from '../../../main/updater'
 import {
   DEFAULT_BLOG_FIELDS,
   DEFAULT_DOCU_FIELDS,
@@ -42,7 +42,7 @@ interface AppState {
   leadgenEngineReady: boolean
   leadgenGateOpen: boolean
 
-  updateInfo: UpdateCheckResult | null
+  updateInfo: UpdateState | null
   updateBannerDismissed: boolean
 
   library: LibraryItem[]
@@ -64,6 +64,8 @@ interface AppState {
   goCreate: () => void
   goEngage: () => void
   goAnalytics: () => void
+  goManage: () => void
+  goCommunity: () => void
   goDistribute: () => void
   goLibrary: () => void
   goSettings: () => void
@@ -100,7 +102,7 @@ interface AppState {
   closeLeadgenGate: () => void
   setLeadgenEngineReady: (ready: boolean) => void
 
-  setUpdateInfo: (info: UpdateCheckResult | null) => void
+  setUpdateInfo: (info: UpdateState | null) => void
   dismissUpdateBanner: () => void
 }
 
@@ -144,6 +146,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   goCreate: () => set({ route: 'create', tool: null, readerItem: null }),
   goEngage: () => set({ route: 'engage', tool: null, readerItem: null }),
   goAnalytics: () => set({ route: 'analytics', tool: null, readerItem: null }),
+  goManage: () => set({ route: 'manage', tool: null, readerItem: null }),
+  goCommunity: () => set({ route: 'community', tool: null, readerItem: null }),
   goDistribute: () => set({ route: 'distribute', tool: null, readerItem: null }),
   goLibrary: () => set({ route: 'library', tool: null, readerItem: null }),
   goSettings: () => set({ route: 'settings', tool: null, readerItem: null }),
@@ -195,6 +199,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   closeLeadgenGate: () => set({ leadgenGateOpen: false }),
   setLeadgenEngineReady: (ready) => set({ leadgenEngineReady: ready }),
 
-  setUpdateInfo: (info) => set({ updateInfo: info }),
+  // Dismissing the banner hides the "an update exists" nudge, but must not also swallow the
+  // "it's downloaded, restart to install" one that comes later — that second message is the
+  // payoff for a download the user explicitly asked for, and silently dropping it would
+  // leave them with an update that only lands whenever they next happen to quit.
+  setUpdateInfo: (info) =>
+    set((s) => ({
+      updateInfo: info,
+      updateBannerDismissed: info?.phase === 'ready' ? false : s.updateBannerDismissed
+    })),
   dismissUpdateBanner: () => set({ updateBannerDismissed: true })
 }))

@@ -1,4 +1,5 @@
 import { spawn, ChildProcessWithoutNullStreams } from 'child_process'
+import { randomBytes } from 'crypto'
 import { app } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
@@ -18,6 +19,19 @@ function sharedTokenEnv(): Record<string, string> {
 export const BACKEND_PORT = 8756
 export const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`
 
+/**
+ * The secret that proves a request came from this app.
+ *
+ * Binding the backend to 127.0.0.1 does not keep anyone out: any web page the user has open
+ * can fetch http://127.0.0.1:8756/… , and the backend has to keep a permissive CORS policy
+ * because the packaged renderer runs from file://. So the browser would happily hand another
+ * site the response. This token is what a web page cannot obtain.
+ *
+ * Generated once per launch and never persisted — there is nothing to steal from disk
+ * between sessions, and a restart invalidates anything that leaked.
+ */
+export const API_TOKEN = randomBytes(32).toString('hex')
+
 let backendProcess: ChildProcessWithoutNullStreams | null = null
 
 function resolveDevPython(): string {
@@ -36,7 +50,13 @@ function spawnDevBackend(): ChildProcessWithoutNullStreams {
   const python = resolveDevPython()
   return spawn(python, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(BACKEND_PORT)], {
     cwd: backendDir,
-    env: { ...process.env, DATA_DIR: app.getPath('userData'), ...leadgenBackendEnv(), ...sharedTokenEnv() }
+    env: {
+      ...process.env,
+      DATA_DIR: app.getPath('userData'),
+      MRAIM_API_TOKEN: API_TOKEN,
+      ...leadgenBackendEnv(),
+      ...sharedTokenEnv()
+    }
   })
 }
 
@@ -61,6 +81,7 @@ function spawnPackagedBackend(): ChildProcessWithoutNullStreams {
     env: {
       ...process.env,
       DATA_DIR: app.getPath('userData'),
+      MRAIM_API_TOKEN: API_TOKEN,
       PATH: `${ffmpegDir()}${pathSep}${process.env.PATH ?? ''}`,
       ...leadgenBackendEnv(),
       ...sharedTokenEnv()
@@ -95,10 +116,21 @@ export function stopBackend(): void {
 // Packaged cold starts (first launch after install, disk cache cold, catalog xlsx parse +
 // PyInstaller's own unpack-on-first-run overhead) can comfortably exceed 30s — 90s gives
 // real headroom without masking a genuinely broken backend forever.
-export async function waitForBackendHealth(timeoutMs = 90000, intervalMs = 250): Promise<void> {
+/**
+ * Wait for the backend to answer /health.
+ *
+ * The budget is generous because backend startup imports torch, transformers, chromadb and
+ * sentence-transformers before it serves anything — measured at ~70s on a warm dev machine,
+ * and slower on a cold or busy one. At the old 90s this failed outright and the whole app
+ * refused to launch, which is a far worse outcome than waiting a little longer on a slow
+ * boot. The splash screen is showing throughout, so the wait is visible rather than a hang.
+ */
+export async function waitForBackendHealth(timeoutMs = 240000, intervalMs = 250): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
+      // /health is deliberately exempt from the token check — it exists to answer this poll
+      // before anything else is ready, and it returns nothing but "ok".
       const res = await fetch(`${BACKEND_URL}/health`)
       if (res.ok) return
     } catch {

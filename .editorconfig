@@ -1,0 +1,25 @@
+# Editor defaults, so a checkout looks the same regardless of who opens it.
+# Pairs with .gitattributes: that one governs what lands in the repo, this one governs what
+# your editor writes in the first place.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.py]
+indent_size = 4
+
+[*.{md,markdown}]
+# Two trailing spaces is a hard line break in Markdown — stripping it silently reflows text.
+trim_trailing_whitespace = false
+
+[*.{bat,cmd,ps1}]
+end_of_line = crlf
+
+[Makefile]
+indent_style = tab

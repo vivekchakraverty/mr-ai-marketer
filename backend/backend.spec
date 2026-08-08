@@ -6,9 +6,11 @@
 # the broad collect_all() list below rather than hand-picked hidden imports.
 from PyInstaller.utils.hooks import collect_all
 
+# Datasets and models are NOT bundled. They live in Hugging Face repos and are fetched on
+# first use into the user's data directory — see app/services/hf_assets.py for why (a file
+# inside a distributed app is a file every user has, and cannot be revoked). What stays here
+# is configuration and code that the packages resolve relative to themselves.
 datas = [
-    ("vendor/guestpostsuggester/data/guest_post_database.xlsx", "vendor/guestpostsuggester/data"),
-    ("vendor/guestpostsuggester/data/opr_scores.json", "vendor/guestpostsuggester/data"),
     ("vendor/dmstrategy/data/ad_benchmarks.json", "vendor/dmstrategy/data"),
     ("vendor/dmstrategy/data/social_benchmarks.json", "vendor/dmstrategy/data"),
     # vendor/socialpost resolves these at runtime relative to its own package root,
@@ -23,12 +25,6 @@ datas = [
     # vendor/leadgen parses its .env.example into the Settings screen's field list at runtime,
     # exactly like socialpost above — load-bearing, not documentation.
     ("vendor/leadgen/.env.example", "vendor/leadgen"),
-    # The Influencer Database's bundled catalogue — read-only static asset, parsed on
-    # first request by app/routers/influencer_db.py.
-    ("app/data/influencer_database.xlsx", "app/data"),
-    # CTR predictor's trained model + reference stats (see ml/ctr/train_ctr_model.py).
-    ("app/ml/ctr_model.joblib", "app/ml"),
-    ("app/ml/ctr_reference_stats.json", "app/ml"),
 ]
 binaries = []
 hiddenimports = [
@@ -48,6 +44,11 @@ hiddenimports = [
     # handlers, so they are already covered by the social_post entries below.
     "app.routers.mastodon_post",
     "app.services.mastodon",
+    "app.services.mastodon_gate",
+    # Engage's Mastodon panel — same service + gate, different verbs.
+    "app.routers.mastodon_engage",
+    "app.routers.hashtags",
+    "app.services.hashtags",
     "app.routers.topic_scout",
     # vendor/topicscout is imported lazily inside the router, so static analysis
     # never sees it. Its sub-modules are reached only through engine.py.
@@ -57,11 +58,26 @@ hiddenimports = [
     "vendor.topicscout.social",
     "vendor.topicscout.signals",
     "vendor.topicscout.sentiment",
+    # Brand Studio's bring-your-own-Modal path. brand_forge.py imports these
+    # inside the handlers (so the hosted-Space path still works in a build with
+    # no modal SDK), which hides them from static analysis.
+    "app.brandforge.modal_runtime",
+    "app.brandforge.modal_backend",
+    "app.brandforge.modal_image_backend",
     "app.routers.influencer_db",
+    # The Community section. Both halves are listed: the bot poller and the Telethon account
+    # client are reached through routers rather than imported at module scope anywhere on the
+    # static path, and Telethon builds its request classes dynamically, so its generated
+    # `tl` packages have to be collected wholesale further down.
+    "app.routers.community",
+    "app.routers.community_account",
+    "app.services.telegram_community",
+    "app.services.telegram_user",
     "app.routers.engage",
     "app.routers.mail",
     "app.routers.mail_tracking",
     "app.routers.leadgen",
+    "app.routers.tracker",
     "app.services.email_writer",
     "app.services.mail_tracking",
     "app.services.mail_bounce",
@@ -113,8 +129,6 @@ hiddenimports = [
     "vendor.socialpost.src.jobs.telemetry",
     "vendor.socialpost.src.jobs.cleanup",
     "vendor.socialpost.src.jobs.authors",
-    "vendor.socialpost.src.jobs.topics",
-    "vendor.socialpost.src.topics",
     "pytrends",
     # vendor/dmstrategy/modules/*.py import each other as a top-level `modules` package
     # via a runtime sys.path.insert (see app/config.py) rather than a normal dotted
@@ -152,16 +166,23 @@ _COLLECT_ALL = [
     "gradio_client",
     "huggingface_hub",
     "scenedetect",
-    # vendor/socialpost: atproto builds its lexicon models dynamically, and
-    # supabase/postgrest wire themselves up at import time — both defeat static
-    # analysis in the same way the packages above do.
+    # vendor/socialpost: atproto builds its lexicon models dynamically, which defeats
+    # static analysis in the same way the packages above do.
     "atproto",
-    "supabase",
     # sklearn's compiled Cython extensions (tree/_tree, utils/_typedefs, etc.) are a
     # well-known PyInstaller static-analysis blind spot; joblib.load()ing the CTR
     # model needs the exact class it was pickled with to be importable at runtime.
     "sklearn",
     "joblib",
+    # Brand Studio's own-GPU path. modal ships a vendored cloudpickle and wires
+    # its gRPC stubs up at import time; it also has to be fully present because
+    # provisioning cloudpickles a function *out* of this build and into a
+    # container (see app/brandforge/modal_backend.py).
+    "modal",
+    # Community's account half. Telethon generates its whole `tl` layer — hundreds of
+    # request and type classes — and resolves them by name at call time, so listing the
+    # handful this app calls would still miss everything they construct underneath.
+    "telethon",
 ]
 for pkg in _COLLECT_ALL:
     d, b, h = collect_all(pkg)

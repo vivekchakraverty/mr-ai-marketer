@@ -92,6 +92,20 @@ class InstanceInfo:
     max_characters: int
     max_media: int
 
+    # What the server's own configuration says you may do. Shown verbatim in the
+    # Engage terms panel as the "allowed" half of the picture, next to the rules
+    # that say what you may not. All defaulted: an instance that omits a field has
+    # told us nothing about it, which is different from telling us zero, and the
+    # panel skips anything left at its default rather than claiming a limit of 0.
+    max_poll_options: int = 0
+    poll_max_expiration_days: int = 0
+    image_size_limit_mb: int = 0
+    video_size_limit_mb: int = 0
+    languages: tuple[str, ...] = ()
+    translation: bool = False
+    thumbnail: str = ""
+    contact_email: str = ""
+
     @property
     def base_url(self) -> str:
         return f"https://{self.host}"
@@ -200,7 +214,7 @@ def normalise_host(value: str) -> str:
     """
     raw = (value or "").strip()
     if not raw:
-        raise MastodonError("Enter your Mastodon instance, e.g. hachyderm.io")
+        raise MastodonError("Enter your Mastodon instance, e.g. mastodon.social")
     if "//" not in raw:
         raw = f"https://{raw}"
     host = (urlparse(raw).hostname or "").strip().lower()
@@ -251,27 +265,72 @@ def _parse_created_at(value: str | None) -> datetime | None:
 # ---------------------------------------------------------------------------
 
 
-def _request(
+def _error_detail(resp: requests.Response) -> str:
+    """The sentence the instance wrote about why it refused, if it wrote one.
+
+    Mastodon answers a rejected write with {"error": "Text character limit of 500
+    exceeded"} or an OAuth-scope complaint. That sentence is the only thing that
+    tells a user what to change, so it must survive up to the UI instead of being
+    flattened into "HTTP 422".
+    """
+    try:
+        payload = resp.json()
+    except ValueError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    for key in ("error_description", "error"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _not_found_message(host: str, path: str) -> str:
+    """A 404 means different things for metadata and for a single object."""
+    if path.startswith(("/api/v1/instance", "/api/v2/instance")):
+        return f"{host} has no {path} — it may not run Mastodon."
+    return f"{host} has nothing at {path} — it may have been deleted."
+
+
+def _call(
     host: str,
+    method: str,
     path: str,
     token: str = "",
     params: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
+    idempotency_key: str = "",
 ) -> Any:
-    """GET a Mastodon API path with retry on 429/5xx. Returns decoded JSON.
+    """One Mastodon API call, with retry on 429/5xx. Returns decoded JSON.
 
     4xx other than 429 are not retried: they mean the request itself is wrong
     (bad token, endpoint disabled on this instance), and repeating it just burns
     the budget and the admin's patience.
+
+    Retrying a write is only safe because of what the writes are. Every POST this
+    module makes except status creation sets a state rather than appending
+    something — favourite, boost, bookmark, follow — so running it twice lands in
+    the same place. Status creation is the exception, and it is exactly the one
+    where a retry after a timeout could publish twice, so it carries an
+    Idempotency-Key that Mastodon dedupes on.
     """
     url = f"https://{host}{path}"
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key
 
     for attempt in range(MAX_RETRIES):
         try:
-            resp = requests.get(
-                url, headers=headers, params=params, timeout=REQUEST_TIMEOUT
+            resp = requests.request(
+                method,
+                url,
+                headers=headers,
+                params=params,
+                json=data,
+                timeout=REQUEST_TIMEOUT,
             )
         except requests.RequestException as err:
             if attempt == MAX_RETRIES - 1:
@@ -279,7 +338,9 @@ def _request(
             time.sleep(BASE_BACKOFF_SECONDS * (2**attempt) + random.uniform(0, 1))
             continue
 
-        if resp.status_code == 200:
+        if resp.status_code in (200, 201, 202, 204):
+            if not (resp.content or b"").strip():
+                return {}
             try:
                 return resp.json()
             except ValueError:
@@ -288,13 +349,26 @@ def _request(
                     f"Is that host actually a Mastodon server?"
                 ) from None
 
+        detail = _error_detail(resp)
+
         if resp.status_code == 401:
             raise MastodonError(
-                f"{host} rejected the access token. Regenerate it under "
-                f"Preferences -> Development on your instance."
+                detail
+                or (
+                    f"{host} rejected the access token. Regenerate it under "
+                    f"Preferences -> Development on your instance."
+                )
+            )
+        if resp.status_code == 403:
+            # Almost always a token missing the scope the call needs.
+            raise MastodonError(
+                f"{host} refused that: {detail or 'the action is outside your token’s scopes'}. "
+                f"A token for posting and following needs read, write and follow scopes."
             )
         if resp.status_code == 404:
-            raise MastodonError(f"{host} has no {path} — it may not run Mastodon.")
+            raise MastodonError(detail or _not_found_message(host, path))
+        if resp.status_code == 422:
+            raise MastodonError(detail or f"{host} rejected that as invalid.")
 
         retryable = resp.status_code == 429 or resp.status_code >= 500
         if not retryable or attempt == MAX_RETRIES - 1:
@@ -303,7 +377,7 @@ def _request(
                     f"{host} is rate limiting us. Wait a few minutes and try again."
                 )
             raise MastodonError(
-                f"{host} returned HTTP {resp.status_code} for {path}."
+                detail or f"{host} returned HTTP {resp.status_code} for {path}."
             )
 
         delay = BASE_BACKOFF_SECONDS * (2**attempt) + random.uniform(0, 1)
@@ -320,16 +394,73 @@ def _request(
     raise RateLimited(f"Gave up on {host} after {MAX_RETRIES} attempts.")
 
 
+def _request(
+    host: str,
+    path: str,
+    token: str = "",
+    params: dict[str, Any] | None = None,
+) -> Any:
+    """GET a Mastodon API path. The corpus side of this module only ever reads."""
+    return _call(host, "GET", path, token, params=params)
+
+
+# The Engage screen acts as the user rather than harvesting a corpus, so it needs
+# the whole verb set and the raw JSON — the flattened Status above deliberately
+# drops boosts, viewer state and media, all of which a client has to show. These
+# three are the seam: transport, retry and error wording stay here, and
+# routers/mastodon_engage.py owns the shape it presents.
+
+
+def api_get(
+    host: str, path: str, token: str = "", params: dict[str, Any] | None = None
+) -> Any:
+    return _call(normalise_host(host), "GET", path, token, params=params)
+
+
+def api_post(
+    host: str,
+    path: str,
+    token: str,
+    data: dict[str, Any] | None = None,
+    idempotency_key: str = "",
+) -> Any:
+    return _call(
+        normalise_host(host),
+        "POST",
+        path,
+        token,
+        data=data,
+        idempotency_key=idempotency_key,
+    )
+
+
+def api_delete(host: str, path: str, token: str) -> Any:
+    return _call(normalise_host(host), "DELETE", path, token)
+
+
 # ---------------------------------------------------------------------------
 # Instance metadata + policy
 # ---------------------------------------------------------------------------
+
+
+def _mb(value: Any) -> int:
+    """Bytes -> whole megabytes, 0 when the server did not say."""
+    try:
+        return int(value) // (1024 * 1024)
+    except (TypeError, ValueError):
+        return 0
 
 
 def instance_info(host: str) -> InstanceInfo:
     """Title, version, and the limits this server actually enforces."""
     host = normalise_host(host)
     data = _request(host, "/api/v2/instance")
-    statuses = ((data or {}).get("configuration") or {}).get("statuses") or {}
+    configuration = (data or {}).get("configuration") or {}
+    statuses = configuration.get("statuses") or {}
+    polls = configuration.get("polls") or {}
+    media = configuration.get("media_attachments") or {}
+    translation = configuration.get("translation") or {}
+    contact = (data or {}).get("contact") or {}
     return InstanceInfo(
         host=host,
         title=str(data.get("title") or host),
@@ -339,6 +470,14 @@ def instance_info(host: str) -> InstanceInfo:
         # the field. Never assume them when the server did answer.
         max_characters=int(statuses.get("max_characters") or 500),
         max_media=int(statuses.get("max_media_attachments") or 4),
+        max_poll_options=int(polls.get("max_options") or 0),
+        poll_max_expiration_days=int(polls.get("max_expiration") or 0) // 86400,
+        image_size_limit_mb=_mb(media.get("image_size_limit")),
+        video_size_limit_mb=_mb(media.get("video_size_limit")),
+        languages=tuple(str(lang) for lang in ((data or {}).get("languages") or [])),
+        translation=bool(translation.get("enabled")),
+        thumbnail=str(((data or {}).get("thumbnail") or {}).get("url") or ""),
+        contact_email=str(contact.get("email") or ""),
     )
 
 
@@ -413,13 +552,83 @@ _RELEVANCE_TERMS = (
 _WORD_RE = re.compile(r"[a-z.]+")
 
 
+def _mentions(text: str, terms: Iterable[str]) -> bool:
+    """Whether any term appears in the text as a word prefix or a phrase.
+
+    Rules are prose, so "automated" has to match "automat" and "content warning"
+    has to match as a phrase. Word-prefix matching rather than plain substring
+    keeps "ai" out of "said" and "chain".
+    """
+    lowered = (text or "").lower()
+    words = set(_WORD_RE.findall(lowered))
+    for term in terms:
+        if " " in term or "-" in term:
+            if term in lowered:
+                return True
+        elif term in words or any(w.startswith(term) for w in words):
+            return True
+    return False
+
+
 def is_relevant(text: str) -> bool:
     """Whether a rule touches AI, automation, or commercial use."""
-    words = set(_WORD_RE.findall((text or "").lower()))
-    return any(
-        term in words or any(w.startswith(term) for w in words)
-        for term in _RELEVANCE_TERMS
-    )
+    return _mentions(text, _RELEVANCE_TERMS)
+
+
+# Headings the Engage terms panel groups an instance's rules under, in priority
+# order. Grouping only — every rule is shown verbatim under whichever heading it
+# lands in, and anything unmatched falls through to the last one, so a
+# mis-classified rule is a cosmetic problem and never a hidden one.
+RULE_TOPICS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "AI, bots and automation",
+        (
+            "ai", "a.i.", "generative", "llm", "machine-generated", "chatgpt",
+            "bot", "automat", "scrap", "crawl", "index", "disclos", "attribut",
+        ),
+    ),
+    (
+        "Marketing and commercial use",
+        (
+            "advertis", "marketing", "promot", "spam", "seo", "commercial",
+            "business", "corporate", "monetis", "monetiz", "solicit", "affiliate",
+            "crypto", "nft",
+        ),
+    ),
+    (
+        "Harassment and hate",
+        (
+            "harass", "hate", "racis", "sexis", "transphob", "homophob", "ableis",
+            "slur", "abuse", "doxx", "dox", "threat", "nazi", "fasci", "bigot",
+            "brigad", "stalk",
+        ),
+    ),
+    (
+        "Sensitive content",
+        (
+            "nsfw", "sexual", "porn", "nudity", "violen", "gore", "graphic",
+            "content warning", "cw", "spoiler", "sensitive", "trigger", "minor",
+            "csam", "self-harm",
+        ),
+    ),
+    (
+        "Posting etiquette",
+        (
+            "alt text", "alt-text", "hashtag", "language", "unlisted", "boost",
+            "reply", "thread", "mention", "tag", "caption", "accessib",
+        ),
+    ),
+)
+
+FALLBACK_TOPIC = "House rules"
+
+
+def rule_topic(text: str) -> str:
+    """The heading a rule belongs under. First match wins."""
+    for topic, terms in RULE_TOPICS:
+        if _mentions(text, terms):
+            return topic
+    return FALLBACK_TOPIC
 
 
 # ---------------------------------------------------------------------------
@@ -682,3 +891,180 @@ def engagement_rate(favourites: int, reblogs: int, replies: int, followers: int)
     if followers < 1:
         return 0.0
     return round((favourites + reblogs + replies) / followers, 6)
+
+
+# ---------------------------------------------------------------------------
+# Hashtag data — trends and per-tag usage
+#
+# The one genuinely free, no-key, real-hashtag-semantics data source in the whole
+# app. Both endpoints are public reads on most instances, so the Hashtag Suggester
+# can use them without the user's token. The token is threaded through only so the
+# Mastodon composer, which already holds one, can reach instances that gate trends
+# behind auth — it is never required.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TagStats:
+    """A hashtag with the usage numbers an instance publishes about it.
+
+    `uses` / `accounts` are the totals over the returned history window (~7 days);
+    `momentum` is recent-vs-earlier usage within that window (>1 rising, <1
+    cooling, 0.0 when there is not enough history to say). `trending` marks a tag
+    the instance itself lists on its trends surface right now.
+    """
+
+    name: str
+    url: str
+    uses: int
+    accounts: int
+    momentum: float
+    days: int
+    trending: bool = False
+
+
+def _tag_history_stats(history: list[dict[str, Any]]) -> tuple[int, int, float, int]:
+    """(total uses, total accounts, momentum, days) from a tag's daily history.
+
+    Mastodon returns history newest-first as [{day, uses, accounts}, ...] with the
+    numbers as strings. Momentum compares the most recent third of the window
+    against the oldest third; the newest entry is a partial day, so a straight
+    last-vs-first would read every tag as cooling in the morning.
+    """
+    days: list[tuple[int, int]] = []
+    for entry in history or []:
+        try:
+            days.append((int(entry.get("uses") or 0), int(entry.get("accounts") or 0)))
+        except (TypeError, ValueError):
+            continue
+    if not days:
+        return 0, 0, 0.0, 0
+
+    uses = sum(u for u, _ in days)
+    accounts = sum(a for _, a in days)
+
+    # History is newest-first; reverse to chronological so "recent" is the tail.
+    chrono = [u for u, _ in reversed(days)]
+    momentum = 0.0
+    if len(chrono) >= 4:
+        window = max(1, len(chrono) // 3)
+        earlier = sum(chrono[:window]) / window
+        recent = sum(chrono[-window:]) / window
+        momentum = round(recent / earlier, 3) if earlier > 0 else (2.0 if recent > 0 else 0.0)
+    return uses, accounts, momentum, len(days)
+
+
+def _parse_tag(raw: dict, *, trending: bool = False) -> TagStats | None:
+    name = str(raw.get("name") or "").strip().lstrip("#")
+    if not name:
+        return None
+    uses, accounts, momentum, days = _tag_history_stats(raw.get("history") or [])
+    return TagStats(
+        name=name,
+        url=str(raw.get("url") or ""),
+        uses=uses,
+        accounts=accounts,
+        momentum=momentum,
+        days=days,
+        trending=trending,
+    )
+
+
+def trending_tags(host: str, limit: int = 20, token: str = "") -> list[TagStats]:
+    """The hashtags the instance is surfacing as trending, with their usage.
+
+    One request. `/api/v1/trends/tags` is public on a default Mastodon install;
+    an instance that has disabled trends answers 404, which the caller treats as
+    "this source is unavailable" rather than an error.
+    """
+    data = _request(
+        normalise_host(host),
+        "/api/v1/trends/tags",
+        token,
+        {"limit": min(40, max(1, limit))},
+    ) or []
+    out: list[TagStats] = []
+    for raw in data:
+        stats = _parse_tag(raw, trending=True)
+        if stats:
+            out.append(stats)
+    log.info("mastodon trends -> %d tags from %s", len(out), host)
+    return out
+
+
+def trending_statuses(
+    host: str, limit: int = 40, offset: int = 0, token: str = ""
+) -> list[Status]:
+    """Posts the instance is currently surfacing as trending.
+
+    Measured on hachyderm.io: 197 unique statuses over 5 offset pages, of which
+    **96% pass should_learn_from** — against 13.5% for a tag timeline. The gap is
+    structural rather than lucky: trending posts come from established,
+    discoverable accounts, whereas a tag timeline is dominated by accounts that
+    set discoverable=false.
+
+    The catch, and why this must never be the only source: it is a
+    survivorship-biased sample. Median author followers on that same run was
+    3,272. A corpus built only from here has no `low` tier at all, so quality
+    conditioning would have nothing to contrast against and the model would just
+    learn "write like a popular account".
+    """
+    data = _request(
+        normalise_host(host),
+        "/api/v1/trends/statuses",
+        token,
+        {"limit": min(40, max(1, limit)), "offset": max(0, offset)},
+    ) or []
+    out: list[Status] = []
+    for raw in data:
+        status = _parse_status(raw)
+        if status:
+            out.append(status)
+    return out
+
+
+def public_timeline(
+    host: str,
+    limit: int = 40,
+    max_id: str = "",
+    local: bool = False,
+    token: str = "",
+) -> list[Status]:
+    """The federated (or local) public timeline — a broad, unranked sample.
+
+    The counterweight to trending: ordinary posts by ordinary accounts, which is
+    what the `mid` and `low` tiers need. Not served everywhere —
+    mastodon.social answers 422 for unauthenticated reads of this endpoint while
+    hachyderm serves it — so callers must treat a MastodonError here as "this
+    source is unavailable on this instance", not as a failure.
+    """
+    params: dict[str, Any] = {"limit": min(PAGE_LIMIT, max(1, limit))}
+    if not local:
+        params["remote"] = "false"
+    else:
+        params["local"] = "true"
+    if max_id:
+        params["max_id"] = max_id
+
+    data = _request(normalise_host(host), "/api/v1/timelines/public", token, params) or []
+    out: list[Status] = []
+    for raw in data:
+        status = _parse_status(raw)
+        if status:
+            out.append(status)
+    return out
+
+
+def tag_info(host: str, tag: str, token: str = "") -> TagStats | None:
+    """Usage history for one specific hashtag, or None if it is unknown/ungated.
+
+    `/api/v1/tags/{tag}` is how a candidate that is NOT currently trending still
+    gets real volume + momentum numbers attached. Some instances gate it behind a
+    token; a MastodonError here is swallowed by the caller so a single gated tag
+    never sinks the whole suggestion.
+    """
+    clean = _hashtag_of(tag)
+    if not clean:
+        return None
+    raw = _request(normalise_host(host), f"/api/v1/tags/{quote(clean)}", token)
+    return _parse_tag(raw or {}, trending=False)

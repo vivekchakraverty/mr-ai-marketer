@@ -1,7 +1,7 @@
-"""HF image inference for BrandForge, billed to the user's own HF token.
+"""Hugging Face fallback image inference for BrandForge.
 
-Text generation now runs on the BrandForge Space (see brandforge/space.py).
-Images stay on HF Inference Providers text-to-image (FLUX.1-dev).
+When the Modal image backend has been provisioned, image requests run there.
+This module keeps the previous hosted FLUX provider available until then.
 """
 from __future__ import annotations
 
