@@ -28,6 +28,7 @@ wired into one place.
 - [Checking it for security problems](#checking-it-for-security-problems)
 - [Privacy and your data](#privacy-and-your-data)
 - [Troubleshooting](#troubleshooting)
+- [What this is built on, and their licences](#what-this-is-built-on-and-their-licences)
 
 ---
 
@@ -536,6 +537,73 @@ committed to the repo because of its size and licence.
 
 ---
 
+## What this is built on, and their licences
+
+This app is mostly an assembly job. Seven separate projects live under `backend/vendor/`, and
+a handful of third-party programs are either shipped in the installer or run as services on
+your machine. None of them carry licence files inside this repo, so this section is the
+record. If you only ever run this for yourself, none of it constrains you — it matters when
+you redistribute.
+
+### The seven vendored projects
+
+| Project | Where it's used | Origin | Licence |
+| --- | --- | --- | --- |
+| `socialpost` | Social Post, Mastodon Post, Hashtag Suggester, the shared LLM wrapper | Written for this app | MIT, as part of this repo |
+| `dmstrategy` | Marketing Plan | Written for this app | MIT, as part of this repo |
+| `guestpostsuggester` | Guest Post Suggester | Written for this app | MIT, as part of this repo |
+| `tutorialmaker` | TutorialMaker | Written for this app | MIT, as part of this repo |
+| `docmaker` | DocuMaker | Own Hugging Face Space, pulled in as a git subtree | **MIT** (declared in the Space's own README) |
+| `topicscout` | Topic Scout | Merge of two projects — see below | **MIT** (both parts) |
+| `leadgen` | Lead Gen Agent, Outreach CRM | Reimplementation of a GPLv3 project's workflow — see below | Needs your attention |
+
+**`topicscout` is a merge of two upstreams.** The ranking engine, evidence model and signal
+tracking come from TrendScout, a Streamlit app written for this project. The social and
+consumer discovery feeds — Reddit RSS, Google Trends RSS, YouTube search, TikTok Creative
+Center, Amazon Best Sellers — plus the bilingual sentiment lexicon are ported from
+[TrendScope](https://github.com/mamboyepez17/trendscope), which is **MIT licensed**. MIT is
+compatible with this repo's licence; it asks only that the copyright notice travel with the
+code, which is what this entry is for.
+
+**`leadgen` follows [OpenOutreach](https://github.com/eracle/OpenOutreach), which is
+GPLv3.** The pipeline shape (discover → qualify → find and verify email → draft → send →
+agentic follow-up), the Campaign/Lead/Deal/Task data model, the deal-state machine and the
+explore/exploit qualifier are all deliberately faithful to it — the source comments say so
+throughout. What's here is a reimplementation that replaces OpenOutreach's paid lead database
+and email lookup with free backends, not a fork of its code. That distinction is what keeps
+this repo MIT: workflow and architecture aren't copyrightable, source code is. **If any
+OpenOutreach source was actually copied rather than reimplemented, this directory is a
+derivative work and must be GPLv3.** Worth confirming before you redistribute.
+
+### Shipped in the installer
+
+| Thing | Licence | What that means here |
+| --- | --- | --- |
+| [ffmpeg](https://www.gyan.dev/ffmpeg/builds/) (gyan.dev static build) | **GPL-3.0** | The one real redistribution obligation. The app never links it — DocuMaker and TutorialMaker shell out to it as a separate executable on PATH — so this is mere aggregation and the MIT grant on the app code is unaffected. But GPLv3 obliges anyone distributing the binary to offer its corresponding source. If you publish an installer, link to the exact build you bundled. |
+
+### Services you run yourself
+
+These are never redistributed — you pull the image or run the binary — so their terms are
+between you and them, not conditions on this repo.
+
+| Thing | Licence | Worth knowing |
+| --- | --- | --- |
+| [Activepieces](https://github.com/activepieces/activepieces) `0.86.2` | MIT core; `packages/ee` under a separate commercial licence | The publishing engine. Everything this app touches is the MIT core. |
+| [SearXNG](https://github.com/searxng/searxng) | AGPL-3.0 | Private metasearch for lead discovery. Self-hosted, unmodified. |
+| [Reacher](https://github.com/reacherhq/check-if-email-exists) | AGPL-3.0 **or** commercial | Email verification. Reacher's own terms say commercial use needs either an AGPL-compatible codebase or a paid licence — if you use the Lead Gen Agent commercially, that's yours to sort out with them. |
+
+### Notable libraries
+
+Ordinary dependencies, all permissive: **faster-whisper** (MIT), **yt-dlp** (Unlicense),
+**ChromaDB** (Apache-2.0), **Sentence Transformers** (Apache-2.0), **FastAPI**, **Electron**
+and **React** (all MIT).
+
+The AI models are a separate question — most are open-weight (Apache-2.0 or MIT), but a few
+carry restrictions, and one image model is non-commercial. See
+[The AI](#the-ai) above and the model ids in the source for specifics.
+
+---
+
 ## Contributing and licence
 
 Issues and pull requests welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers how to get a
@@ -552,8 +620,10 @@ environment variables above, so nobody's clone quietly sends traffic to your acc
 Released under the **MIT Licence** — see [LICENSE](LICENSE). In short: use it, change it,
 ship it commercially, just keep the copyright notice.
 
-One caveat worth reading if you plan to redistribute. `backend/vendor/` contains seven
-separate projects that this app wraps rather than reimplements. They carry no licence files
-of their own here, so the MIT grant above covers the application code — not necessarily
-those vendored projects, whose terms are set by whoever wrote them. If you fork this for
-anything beyond personal use, check each one's upstream licence first.
+That grant covers the application code and the projects under `backend/vendor/` that were
+written for it. It does **not** override the terms of the third-party work this app builds
+on — most notably the GPL-3.0 ffmpeg binaries in the installer, and the GPLv3 project whose
+workflow the Lead Gen Agent follows.
+[What this is built on](#what-this-is-built-on-and-their-licences) has the full picture and
+the two items that need a decision before you redistribute. Read it before you fork this for
+anything beyond personal use.
