@@ -1,0 +1,54 @@
+version: 2
+
+# Grouped and monthly on purpose. This is a solo project with a large dependency tree (torch,
+# chromadb, transformers, electron); weekly per-package PRs would produce more review work than
+# anyone here can absorb, and unreviewed dependency PRs are worse than none.
+updates:
+  - package-ecosystem: npm
+    directory: /electron
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      # Electron and its build chain move together; splitting them produces PRs that don't
+      # build on their own.
+      electron:
+        patterns:
+          - electron
+          - electron-*
+          - "@electron-toolkit/*"
+      react:
+        patterns:
+          - react
+          - react-dom
+          - "@types/react"
+          - "@types/react-dom"
+      dev-dependencies:
+        dependency-type: development
+
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      dependencies:
+        patterns:
+          - "*"
+    ignore:
+      # Pinned deliberately. requirements.lock.txt exists because a fresh resolve picks
+      # protobuf 6.x, which this app is not tested against — see the note in build.yml.
+      - dependency-name: protobuf
+      # torch upgrades are a deliberate, tested decision here, not a routine bump: they change
+      # wheel sizes by hundreds of MB and can break the PyInstaller build.
+      - dependency-name: torch
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns:
+          - "*"

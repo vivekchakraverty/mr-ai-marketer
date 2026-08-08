@@ -1,17 +1,26 @@
 import { useEffect, useState } from 'react'
 import {
   approveDistributionItem,
+  deleteCustomChannel,
+  fetchCataloguePiece,
   fetchDistributionChannels,
   fetchDistributionJobs,
   fetchDistributionQueue,
   rejectDistributionItem,
   type ChannelStatus,
+  type CustomChannelStatus,
   type DistributionJob
 } from '../api/client'
+import AddChannelModal from '../components/AddChannelModal'
 import ApprovalQueueCard from '../components/ApprovalQueueCard'
 import ChannelConnectModal from '../components/ChannelConnectModal'
 import MailComposer from '../components/MailComposer'
-import { BROADCAST_CHANNELS, COMMUNITY_CHANNELS, PLATFORM_SETUP_GUIDES } from '../state/platformSetupGuides'
+import {
+  BROADCAST_CHANNELS,
+  COMMUNITY_CHANNELS,
+  PLATFORM_SETUP_GUIDES,
+  type PlatformSetupGuide
+} from '../state/platformSetupGuides'
 import { useAppStore } from '../state/store'
 import { secondaryButtonSmall, tag } from '../styles/styleKit'
 
@@ -46,14 +55,21 @@ function formatDate(iso: string): string {
 function ChannelCard({
   status,
   engineReady,
-  onClick
+  onClick,
+  label: labelOverride,
+  color: colorOverride
 }: {
   status: ChannelStatus
   /** null while the first channels fetch is still in flight. */
   engineReady: boolean | null
   onClick: () => void
+  /** Supplied for user-added channels, which have no hand-written guide to read from. */
+  label?: string
+  color?: string
 }): React.JSX.Element {
   const guide = PLATFORM_SETUP_GUIDES[status.channel]
+  const cardLabel = labelOverride ?? guide.label
+  const cardColor = colorOverride ?? guide.color
   return (
     <div
       onClick={onClick}
@@ -74,13 +90,13 @@ function ChannelCard({
           width: 30,
           height: 30,
           borderRadius: '52% 48% 55% 45%',
-          background: guide.color,
+          background: cardColor,
           border: '2px solid var(--border)',
           flexShrink: 0
         }}
       />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ font: "700 14px 'Kalam'", color: 'var(--ink)' }}>{guide.label}</div>
+        <div style={{ font: "700 14px 'Kalam'", color: 'var(--ink)' }}>{cardLabel}</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
           <span
             style={{
@@ -107,6 +123,11 @@ export default function Distribute(): React.JSX.Element {
   const [engineReady, setEngineReady] = useState<boolean | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [activeChannel, setActiveChannel] = useState<string | null>(null)
+  const [customChannels, setCustomChannels] = useState<CustomChannelStatus[]>([])
+  const [addOpen, setAddOpen] = useState(false)
+  // The connect form for a user-added channel is generated from its piece's own auth
+  // schema, fetched when its card is opened rather than kept for every channel up front.
+  const [customGuide, setCustomGuide] = useState<PlatformSetupGuide | null>(null)
   const openDistributionGate = useAppStore((s) => s.openDistributionGate)
   const gateReportedReady = useAppStore((s) => s.distributionEngineReady)
 
@@ -116,8 +137,54 @@ export default function Distribute(): React.JSX.Element {
       setEngineReady(result.ready)
       setChannels(result.channels)
       setCommunityChannels(result.communityChannels)
+      setCustomChannels(result.customChannels ?? [])
     } catch {
       setEngineReady(false)
+    }
+  }
+
+  /** Builds a setup guide on the fly from what the piece says it needs to authenticate,
+   * so a user-added channel gets the same connect form as a hand-written one. */
+  async function openCustomChannel(status: CustomChannelStatus): Promise<void> {
+    setActiveChannel(status.channel)
+    setCustomGuide(null)
+    try {
+      const piece = await fetchCataloguePiece(status.pieceName)
+      const authKind = (piece.auth.type ?? 'OAUTH2') as PlatformSetupGuide['authKind']
+      setCustomGuide({
+        channel: status.channel,
+        label: status.label,
+        authKind,
+        color: 'var(--tool-distribute)',
+        blurb: piece.auth.description?.split('\n')[0] || `Post to ${status.label} from this app.`,
+        helpSteps: [],
+        // SECRET_TEXT pieces declare no props — Activepieces takes the one value under the
+        // fixed `secret_text` key, which is what the bundled Discord guide uses too.
+        fields:
+          authKind === 'SECRET_TEXT'
+            ? [{ key: 'secret_text', label: piece.auth.label || 'API key or token', secret: true }]
+            : piece.auth.props.map((p) => ({
+                key: p.key,
+                label: p.label,
+                secret: p.type === 'SECRET_TEXT',
+                optional: !p.required,
+                kind: p.type === 'CHECKBOX' ? ('checkbox' as const) : p.options.length > 0 ? ('select' as const) : ('text' as const),
+                options: p.options,
+                defaultValue: typeof p.defaultValue === 'string' ? p.defaultValue : undefined
+              }))
+      })
+    } catch {
+      setActiveChannel(null)
+    }
+  }
+
+  async function handleRemoveCustom(channel: string): Promise<void> {
+    try {
+      await deleteCustomChannel(channel)
+    } finally {
+      setActiveChannel(null)
+      setCustomGuide(null)
+      void refreshChannels()
     }
   }
 
@@ -159,7 +226,10 @@ export default function Distribute(): React.JSX.Element {
     setQueue((current) => current.filter((job) => job.id !== jobId))
   }
 
-  const connectedByChannel = new Set([...channels, ...communityChannels].filter((c) => c.connected).map((c) => c.channel))
+  const connectedByChannel = new Set(
+    [...channels, ...communityChannels, ...customChannels].filter((c) => c.connected).map((c) => c.channel)
+  )
+  const activeCustom = customChannels.find((c) => c.channel === activeChannel) ?? null
   const recentJobs = jobs.filter((j) => j.status !== 'pending_approval').slice(0, 15)
   // The backend already returns the full catalogue even when the engine is down; these
   // fall back to the static lists for the case where the backend itself hasn't answered.
@@ -279,6 +349,43 @@ export default function Distribute(): React.JSX.Element {
         ))}
       </div>
 
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
+        <div style={{ font: "700 12px 'Quicksand'", letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--ink-faint)' }}>
+          Your channels
+        </div>
+        <div style={secondaryButtonSmall} onClick={() => setAddOpen(true)}>
+          + Add a channel
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 10, marginBottom: 30 }}>
+        {customChannels.map((c) => (
+          <ChannelCard
+            key={c.channel}
+            status={c}
+            engineReady={engineReady}
+            label={c.label}
+            color="var(--tool-distribute)"
+            onClick={() => void openCustomChannel(c)}
+          />
+        ))}
+        {customChannels.length === 0 && (
+          <div
+            onClick={() => setAddOpen(true)}
+            style={{
+              border: '2px dashed var(--border)',
+              borderRadius: 16,
+              padding: '13px 16px',
+              font: "600 12.5px/1.5 'Quicksand'",
+              color: 'var(--ink-fainter-2)',
+              cursor: 'pointer',
+              gridColumn: 'span 2'
+            }}
+          >
+            Anything else the engine can post to — Telegram, Slack, Pinterest and hundreds more — can be added here.
+          </div>
+        )}
+      </div>
+
       <div style={{ marginBottom: 14 }}>
         <div style={{ font: "700 18px 'Kalam'", color: 'var(--ink)' }}>Send history</div>
       </div>
@@ -314,7 +421,11 @@ export default function Distribute(): React.JSX.Element {
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={tag}>{PLATFORM_SETUP_GUIDES[job.channel]?.label ?? job.channel}</span>
+                <span style={tag}>
+                  {PLATFORM_SETUP_GUIDES[job.channel]?.label ??
+                    customChannels.find((c) => c.channel === job.channel)?.label ??
+                    job.channel}
+                </span>
                 <span style={{ font: "700 12.5px 'Quicksand'", color: job.status === 'failed' ? '#a34a3a' : 'var(--ink-muted)' }}>
                   {STATUS_LABEL[job.status] ?? job.status}
                 </span>
@@ -325,15 +436,24 @@ export default function Distribute(): React.JSX.Element {
         </div>
       )}
 
-      {activeChannel && (
+      {/* A user-added channel waits for its piece's auth schema before the form can render;
+          a built-in one already has its guide compiled in. */}
+      {activeChannel && (!activeCustom || customGuide) && (
         <ChannelConnectModal
           channel={activeChannel}
           connected={connectedByChannel.has(activeChannel)}
           engineReady={engineReady !== false}
-          onClose={() => setActiveChannel(null)}
+          guide={customGuide ?? undefined}
+          onRemove={activeCustom ? () => void handleRemoveCustom(activeCustom.channel) : undefined}
+          onClose={() => {
+            setActiveChannel(null)
+            setCustomGuide(null)
+          }}
           onChanged={refreshChannels}
         />
       )}
+
+      {addOpen && <AddChannelModal onClose={() => setAddOpen(false)} onAdded={refreshChannels} />}
     </div>
   )
 }

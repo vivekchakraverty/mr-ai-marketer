@@ -11,6 +11,9 @@ router = APIRouter(prefix="/email-writer", tags=["email-writer"])
 
 class GenerateEmailRequest(BaseModel):
     instruction: str
+    # Only used on a fresh install, to fetch the CTR model from Hugging Face the first time.
+    # The Space call itself is authenticated inside services/email_writer.
+    hfToken: str = ""
 
 
 class GenerateEmailResponse(BaseModel):
@@ -31,7 +34,9 @@ def generate_email(body: GenerateEmailRequest) -> GenerateEmailResponse:
     try:
         # Space call + CTR now live in services/email_writer so the Lead Gen Agent can reuse
         # them; the Library save stays here (specific to this tool).
-        result = email_writer_service.generate_marketing_email(instruction)
+        result = email_writer_service.generate_marketing_email(
+            instruction, hf_token=body.hfToken.strip() or None
+        )
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err)) from None
     except Exception as err:  # noqa: BLE001 — surface Space/network failures as a clean API error

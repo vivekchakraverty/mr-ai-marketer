@@ -6,8 +6,10 @@ import { dockerCommand, toWslPath, startWslKeepAlive, stopWslKeepAlive } from '.
 
 export const LEADGEN_REACHER_PORT = 8082
 export const LEADGEN_SEARXNG_PORT = 8083
-export const LEADGEN_REACHER_URL = `http://localhost:${LEADGEN_REACHER_PORT}`
-export const LEADGEN_SEARXNG_URL = `http://localhost:${LEADGEN_SEARXNG_PORT}`
+// 127.0.0.1 rather than localhost, for the same reason as activepieces.ts: these containers
+// publish on IPv4 loopback and Node prefers ::1 for `localhost` on Windows.
+export const LEADGEN_REACHER_URL = `http://127.0.0.1:${LEADGEN_REACHER_PORT}`
+export const LEADGEN_SEARXNG_URL = `http://127.0.0.1:${LEADGEN_SEARXNG_PORT}`
 
 function resourcesDir(): string {
   // Dev: resources/leadgen next to the repo root. Packaged: bundled as an extraResource

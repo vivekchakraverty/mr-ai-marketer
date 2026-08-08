@@ -2,7 +2,9 @@ import { useRef, useState } from 'react'
 import { backendUrl, generateDocu, type GenerateDocuResponse } from '../api/client'
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
+import ScreenBackdrop from '../components/ScreenBackdrop'
 import { label, paperCard, primaryButton, secondaryButtonSmall, textInput } from '../styles/styleKit'
+import SaveButton from '../components/SaveButton'
 
 export default function DocuMaker(): React.JSX.Element {
   const fields = useAppStore((s) => s.fields.docu)
@@ -37,6 +39,7 @@ export default function DocuMaker(): React.JSX.Element {
 
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '22px 34px 60px' }}>
+      <ScreenBackdrop video="docu" />
       <div style={{ font: "700 13px 'Quicksand'", color: 'var(--accent)', cursor: 'pointer', marginBottom: 14 }} onClick={goCreate}>
         ← Create
       </div>
@@ -108,7 +111,14 @@ export default function DocuMaker(): React.JSX.Element {
         <div style={{ flex: 1 }}>
           {result && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, alignItems: 'center' }}>
+                <SaveButton
+                  libraryId={result.libraryId}
+                  tool="Docs"
+                  title={result.title}
+                  subtitle="Documentation"
+                  content={result.intro}
+                />
                 <div
                   style={result.docxPath ? secondaryButtonSmall : { ...secondaryButtonSmall, opacity: 0.5, cursor: 'default' }}
                   onClick={() => result.docxPath && window.api.openFile(result.docxPath)}

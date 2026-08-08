@@ -1,0 +1,5 @@
+# The monitor needs almost nothing: HTTP and (optionally) yt-dlp for the search-tier check.
+requests>=2.31
+# Optional — without it the "Video search (yt-dlp)" check reports as skipped rather than
+# failing, so the monitor still runs on a bare Python.
+yt-dlp>=2024.1.1

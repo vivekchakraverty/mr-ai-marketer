@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { analyzeGuestPost, searchGuestPosts, type AnalyzeGuestResponse, type GuestSite } from '../api/client'
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
+import ScreenBackdrop from '../components/ScreenBackdrop'
 import { label, primaryButtonSmall, secondaryButtonSmall, select, textInput } from '../styles/styleKit'
+import SaveButton from '../components/SaveButton'
 
 const TIER_LABELS: Record<string, string> = {
   rss: 'RSS feed',
@@ -29,6 +31,8 @@ export default function GuestPost(): React.JSX.Element {
   const goCreate = useAppStore((s) => s.goCreate)
 
   const [sites, setSites] = useState<GuestSite[] | null>(null)
+  // The search saves itself to the Library; hold the id so the Save control can say so.
+  const [libraryId, setLibraryId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [analyzed, setAnalyzed] = useState<{ domain: string; data: AnalyzeGuestResponse } | null>(null)
@@ -42,6 +46,7 @@ export default function GuestPost(): React.JSX.Element {
     try {
       const res = await searchGuestPosts(fields)
       setSites(res.sites)
+      setLibraryId(res.libraryId)
       void refreshLibrary()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -65,6 +70,7 @@ export default function GuestPost(): React.JSX.Element {
 
   return (
     <div style={{ maxWidth: 1120, margin: '0 auto', padding: '22px 34px 60px' }}>
+      <ScreenBackdrop video="guest" />
       <div style={{ font: "700 13px 'Quicksand'", color: 'var(--accent)', cursor: 'pointer', marginBottom: 14 }} onClick={goCreate}>
         ← Create
       </div>
@@ -134,8 +140,17 @@ export default function GuestPost(): React.JSX.Element {
 
       {sites && (
         <div style={{ marginTop: 24 }}>
-          <div style={{ font: "700 18px 'Kalam'", color: 'var(--ink)', marginBottom: 12 }}>
-            Sites for “{fields.topic}” · ranked by authority
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+            <div style={{ font: "700 18px 'Kalam'", color: 'var(--ink)' }}>
+              Sites for “{fields.topic}” · ranked by authority
+            </div>
+            <SaveButton
+              libraryId={libraryId}
+              tool="Guest"
+              title={`“${fields.topic}” guest-post targets`}
+              subtitle="Guest research"
+              content={sites.map((s) => `${s.domain} · PR ${s.page_rank} · ${s.guest_posts_url}`).join('\n')}
+            />
           </div>
           <div style={{ background: 'var(--surface)', border: '2.5px solid var(--border)', borderRadius: 20, boxShadow: 'var(--shadow-md)', overflow: 'hidden' }}>
             <div

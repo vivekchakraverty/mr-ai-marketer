@@ -12,14 +12,20 @@ from .. import config, db
 
 router = APIRouter(prefix="/blog-writer", tags=["blog-writer"])
 
-_SPACE_ID = "vivekchakraverty/BlogWriter"
 _client: Client | None = None
+_client_space: str = ""
 
 
 def _get_client() -> Client:
-    global _client
-    if _client is None:
-        _client = Client(_SPACE_ID)
+    """The Space is user-configured (config.BLOG_WRITER_SPACE) — there is no default.
+
+    Cached per Space id so changing the setting takes effect without a restart.
+    """
+    global _client, _client_space
+    space_id = config.require_space(config.BLOG_WRITER_SPACE, "BLOG_WRITER_SPACE", "Blog Writer")
+    if _client is None or _client_space != space_id:
+        _client = Client(space_id)
+        _client_space = space_id
     return _client
 
 

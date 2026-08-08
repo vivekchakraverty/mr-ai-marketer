@@ -1,7 +1,26 @@
 import type { DocuFields, GuestFields, LibraryItem, PlanFields, TutorialFields } from '../state/types'
 import type { BlogFields } from '../state/types'
+import type { Workbooks as TrackerWorkbooks } from '../components/tracker/formulas'
+import { reportError } from '../state/errors'
+
+export type { TrackerWorkbooks }
 
 export const backendUrl = window.api?.backendUrl ?? 'http://127.0.0.1:8756'
+
+/**
+ * Proof that a request came from this app.
+ *
+ * The backend binds to 127.0.0.1, which is not the same as being private: any web page the
+ * user has open can fetch it, and the backend has to keep a permissive CORS policy because
+ * the packaged renderer runs from file://. Without this header the browser would hand another
+ * site the response. Generated fresh per launch by the main process and delivered on argv.
+ */
+const apiToken = window.api?.apiToken ?? ''
+
+/** Request headers with the token attached. Pass `extra` for Content-Type and friends. */
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  return apiToken ? { ...extra, 'X-MRAIM-Token': apiToken } : { ...extra }
+}
 
 /**
  * Turn a failed response into an Error the UI can show as-is.
@@ -14,24 +33,34 @@ export const backendUrl = window.api?.backendUrl ?? 'http://127.0.0.1:8756'
  */
 async function errorFrom(res: Response, path: string): Promise<Error> {
   const text = await res.text().catch(() => '')
+  let message = `${path} failed: HTTP ${res.status}${text ? ` ${text}` : ''}`
   try {
     const detail = JSON.parse(text)?.detail
-    if (typeof detail === 'string' && detail.trim()) return new Error(detail)
-    // Pydantic validation errors arrive as a list of {loc, msg, …}.
-    if (Array.isArray(detail) && detail.length) {
+    if (typeof detail === 'string' && detail.trim()) {
+      message = detail
+    } else if (Array.isArray(detail) && detail.length) {
+      // Pydantic validation errors arrive as a list of {loc, msg, …}.
       const msg = detail.map((d) => d?.msg).filter(Boolean).join('; ')
-      if (msg) return new Error(msg)
+      if (msg) message = msg
     }
   } catch {
-    // Not JSON — fall through to the envelope, which is all we have.
+    // Not JSON — keep the envelope, which is all we have.
   }
-  return new Error(`${path} failed: HTTP ${res.status}${text ? ` ${text}` : ''}`)
+  // Raise it globally as well as returning it. Callers still catch this and render their own
+  // inline message; the popup is what makes an error copyable, and what catches the ones a
+  // caller forgets to handle.
+  reportError({
+    message,
+    source: `${res.status} ${path}`,
+    detail: text && text !== message ? text : ''
+  })
+  return new Error(message)
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${backendUrl}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body)
   })
   if (!res.ok) throw await errorFrom(res, path)
@@ -39,13 +68,23 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${backendUrl}${path}`)
+  const res = await fetch(`${backendUrl}${path}`, { headers: authHeaders() })
+  if (!res.ok) throw await errorFrom(res, path)
+  return res.json() as Promise<T>
+}
+
+async function putJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${backendUrl}${path}`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(body)
+  })
   if (!res.ok) throw await errorFrom(res, path)
   return res.json() as Promise<T>
 }
 
 async function deleteJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${backendUrl}${path}`, { method: 'DELETE' })
+  const res = await fetch(`${backendUrl}${path}`, { method: 'DELETE', headers: authHeaders() })
   if (!res.ok) throw await errorFrom(res, path)
   return res.json() as Promise<T>
 }
@@ -53,7 +92,7 @@ async function deleteJson<T>(path: string): Promise<T> {
 async function patchJson<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${backendUrl}${path}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body)
   })
   if (!res.ok) throw await errorFrom(res, path)
@@ -88,6 +127,68 @@ export interface LibraryListResponse {
 
 export function fetchLibrary(): Promise<LibraryListResponse> {
   return getJson('/library')
+}
+
+/**
+ * Save generated content that the tool didn't already save for you.
+ *
+ * Most tools write to the Library as part of generating; this is the explicit path for the
+ * ones that don't, and for a user who wants to keep something the app didn't decide to keep.
+ */
+export function saveToLibrary(input: {
+  tool: string
+  title: string
+  subtitle?: string
+  content?: string
+  outputPath?: string
+}): Promise<{ libraryId: string }> {
+  return postJson('/library', input)
+}
+
+export function deleteLibraryItem(id: string): Promise<{ deleted: string }> {
+  return deleteJson(`/library/${id}`)
+}
+
+// --- Backups ---------------------------------------------------------------
+
+export interface BackupEntry {
+  id: string
+  createdAt: string
+  databases: { name: string; bytes: number }[]
+  bytes: number
+  path: string
+}
+
+export function listBackups(): Promise<{ backups: BackupEntry[]; directory: string }> {
+  return getJson('/backup')
+}
+
+export function createBackup(label = ''): Promise<{ backup: BackupEntry }> {
+  return postJson('/backup', { label })
+}
+
+export function deleteBackup(id: string): Promise<{ deleted: string }> {
+  return deleteJson(`/backup/${encodeURIComponent(id)}`)
+}
+
+export function restoreBackup(id: string): Promise<{ restored: string[]; safetyBackup: string; detail: string }> {
+  return postJson(`/backup/${encodeURIComponent(id)}/restore`, {})
+}
+
+// --- Tracker export --------------------------------------------------------
+
+export interface ExportSheet {
+  name: string
+  columns: string[]
+  rows: string[][]
+}
+
+export function exportTracker(
+  format: 'csv' | 'xlsx',
+  workbook: string,
+  sheets: ExportSheet[]
+): Promise<{ path: string; files: string[]; format: string }> {
+  return postJson('/tracker/export', { format, workbook, sheets })
 }
 
 export interface GeneratePlanResponse {
@@ -144,8 +245,12 @@ export interface GenerateEmailResponse {
   ctrBucket: 'below average' | 'typical' | 'above average' | 'strong'
 }
 
-export function generateEmail(instruction: string): Promise<GenerateEmailResponse> {
-  return postJson('/email-writer/generate', { instruction })
+export async function generateEmail(instruction: string): Promise<GenerateEmailResponse> {
+  // The token is only used the first time on a machine, to fetch the CTR model from Hugging
+  // Face — it isn't bundled with the app any more. Sent every call because the backend is
+  // the only side that knows whether the model is already on disk.
+  const settings = await window.api.settings.getAll()
+  return postJson('/email-writer/generate', { instruction, hfToken: settings.hfToken })
 }
 
 export interface GuestSite {
@@ -197,6 +302,8 @@ export interface GenerateTutorialResponse {
   docxPath: string | null
   docxUrl: string | null
   libraryId: string
+  /** Set when comment sentiment fell below the floor, so the video was never downloaded. */
+  sentimentNote?: string | null
 }
 
 export async function generateTutorial(fields: TutorialFields): Promise<GenerateTutorialResponse> {
@@ -257,11 +364,90 @@ export interface ChannelStatus {
   connected: boolean
 }
 
+/** A channel the user built from the piece catalogue, rather than one of the ten bundled ones. */
+export interface CustomChannelStatus extends ChannelStatus {
+  label: string
+  authType: string | null
+  pieceName: string
+  custom: true
+}
+
 export interface DistributionChannelsResponse {
   ready: boolean
   detail?: string
   channels: ChannelStatus[]
   communityChannels: ChannelStatus[]
+  customChannels?: CustomChannelStatus[]
+}
+
+export interface CataloguePiece {
+  name: string
+  displayName: string
+  description: string
+  logoUrl: string | null
+  version: string
+  authType: string | null
+  actionCount: number
+  categories: string[]
+  alreadyAdded: boolean
+  builtIn: boolean
+}
+
+/** One prop of a piece's auth block or action, as the piece itself declares it. */
+export interface PieceProp {
+  key: string
+  label: string
+  description: string
+  type: string
+  required: boolean
+  defaultValue?: unknown
+  options: { label: string; value: string }[]
+  /** Which send-payload field this prop most likely wants — a pre-selection, not a decision. */
+  suggestedBinding?: string | null
+}
+
+export interface PieceAction {
+  name: string
+  label: string
+  description: string
+  props: PieceProp[]
+}
+
+export interface CataloguePieceDetail {
+  name: string
+  displayName: string
+  version: string
+  logoUrl: string | null
+  auth: { type: string | null; label: string; description: string; props: PieceProp[] }
+  actions: PieceAction[]
+  payloadFields: string[]
+}
+
+/** Per prop: bind it to a send-payload field, or pin it to a literal typed once at setup. */
+export type InputChoice = { field: string } | { value: string }
+
+export function fetchDistributionCatalogue(q = '', limit = 60): Promise<{ total: number; pieces: CataloguePiece[] }> {
+  return getJson(`/distribution/catalogue?q=${encodeURIComponent(q)}&limit=${limit}`)
+}
+
+export function fetchCataloguePiece(pieceName: string): Promise<CataloguePieceDetail> {
+  return getJson(`/distribution/catalogue/${pieceName}`)
+}
+
+export function createCustomChannel(body: {
+  channel: string
+  label: string
+  pieceName: string
+  pieceVersion: string
+  actionName: string
+  authType: string
+  inputMap: Record<string, InputChoice>
+}): Promise<{ channel: string; label: string }> {
+  return postJson('/distribution/custom-channels', body)
+}
+
+export function deleteCustomChannel(channel: string): Promise<{ deleted: boolean }> {
+  return deleteJson(`/distribution/custom-channels/${channel}`)
 }
 
 export function fetchDistributionChannels(): Promise<DistributionChannelsResponse> {
@@ -310,7 +496,12 @@ export async function generateDocu(fields: DocuFields, video: File): Promise<Gen
   form.append('product', fields.product)
   form.append('hfToken', hfToken)
 
-  const res = await fetch(`${backendUrl}/docu-maker/generate`, { method: 'POST', body: form })
+  // No Content-Type: the browser has to set it so the multipart boundary is right.
+  const res = await fetch(`${backendUrl}/docu-maker/generate`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: form
+  })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`/docu-maker/generate failed: HTTP ${res.status} ${text}`)
@@ -385,6 +576,13 @@ export interface SocialGenerateResponse {
   source: SocialSource | null
 }
 
+export interface SocialGeneratedImage {
+  url: string
+  promptUsed: string
+  width: number
+  height: number
+}
+
 export function getSocialStatus(): Promise<SocialStatus> {
   return getJson('/social-post/status')
 }
@@ -418,12 +616,75 @@ export function generateSocialPost(
   return postJson('/social-post/generate', { userInput, niche, platform, sourceUrl })
 }
 
+export async function generateSocialPostImage(
+  postText: string,
+  niche: string,
+  platform: string
+): Promise<SocialGeneratedImage> {
+  const settings = await window.api.settings.getAll()
+  return postJson('/social-post/images', {
+    postText,
+    niche,
+    platform,
+    hfToken: settings.hfToken,
+    modalTokenId: settings.brandForge.modalTokenId,
+    modalTokenSecret: settings.brandForge.modalTokenSecret,
+    useModal: Boolean(settings.brandForge.modalProvisionedAt.trim())
+  })
+}
+
 export function markSocialPublished(
   generationId: number,
   postedUri: string,
   niche: string
 ): Promise<{ postedUri: string }> {
   return postJson('/social-post/published', { generationId, postedUri, niche })
+}
+
+// ---------------------------------------------------------------------------
+// Hashtag Suggester (app/routers/hashtags.py)
+//
+// Shared by both post composers. The Mastodon instance is read from Settings so
+// fediverse trend/usage data can be pulled from the server the user actually
+// posts to; the Bluesky/X/LinkedIn composer sends '' and the backend falls back
+// to a public instance (reported in trendInstance), used as a cross-network proxy.
+// ---------------------------------------------------------------------------
+
+export interface HashtagSuggestion {
+  tag: string
+  score: number
+  suitability: number
+  trend: 'hot' | 'rising' | 'steady' | 'cooling' | 'unknown'
+  reach: 'broad' | 'balanced' | 'niche' | 'unknown'
+  volume: number | null
+  accounts: number | null
+  bucket: 'proven' | 'trending' | 'onTopic'
+  sources: string[]
+}
+
+export interface HashtagSuggestResponse {
+  platform: string
+  niche: string
+  recommendedCount: number
+  trendInstance: string
+  suggestions: HashtagSuggestion[]
+  sourcesUsed: string[]
+  sourcesUnavailable: string[]
+  note: string
+}
+
+export async function suggestHashtags(
+  draft: string,
+  niche: string,
+  platform: string
+): Promise<HashtagSuggestResponse> {
+  const settings = await window.api.settings.getAll()
+  return postJson('/hashtags/suggest', {
+    draft,
+    niche,
+    platform,
+    mastodonInstance: settings.mastodonInstance ?? ''
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -598,6 +859,264 @@ export async function verifyMastodonToken(instance: string): Promise<{
   return postJson('/mastodon-post/verify', { instance, accessToken: await mastodonToken() })
 }
 
+// ---------------------------------------------------------------------------
+// Engage, Mastodon side (app/routers/mastodon_engage.py)
+//
+// Every call is a POST, including the reads, because the access token travels in
+// the body — the backend is localhost-only but a credential in a query string
+// still lands in access logs. Instance and token are read from Settings in here
+// rather than threaded through the components, same as the Post Creator above.
+// ---------------------------------------------------------------------------
+
+export type MastodonFeedName =
+  | 'home'
+  | 'notifications'
+  | 'local'
+  | 'public'
+  | 'tag'
+  | 'bookmarks'
+  | 'favourites'
+
+export type MastodonStatusAction =
+  | 'favourite'
+  | 'unfavourite'
+  | 'reblog'
+  | 'unreblog'
+  | 'bookmark'
+  | 'unbookmark'
+  | 'mute'
+  | 'unmute'
+  | 'pin'
+  | 'unpin'
+
+export type MastodonAccountAction = 'follow' | 'unfollow' | 'mute' | 'unmute' | 'block' | 'unblock'
+
+export interface MastodonAccount {
+  id: string
+  acct: string
+  displayName: string
+  url: string
+  avatar: string
+  bot: boolean
+  followers: number
+  note: string
+}
+
+export interface MastodonRelationship {
+  accountId: string
+  following: boolean
+  followedBy: boolean
+  requested: boolean
+  muting: boolean
+  blocking: boolean
+  blockedBy: boolean
+}
+
+export interface MastodonMedia {
+  type: string
+  url: string
+  previewUrl: string
+  description: string
+}
+
+export interface MastodonFeedPost {
+  id: string
+  uri: string
+  url: string
+  createdAt: string
+  text: string
+  spoilerText: string
+  sensitive: boolean
+  visibility: string
+  language: string
+  account: MastodonAccount
+  media: MastodonMedia[]
+  hashtags: string[]
+  favourites: number
+  reblogs: number
+  replies: number
+  favourited: boolean
+  reblogged: boolean
+  bookmarked: boolean
+  muted: boolean
+  pinned: boolean
+  inReplyToId: string | null
+  isOwn: boolean
+  boostedBy: string | null
+  embedUrl: string
+  relationship: MastodonRelationship | null
+  reason: string | null
+  notificationId: string | null
+  isRead: boolean | null
+}
+
+export interface MastodonFeedResponse {
+  feed: string
+  posts: MastodonFeedPost[]
+  nextMaxId: string
+  tagFollowing: boolean | null
+  lastReadId: string
+}
+
+export interface MastodonSession {
+  instance: string
+  configured: boolean
+  hasToken: boolean
+  reachable: boolean
+  detail: string
+  title: string
+  version: string
+  maxCharacters: number
+  maxMedia: number
+  visibilities: string[]
+  rulesAccepted: boolean
+  rulesChanged: boolean
+  account: MastodonAccount | null
+  embedUrl: string
+}
+
+export interface MastodonTermRule {
+  id: string
+  text: string
+  hint: string
+}
+
+export interface MastodonTermTopic {
+  topic: string
+  rules: MastodonTermRule[]
+}
+
+export interface MastodonTermLimit {
+  label: string
+  value: string
+}
+
+export interface MastodonTerms {
+  instance: string
+  title: string
+  version: string
+  description: string
+  thumbnail: string
+  contactEmail: string
+  aboutUrl: string
+  policyHash: string
+  accepted: boolean
+  acceptedAt: string | null
+  changedSinceAccepted: boolean
+  ruleCount: number
+  topics: MastodonTermTopic[]
+  limits: MastodonTermLimit[]
+  requires: string[]
+  extendedDescription: string
+}
+
+export interface MastodonActionResult {
+  ok: boolean
+  post: MastodonFeedPost | null
+  relationship: MastodonRelationship | null
+  tagFollowing: boolean | null
+}
+
+export interface MastodonThread {
+  ancestors: MastodonFeedPost[]
+  status: MastodonFeedPost
+  descendants: MastodonFeedPost[]
+}
+
+export interface MastodonSearchResult {
+  accounts: MastodonAccount[]
+  statuses: MastodonFeedPost[]
+  hashtags: string[]
+}
+
+/** Instance + token together — every Engage call needs both halves. */
+async function mastodonAuth(): Promise<{ instance: string; accessToken: string }> {
+  const settings = await window.api.settings.getAll()
+  return {
+    instance: settings.mastodonInstance ?? '',
+    accessToken: settings.mastodonAccessToken ?? ''
+  }
+}
+
+export async function getMastodonSession(): Promise<MastodonSession> {
+  return postJson('/mastodon-engage/session', await mastodonAuth())
+}
+
+export async function getMastodonTerms(): Promise<MastodonTerms> {
+  return postJson('/mastodon-engage/terms', await mastodonAuth())
+}
+
+export async function getMastodonFeed(
+  feed: MastodonFeedName,
+  opts: { tag?: string; limit?: number; maxId?: string } = {}
+): Promise<MastodonFeedResponse> {
+  const body = { ...(await mastodonAuth()), feed, tag: opts.tag ?? '', limit: opts.limit ?? 30, maxId: opts.maxId ?? '' }
+  return postJson(feed === 'notifications' ? '/mastodon-engage/notifications' : '/mastodon-engage/timeline', body)
+}
+
+export async function getMastodonThread(statusId: string): Promise<MastodonThread> {
+  return postJson('/mastodon-engage/thread', { ...(await mastodonAuth()), statusId })
+}
+
+export async function composeMastodonStatus(post: {
+  text: string
+  visibility: string
+  spoilerText?: string
+  language?: string
+  inReplyToId?: string
+  /** Stable across retries of the same draft so a double-submit can't post twice. */
+  idempotencyKey: string
+}): Promise<MastodonActionResult> {
+  return postJson('/mastodon-engage/compose', {
+    ...(await mastodonAuth()),
+    text: post.text,
+    visibility: post.visibility,
+    spoilerText: post.spoilerText ?? '',
+    language: post.language ?? '',
+    inReplyToId: post.inReplyToId ?? '',
+    idempotencyKey: post.idempotencyKey
+  })
+}
+
+export async function mastodonStatusAction(
+  statusId: string,
+  action: MastodonStatusAction,
+  visibility = ''
+): Promise<MastodonActionResult> {
+  return postJson('/mastodon-engage/status-action', {
+    ...(await mastodonAuth()),
+    statusId,
+    action,
+    visibility
+  })
+}
+
+export async function mastodonAccountAction(
+  accountId: string,
+  action: MastodonAccountAction
+): Promise<MastodonActionResult> {
+  return postJson('/mastodon-engage/account-action', { ...(await mastodonAuth()), accountId, action })
+}
+
+export async function mastodonTagAction(
+  tag: string,
+  action: 'follow' | 'unfollow'
+): Promise<MastodonActionResult> {
+  return postJson('/mastodon-engage/tag-action', { ...(await mastodonAuth()), tag, action })
+}
+
+export async function deleteMastodonStatus(statusId: string): Promise<MastodonActionResult> {
+  return postJson('/mastodon-engage/delete-status', { ...(await mastodonAuth()), statusId })
+}
+
+export async function markMastodonNotificationsRead(lastReadId: string): Promise<MastodonActionResult> {
+  return postJson('/mastodon-engage/notifications/read', { ...(await mastodonAuth()), lastReadId })
+}
+
+export async function searchMastodon(query: string, limit = 10): Promise<MastodonSearchResult> {
+  return postJson('/mastodon-engage/search', { ...(await mastodonAuth()), query, limit })
+}
+
 // --- settings ---------------------------------------------------------------
 
 export interface EnvSetting {
@@ -618,28 +1137,11 @@ export function pushSocialPostEnv(values: Record<string, string>): Promise<{ cha
   return postJson('/settings/social-post/env', { values })
 }
 
-export function verifySocialPost(target: 'supabase' | 'bluesky' | 'llm' | 'hf'): Promise<{
+export function verifySocialPost(target: 'bluesky' | 'llm' | 'hf'): Promise<{
   valid: boolean
   detail: string
 }> {
   return postJson(`/settings/social-post/verify/${target}`, {})
-}
-
-export interface TopicSuggestion {
-  topic: string
-  whyNow: string
-  sources: string[]
-}
-
-export interface TopicsResponse {
-  suggestions: TopicSuggestion[]
-  corpusPosts: number
-  signals: string[]
-  note: string
-}
-
-export function suggestSocialTopics(niche: string, n = 5): Promise<TopicsResponse> {
-  return getJson(`/social-post/topics?niche=${encodeURIComponent(niche)}&n=${n}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -1105,8 +1607,39 @@ export async function generateBrandSection(intake: BrandIntakeInput, sectionName
     intake,
     sectionName,
     spaceId: settings.brandForge.spaceId,
-    hfToken: settings.hfToken
+    hfToken: settings.hfToken,
+    // Sent every time; the backend only switches to the user's own GPU when
+    // both halves are present, so an empty pair keeps the hosted Space path.
+    modalTokenId: settings.brandForge.modalTokenId,
+    modalTokenSecret: settings.brandForge.modalTokenSecret
   })
+}
+
+export interface ModalProvisionStatus {
+  status: 'idle' | 'running' | 'ready' | 'error'
+  message: string
+  elapsedSeconds: number
+  hint: string
+  appPageUrl: string
+  logsUrl: string
+}
+
+/** Deploy the GPU backend into the user's own Modal workspace. Returns as soon
+ * as the deploy starts — poll getModalStatus() for progress.
+ *
+ * Takes the credentials explicitly rather than reading the saved settings, so
+ * setup works on what the user just typed without a Save first — same rule the
+ * "Test connection" buttons follow. */
+export function provisionModalBackend(
+  modalTokenId: string,
+  modalTokenSecret: string,
+  hfToken: string
+): Promise<ModalProvisionStatus> {
+  return postJson('/brand-forge/modal/provision', { modalTokenId, modalTokenSecret, hfToken })
+}
+
+export function getModalStatus(): Promise<ModalProvisionStatus> {
+  return getJson('/brand-forge/modal/status')
 }
 
 export function assembleBrandDocument(
@@ -1121,7 +1654,10 @@ export async function generateBrandImages(intake: BrandIntakeInput, visualBrief:
   return postJson('/brand-forge/images', {
     intake,
     visualBrief,
-    hfToken: settings.hfToken
+    hfToken: settings.hfToken,
+    modalTokenId: settings.brandForge.modalTokenId,
+    modalTokenSecret: settings.brandForge.modalTokenSecret,
+    useModal: Boolean(settings.brandForge.modalProvisionedAt.trim())
   })
 }
 
@@ -1481,4 +2017,248 @@ export function searchInfluencers(query: InfluencerQuery): Promise<InfluencerSea
 
 export function exportInfluencers(query: InfluencerQuery): Promise<InfluencerExportResponse> {
   return postJson('/influencer-db/export', query)
+}
+
+// --- Tracker Studio (Manage) ----------------------------------------------
+// Only input cells cross the wire; every derived column is recomputed in the
+// renderer by components/tracker/formulas.ts.
+
+export function getTrackerWorkbooks(): Promise<TrackerWorkbooks> {
+  return getJson('/tracker/workbooks')
+}
+
+export function saveTrackerWorkbooks(workbooks: TrackerWorkbooks): Promise<TrackerWorkbooks> {
+  return putJson('/tracker/workbooks', workbooks)
+}
+
+export function resetTrackerWorkbooks(): Promise<TrackerWorkbooks> {
+  return postJson('/tracker/reset', {})
+}
+
+// ---------------------------------------------------------------------------
+// Community — a subscriber-only Telegram group
+// ---------------------------------------------------------------------------
+
+export interface CommunityTier {
+  id: string
+  name: string
+  description: string
+  stars: number
+  period_days: number
+  active: number
+}
+
+export interface CommunityMember {
+  telegram_id: string
+  username: string
+  first_name: string
+  tier_id: string | null
+  status: string
+  expires_at: string | null
+  in_group: number
+  joined_at: string | null
+}
+
+export interface CommunityStatus {
+  botConnected: boolean
+  botUsername: string
+  chatId: string
+  chatTitle: string
+  inviteLink: string
+  gatedChatId: string
+  gatedChatTitle: string
+  gatedInviteLink: string
+  groupLinked: boolean
+  gatedLinked: boolean
+  tiers: CommunityTier[]
+  revenue: { totalStars: number; payments: number; activeMembers: number }
+  lastError: string
+}
+
+export function fetchCommunityStatus(): Promise<CommunityStatus> {
+  return getJson('/community/status')
+}
+
+export function connectCommunityBot(token: string): Promise<{ botUsername: string; name: string }> {
+  return postJson('/community/bot', { token })
+}
+
+export function disconnectCommunityBot(): Promise<{ botConnected: boolean }> {
+  return deleteJson('/community/bot')
+}
+
+export function createCommunityInvite(): Promise<{ inviteLink: string }> {
+  return postJson('/community/invite-link', {})
+}
+
+export function saveCommunityTier(tier: {
+  id?: string
+  name: string
+  description?: string
+  stars: number
+  periodDays?: number
+  active?: boolean
+}): Promise<{ tier: CommunityTier }> {
+  return postJson('/community/tiers', tier)
+}
+
+export function deleteCommunityTier(id: string): Promise<{ deleted: boolean }> {
+  return deleteJson(`/community/tiers/${id}`)
+}
+
+export function fetchCommunityMembers(): Promise<{ members: CommunityMember[] }> {
+  return getJson('/community/members')
+}
+
+export function sweepCommunity(): Promise<{ removed: number }> {
+  return postJson('/community/sweep', {})
+}
+
+export function broadcastCommunity(text: string, gated: boolean): Promise<{ sentTo: string }> {
+  return postJson('/community/broadcast', { text, gated })
+}
+
+export function createGatedInvite(): Promise<{ gatedInviteLink: string; stars: number }> {
+  return postJson('/community/gated-invite', {})
+}
+
+// ---------------------------------------------------------------------------
+// Community — signed in as yourself, not as the bot
+//
+// A bot cannot create a group or add anyone to one, so those run over Telegram's client
+// protocol as the account holder. The api_id/api_hash/session travel in the body of every
+// call, the same way the Hugging Face token does: they live in Electron's encrypted store
+// and the backend keeps them in memory only.
+// ---------------------------------------------------------------------------
+
+export interface TelegramChat {
+  id: string
+  title: string
+  username: string
+  kind: 'group' | 'channel'
+  megagroup: boolean
+  creator: boolean
+  admin: boolean
+  participants: number
+  botAdded?: boolean
+  botDetail?: string
+}
+
+export interface TelegramAccountStatus {
+  connected: boolean
+  userId: string
+  username: string
+  firstName: string
+  phone: string
+  detail?: string
+}
+
+export interface TelegramChatMember {
+  id: string
+  username: string
+  name: string
+  bot: boolean
+}
+
+export interface AddMemberResult {
+  handle: string
+  ok: boolean
+  detail: string
+}
+
+/** The credentials every account call carries. Throws rather than sending a half-set. */
+async function telegramCreds(requireSession = true): Promise<{ apiId: number; apiHash: string; session: string }> {
+  const { telegram } = await window.api.settings.getAll()
+  const apiId = Number(telegram.apiId)
+  if (!apiId || !telegram.apiHash) throw new Error('Add your Telegram api_id and api_hash first.')
+  if (requireSession && !telegram.session) throw new Error('Sign in to Telegram first.')
+  return { apiId, apiHash: telegram.apiHash, session: telegram.session }
+}
+
+export async function telegramSendCode(phone: string): Promise<{ sentTo: string }> {
+  const creds = await telegramCreds(false)
+  return postJson('/community/account/send-code', { ...creds, phone })
+}
+
+/**
+ * Finish the login.
+ *
+ * A 409 means the account has two-step verification and the password is still needed — the
+ * code itself was fine. Surfaced as a flag rather than an error so the UI can reveal the
+ * password field instead of showing the sign-in as failed.
+ */
+export async function telegramSignIn(
+  code: string,
+  password = ''
+): Promise<{ needsPassword: boolean; session?: string; username?: string; firstName?: string; userId?: string }> {
+  const res = await fetch(`${backendUrl}/community/account/sign-in`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ code, password })
+  })
+  if (res.status === 409) return { needsPassword: true }
+  if (!res.ok) throw await errorFrom(res, '/community/account/sign-in')
+  return { needsPassword: false, ...(await res.json()) }
+}
+
+export async function telegramAccountStatus(): Promise<TelegramAccountStatus> {
+  const { telegram } = await window.api.settings.getAll()
+  if (!telegram.session || !telegram.apiId) {
+    return { connected: false, userId: '', username: '', firstName: '', phone: '' }
+  }
+  return postJson('/community/account/status', {
+    apiId: Number(telegram.apiId),
+    apiHash: telegram.apiHash,
+    session: telegram.session
+  })
+}
+
+export async function telegramLogOut(): Promise<{ connected: boolean }> {
+  const creds = await telegramCreds()
+  return postJson('/community/account/logout', creds)
+}
+
+export async function telegramChats(): Promise<{ chats: TelegramChat[] }> {
+  const creds = await telegramCreds()
+  return postJson('/community/account/chats', creds)
+}
+
+export async function telegramCreateChat(input: {
+  title: string
+  about?: string
+  kind?: 'group' | 'channel'
+  addBot?: boolean
+}): Promise<{ chat: TelegramChat }> {
+  const creds = await telegramCreds()
+  return postJson('/community/account/chats/create', { ...creds, ...input })
+}
+
+export async function telegramChatMembers(chatId: string): Promise<{ members: TelegramChatMember[] }> {
+  const creds = await telegramCreds()
+  return postJson(`/community/account/chats/${encodeURIComponent(chatId)}/members`, creds)
+}
+
+export async function telegramAddMembers(chatId: string, handles: string[]): Promise<{ results: AddMemberResult[] }> {
+  const creds = await telegramCreds()
+  return postJson(`/community/account/chats/${encodeURIComponent(chatId)}/members/add`, { ...creds, handles })
+}
+
+export async function telegramPost(chatId: string, text: string): Promise<{ messageId: string }> {
+  const creds = await telegramCreds()
+  return postJson(`/community/account/chats/${encodeURIComponent(chatId)}/post`, { ...creds, text })
+}
+
+export async function telegramChatInvite(chatId: string): Promise<{ inviteLink: string }> {
+  const creds = await telegramCreds()
+  return postJson(`/community/account/chats/${encodeURIComponent(chatId)}/invite`, creds)
+}
+
+export async function telegramAddBot(chatId: string): Promise<{ chat: TelegramChat }> {
+  const creds = await telegramCreds()
+  return postJson(`/community/account/chats/${encodeURIComponent(chatId)}/add-bot`, creds)
+}
+
+export async function telegramLinkChat(chatId: string, role: 'open' | 'paid', title: string): Promise<{ linked: string }> {
+  const creds = await telegramCreds()
+  return postJson(`/community/account/chats/${encodeURIComponent(chatId)}/link`, { ...creds, role, title })
 }

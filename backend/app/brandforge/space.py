@@ -10,12 +10,12 @@ import json
 
 from gradio_client import Client
 
+from .. import config
 from .client import BrandForgeError
 
-# The hosted BrandForge Space (proxies to the Modal GPU backend). Used out of the
-# box so Brand Studio works with no setup; the Settings "Space ID" field overrides
-# it only when a user wants to point at their own Space.
-DEFAULT_SPACE_ID = "vivekchakraverty/brandforge-qwen3-small"
+# No default. Brand Studio runs on the Space *you* deploy — set it in Settings, or via
+# the BRANDFORGE_SPACE environment variable.
+DEFAULT_SPACE_ID = config.BRANDFORGE_SPACE
 
 # Cache one client per (space_id, token) — building a Client fetches the Space
 # config over the network, which also wakes a sleeping free Space.

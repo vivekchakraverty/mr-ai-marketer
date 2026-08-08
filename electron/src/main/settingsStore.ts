@@ -12,6 +12,14 @@ export interface GoogleAdsSettings {
 
 export interface BrandForgeSettings {
   spaceId: string
+  // Bring-your-own Modal: Brand Studio generation runs on the user's own GPU
+  // instead of the hosted Space. Both halves of the API token are needed before
+  // anything switches over; blank means the hosted default is untouched.
+  modalTokenId: string
+  modalTokenSecret: string
+  // ISO timestamp of the last successful deploy — drives the "already set up"
+  // state in Settings so we don't re-deploy on every visit.
+  modalProvisionedAt: string
 }
 
 // Topic Scout runs key-free by default. Everything here unlocks one extra source
@@ -27,6 +35,16 @@ export interface TopicScoutSettings {
   geo: string
 }
 
+// The Community section's account login. `apiId`/`apiHash` come from my.telegram.org and
+// identify the *app*; `session` is the login itself and is full access to the account — it
+// lives here, in the DPAPI-encrypted store, rather than in the backend's SQLite file.
+export interface TelegramSettings {
+  apiId: string
+  apiHash: string
+  session: string
+  username: string
+}
+
 export interface AppSettings {
   hfToken: string
   youtubeApiKey: string
@@ -38,6 +56,21 @@ export interface AppSettings {
   googleAds: GoogleAdsSettings
   brandForge: BrandForgeSettings
   topicScout: TopicScoutSettings
+  telegram: TelegramSettings
+}
+
+/**
+ * What a caller may pass to `setSettings`.
+ *
+ * `Partial<AppSettings>` isn't enough: it makes each *group* optional but still demands a
+ * whole group when one is given, so saving a single Telegram field would mean restating the
+ * other three. The nested groups merge key-by-key on write, so the type says so too.
+ */
+export type SettingsPatch = Partial<Omit<AppSettings, 'googleAds' | 'brandForge' | 'topicScout' | 'telegram'>> & {
+  googleAds?: Partial<GoogleAdsSettings>
+  brandForge?: Partial<BrandForgeSettings>
+  topicScout?: Partial<TopicScoutSettings>
+  telegram?: Partial<TelegramSettings>
 }
 
 const EMPTY_SETTINGS: AppSettings = {
@@ -46,7 +79,7 @@ const EMPTY_SETTINGS: AppSettings = {
   mastodonInstance: '',
   mastodonAccessToken: '',
   googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
-  brandForge: { spaceId: '' },
+  brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '' },
   topicScout: {
     contactEmail: '',
     githubToken: '',
@@ -55,7 +88,8 @@ const EMPTY_SETTINGS: AppSettings = {
     twitterAuthToken: '',
     twitterCt0: '',
     geo: 'US'
-  }
+  },
+  telegram: { apiId: '', apiHash: '', session: '', username: '' }
 }
 
 function configPath(): string {
@@ -68,6 +102,20 @@ function legacyConfigPath(): string {
   return join(app.getPath('userData'), 'config.json')
 }
 
+// A stored config predates any field added since it was written, so the nested
+// groups have to be merged key-by-key. A shallow spread would drop a whole group
+// back to `undefined` for existing installs the first time one gains a field.
+function withDefaults(parsed: Partial<AppSettings>): AppSettings {
+  return {
+    ...EMPTY_SETTINGS,
+    ...parsed,
+    googleAds: { ...EMPTY_SETTINGS.googleAds, ...(parsed.googleAds ?? {}) },
+    brandForge: { ...EMPTY_SETTINGS.brandForge, ...(parsed.brandForge ?? {}) },
+    topicScout: { ...EMPTY_SETTINGS.topicScout, ...(parsed.topicScout ?? {}) },
+    telegram: { ...EMPTY_SETTINGS.telegram, ...(parsed.telegram ?? {}) }
+  }
+}
+
 function readSettings(): AppSettings {
   const path = configPath()
   if (existsSync(path)) {
@@ -76,7 +124,7 @@ function readSettings(): AppSettings {
       const json = safeStorage.isEncryptionAvailable()
         ? safeStorage.decryptString(raw)
         : raw.toString('utf-8')
-      return { ...EMPTY_SETTINGS, ...JSON.parse(json) }
+      return withDefaults(JSON.parse(json))
     } catch (err) {
       console.error('[settings] failed to read/decrypt settings, resetting:', err)
       return { ...EMPTY_SETTINGS }
@@ -111,13 +159,17 @@ export function getSettings(): AppSettings {
   return readSettings()
 }
 
-export function setSettings(partial: Partial<AppSettings>): AppSettings {
+export function setSettings(partial: SettingsPatch): AppSettings {
   const current = readSettings()
+  // Nested groups merge key-by-key: a caller that saves one Telegram field must not blank
+  // the other three, which is what a plain `...partial` spread would do.
   const next: AppSettings = {
     ...current,
     ...partial,
     googleAds: { ...current.googleAds, ...(partial.googleAds ?? {}) },
-    brandForge: { ...current.brandForge, ...(partial.brandForge ?? {}) }
+    brandForge: { ...current.brandForge, ...(partial.brandForge ?? {}) },
+    topicScout: { ...current.topicScout, ...(partial.topicScout ?? {}) },
+    telegram: { ...current.telegram, ...(partial.telegram ?? {}) }
   }
   writeSettings(next)
   return next

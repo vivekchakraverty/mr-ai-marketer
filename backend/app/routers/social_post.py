@@ -17,15 +17,20 @@ starts with the backend. It is inert until the user has configured credentials.
 
 from __future__ import annotations
 
+import io
 import logging
 import threading
 import time
+import uuid
 from datetime import timedelta
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from PIL import Image
 from pydantic import BaseModel
 
-from .. import db
+from .. import config, db
+from ..brandforge.client import BrandForgeError, text_to_image
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +118,23 @@ class GenerateResponse(BaseModel):
     source: SourceOut | None = None
 
 
+class GenerateImageRequest(BaseModel):
+    postText: str
+    niche: str = ""
+    platform: str = "bluesky"
+    hfToken: str = ""
+    modalTokenId: str = ""
+    modalTokenSecret: str = ""
+    useModal: bool = False
+
+
+class GenerateImageResponse(BaseModel):
+    url: str
+    promptUsed: str
+    width: int
+    height: int
+
+
 class PublishedRequest(BaseModel):
     generationId: int
     postedUri: str
@@ -145,11 +167,11 @@ def _missing_credentials() -> list[str]:
     spg_db, _, _, _ = _spg()
     missing: list[str] = []
 
-    if (os.environ.get("LLM_PROVIDER") or "gemini") == "hf":
-        if not (os.environ.get("HF_TOKEN") or "").strip():
-            missing.append("HF_TOKEN")
-    elif not (os.environ.get("GEMINI_API_KEY") or "").strip():
-        missing.append("GEMINI_API_KEY")
+    # Hugging Face is the only generation provider this app configures. The vendored
+    # project can also talk to a hosted Gemini endpoint, but that would mean a second
+    # paid account and a second key for no gain, so the app pins LLM_PROVIDER=hf.
+    if not (os.environ.get("HF_TOKEN") or "").strip():
+        missing.append("HF_TOKEN")
 
     # Bluesky powers collection/measurement, not generation — a user can write
     # posts before connecting it, just without grounding.
@@ -157,10 +179,9 @@ def _missing_credentials() -> list[str]:
         if not (os.environ.get(name) or "").strip():
             missing.append(name)
 
-    if spg_db.backend() == "supabase":
-        for name in ("SUPABASE_URL", "SUPABASE_SERVICE_KEY"):
-            if not (os.environ.get(name) or "").strip():
-                missing.append(name)
+    # No hosted-database branch: this app is single-user and entirely local, so the
+    # vendored project's Supabase backend is never selected (see config.py, which pins
+    # DB_BACKEND=sqlite). Nothing here needs a server to be reachable.
     return missing
 
 
@@ -189,7 +210,7 @@ def status() -> StatusResponse:
     missing = _missing_credentials()
 
     return StatusResponse(
-        configured=not [m for m in missing if m.startswith(("HF_", "GEMINI_"))],
+        configured=not [m for m in missing if m.startswith("HF_")],
         missing=missing,
         backend=spg_db.backend(),
         provider=spg_llm.provider(),
@@ -288,6 +309,57 @@ def _bsky_web_url(at_uri: str) -> str:
         return ""
 
 
+_SOCIAL_IMAGE_DIMENSIONS: dict[str, tuple[int, int]] = {
+    "bluesky": (1200, 672),
+    "x": (1200, 672),
+    "linkedin": (1200, 1200),
+    "mastodon": (1024, 1024),
+}
+
+
+def _social_image_prompt(post_text: str, niche: str, platform: str) -> str:
+    """Turn a post draft into an image direction without asking the model for text.
+
+    Image models remain unreliable at typesetting. The composer therefore gets a
+    clear visual that communicates the post's idea, with deliberately calm space
+    for a marketer to add a real headline afterwards.
+    """
+    return " ".join(
+        part
+        for part in (
+            "Create an original editorial social-media image for a marketing post.",
+            f"Platform: {platform}.",
+            f"Audience niche: {niche}." if niche.strip() else "",
+            "Communicate the post's central idea visually with a polished, specific composition.",
+            "No lettering, no logo, no watermark, no UI mockup, no collage of screenshots.",
+            "Leave a calm, uncluttered focal area suitable for real text to be added later.",
+            f"Post to illustrate: {post_text.strip()[:1800]}",
+        )
+        if part
+    )
+
+
+def _social_image_path() -> Path:
+    run_dir = config.OUTPUTS_DIR / "social" / str(uuid.uuid4())
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir / "post-image.png"
+
+
+def _outputs_url(path: Path) -> str:
+    return "/outputs/" + path.resolve().relative_to(config.OUTPUTS_DIR.resolve()).as_posix()
+
+
+def _modal_runtime():
+    try:
+        from ..brandforge import modal_runtime
+    except ImportError as err:
+        raise HTTPException(
+            status_code=500,
+            detail="The Modal SDK isn't installed in this build, so a personal GPU backend can't be used.",
+        ) from err
+    return modal_runtime
+
+
 @router.post("/generate", response_model=GenerateResponse)
 def generate(body: GenerateRequest) -> GenerateResponse:
     if not body.userInput.strip():
@@ -359,51 +431,50 @@ def generate(body: GenerateRequest) -> GenerateResponse:
     )
 
 
-class TopicSuggestionOut(BaseModel):
-    topic: str
-    whyNow: str
-    sources: list[str]
+@router.post("/images", response_model=GenerateImageResponse)
+def generate_image(body: GenerateImageRequest) -> GenerateImageResponse:
+    """Create a visual companion for a generated post.
 
-
-class TopicsResponse(BaseModel):
-    suggestions: list[TopicSuggestionOut]
-    corpusPosts: int
-    signals: list[str]  # flat, human-readable evidence for the transparency panel
-    note: str = ""
-
-
-@router.get("/topics", response_model=TopicsResponse)
-def suggest_topics(niche: str, n: int = 5) -> TopicsResponse:
-    """What to post about in this niche, grounded in live evidence.
-
-    Slow by nature: embeddings, a handful of polite trend lookups, and one LLM
-    call. The UI shows a spinner rather than this being backgrounded, because the
-    result is worthless if the user has navigated away from it.
+    Modal is selected after Settings has successfully provisioned it. The HF
+    provider remains available before that, matching BrandForge's behavior.
     """
-    from vendor.socialpost.src import topics as spg_topics
+    if not body.postText.strip():
+        raise HTTPException(status_code=400, detail="Generate or paste a post before creating its image.")
+    if not body.hfToken.strip():
+        raise HTTPException(status_code=400, detail="Please connect your Hugging Face account in Settings.")
+    if body.platform not in PLATFORMS:
+        raise HTTPException(status_code=400, detail=f"Unknown platform: {body.platform}")
+
+    prompt = _social_image_prompt(body.postText, body.niche, body.platform)
+    width, height = _SOCIAL_IMAGE_DIMENSIONS[body.platform]
+    use_modal = bool(body.useModal and body.modalTokenId.strip() and body.modalTokenSecret.strip())
 
     try:
-        report = spg_topics.suggest_topics(niche, n=n)
-    except ValueError as err:
-        raise HTTPException(status_code=400, detail=str(err)) from None
-    except Exception as err:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(err)) from None
+        if use_modal:
+            runtime = _modal_runtime()
+            modal_cfg = runtime.ModalConfig(
+                token_id=body.modalTokenId.strip(),
+                token_secret=body.modalTokenSecret.strip(),
+                hf_token=body.hfToken.strip(),
+            )
+            png = runtime.generate_image(modal_cfg, prompt, width, height)
+            with Image.open(io.BytesIO(png)) as response_image:
+                response_image.load()
+                image = response_image.copy()
+        else:
+            image = text_to_image(body.hfToken, prompt)
+    except BrandForgeError as err:
+        raise HTTPException(status_code=502, detail=str(err)) from err
+    except (OSError, ValueError) as err:
+        raise HTTPException(status_code=502, detail=f"The image backend returned invalid PNG data: {err}") from err
 
-    signals: list[str] = [
-        f"{c['size']} posts about \"{c['samples'][0][:60]}…\"" for c in report.clusters
-    ]
-    for name, items in report.overlays.items():
-        label = name.replace("_", " ")
-        signals.extend(f"{label}: {item}" for item in items)
-
-    return TopicsResponse(
-        suggestions=[
-            TopicSuggestionOut(topic=s.topic, whyNow=s.why_now, sources=s.sources)
-            for s in report.suggestions
-        ],
-        corpusPosts=report.corpus_posts,
-        signals=signals,
-        note=report.note,
+    path = _social_image_path()
+    image.save(path)
+    return GenerateImageResponse(
+        url=_outputs_url(path),
+        promptUsed=prompt,
+        width=width,
+        height=height,
     )
 
 

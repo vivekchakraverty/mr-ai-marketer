@@ -7,16 +7,16 @@ import BrandForge from '../components/BrandForge'
 import InfluencerDb from '../components/InfluencerDb'
 import MarkdownPanel from '../components/MarkdownPanel'
 import SendToDistributionModal from '../components/SendToDistributionModal'
-import TopicFinder from '../components/TopicFinder'
 import TopicScout from '../components/TopicScout'
 import LeadGenPanel from '../components/leadgen/LeadGenPanel'
-import { card, label, primaryButton, primaryButtonSmall, secondaryButtonSmall, sectionEyebrow, segGroup, segItem, select, textInput, textarea } from '../styles/styleKit'
+import ScreenBackdrop from '../components/ScreenBackdrop'
+import { card, label, primaryButton, primaryButtonSmall, sectionEyebrow, segGroup, segItem, select, textInput, textarea } from '../styles/styleKit'
+import SaveButton from '../components/SaveButton'
 
-type ResearchTool = 'plan' | 'brand' | 'topics' | 'scout' | 'leads' | 'influencers'
+type ResearchTool = 'plan' | 'brand' | 'scout' | 'leads' | 'influencers'
 const RESEARCH_TOOLS: { key: ResearchTool; label: string }[] = [
   { key: 'plan', label: 'Marketing Plan' },
   { key: 'brand', label: 'Brand Studio' },
-  { key: 'topics', label: 'Post Topic Finder' },
   { key: 'scout', label: 'Topic Scout' },
   { key: 'leads', label: 'Lead Gen Agent' },
   { key: 'influencers', label: 'Influencer Database' }
@@ -32,11 +32,6 @@ const TOOL_HEADINGS: Record<ResearchTool, { title: string; subtitle: string }> =
     title: 'Brand Studio',
     subtitle:
       "Define your brand's identity, voice, messaging, story and visual direction — a full 12-section Brand Document written by your fine-tuned BrandForge model, grounded in the branding books it learned from."
-  },
-  topics: {
-    title: 'Post Topic Finder',
-    subtitle:
-      "Out of ideas? Find out what your niche is actually talking about today — and what the wider internet is doing about it — before you write a word."
   },
   scout: {
     title: 'Topic Scout',
@@ -101,6 +96,11 @@ export default function Research(): React.JSX.Element {
 
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '30px 34px 60px' }}>
+      {researchTool === 'plan' && <ScreenBackdrop video="plan" />}
+      {researchTool === 'brand' && <ScreenBackdrop video="brand" />}
+      {researchTool === 'scout' && <ScreenBackdrop video="scout" />}
+      {researchTool === 'leads' && <ScreenBackdrop video="leads" />}
+      {researchTool === 'influencers' && <ScreenBackdrop video="influencers" />}
       <div style={{ marginBottom: 22 }}>
         <div style={sectionEyebrow}>Research / Strategy</div>
         <div style={{ font: "700 30px 'Kalam'", color: 'var(--ink)', marginTop: 4 }}>
@@ -124,7 +124,6 @@ export default function Research(): React.JSX.Element {
       </div>
 
       {researchTool === 'brand' && <BrandForge />}
-      {researchTool === 'topics' && <TopicFinder />}
       {researchTool === 'scout' && <TopicScout />}
       {researchTool === 'leads' && <LeadGenPanel />}
       {researchTool === 'influencers' && <InfluencerDb />}
@@ -255,7 +254,13 @@ export default function Research(): React.JSX.Element {
                   borderTop: '2px dashed var(--border-soft)'
                 }}
               >
-                <div style={secondaryButtonSmall}>Export</div>
+                <SaveButton
+                  libraryId={result.libraryId}
+                  tool="Plan"
+                  title={`${fields.name || 'Your business'} — Growth Plan`}
+                  subtitle="Marketing plan"
+                  content={result.markdown}
+                />
                 <div style={primaryButtonSmall} onClick={() => setShowSend(true)}>
                   Send to Distribution →
                 </div>

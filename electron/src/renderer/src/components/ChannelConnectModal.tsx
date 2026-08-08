@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { connectChannel, disconnectChannel, fetchDistributionConsoleUrl } from '../api/client'
-import { PLATFORM_SETUP_GUIDES } from '../state/platformSetupGuides'
+import { PLATFORM_SETUP_GUIDES, type PlatformSetupGuide } from '../state/platformSetupGuides'
 import { label, primaryButton, secondaryButtonSmall, textInput } from '../styles/styleKit'
 
 interface Props {
@@ -9,6 +9,11 @@ interface Props {
   /** False while the distribution engine is unreachable — the form still opens (so the setup
    * steps are readable and credentials can be pasted in advance), but saving needs the engine. */
   engineReady?: boolean
+  /** Supplied for user-added channels, whose form is generated from the piece's own auth
+   * schema instead of one of the hand-written guides. */
+  guide?: PlatformSetupGuide
+  /** Only passed for user-added channels — built-in ones cannot be removed. */
+  onRemove?: () => void
   onClose: () => void
   onChanged: () => void
 }
@@ -17,10 +22,12 @@ export default function ChannelConnectModal({
   channel,
   connected,
   engineReady = true,
+  guide: guideOverride,
+  onRemove,
   onClose,
   onChanged
 }: Props): React.JSX.Element {
-  const guide = PLATFORM_SETUP_GUIDES[channel]
+  const guide = guideOverride ?? PLATFORM_SETUP_GUIDES[channel]
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(guide.fields.map((f) => [f.key, f.kind === 'checkbox' ? 'true' : (f.defaultValue ?? '')]))
   )
@@ -203,6 +210,14 @@ export default function ChannelConnectModal({
           {connected && (
             <div style={secondaryButtonSmall} onClick={busy ? undefined : handleDisconnect}>
               Disconnect
+            </div>
+          )}
+          {onRemove && (
+            <div
+              style={{ ...secondaryButtonSmall, color: 'var(--danger-ink)' }}
+              onClick={busy ? undefined : onRemove}
+            >
+              Remove channel
             </div>
           )}
           <div style={secondaryButtonSmall} onClick={onClose}>

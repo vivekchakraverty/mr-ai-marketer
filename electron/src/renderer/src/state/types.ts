@@ -1,4 +1,14 @@
-export type Route = 'home' | 'research' | 'create' | 'engage' | 'analytics' | 'distribute' | 'library' | 'settings'
+export type Route =
+  | 'home'
+  | 'research'
+  | 'create'
+  | 'engage'
+  | 'analytics'
+  | 'manage'
+  | 'community'
+  | 'distribute'
+  | 'library'
+  | 'settings'
 export type Tool = 'blog' | 'guest' | 'tutorial' | 'docu' | 'social' | 'mastodon' | 'email' | null
 
 export interface LibraryItem {

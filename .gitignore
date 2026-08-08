@@ -5,9 +5,16 @@ electron/dist/
 electron/dist-electron/
 
 # Python
-backend/.venv/
-backend/__pycache__/
-backend/**/__pycache__/
+# Deliberately unscoped: Python lives in backend/, healthmon/, scripts/ and several
+# resources/*-space/ dirs, and a backend-only rule silently let 13 .pyc files through.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 backend/dist/
 backend/build/
 # (backend.spec itself is hand-authored and tracked — only PyInstaller's build/dist output above is ignored)
@@ -32,6 +39,33 @@ mr-ai-marketer.sqlite3
 # HF Dataset at runtime instead; this local link only exists for dev-machine testing.
 backend/vendor/dmstrategy/rag_index/
 
-# OS
+# OS / editor
 .DS_Store
 Thumbs.db
+desktop.ini
+*.swp
+*~
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Generated output from the tools (documents, screenshots, images)
+outputs/
+
+# Health monitor: run history and its local secrets
+healthmon/state/
+healthmon/.env
+
+# Stray file Windows shells create from a mistyped redirect
+nul
+
+# Claude Code's local permission file. Already covered by a global ignore on the original
+# author's machine, which is exactly why it belongs here too — protection that depends on
+# one developer's personal git config is not protection. It records the commands run in
+# this repo, including URLs of your own infrastructure.
+.claude/settings.local.json
+
+# Security tooling and its output. `scripts/security/scan.py` writes reports here, and
+# .tools/ is the documented place to drop a semgrep venv so the script can find it.
+.security-reports/
+.tools/

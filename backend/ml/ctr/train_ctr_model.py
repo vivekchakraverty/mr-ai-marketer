@@ -46,6 +46,7 @@ Output: app/ml/ctr_model.joblib (bundled with the app; see backend.spec).
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -65,11 +66,32 @@ FEATURES = [
 
 HERE = Path(__file__).resolve().parent
 DATA_PATH = HERE / "data" / "train_data.csv"
+
+# The training corpus is not distributed with the app and is not in the repo. The app ships
+# the *fitted* model; this data is only needed to refit it, so it lives in a private Hugging
+# Face dataset that this script pulls and nothing else reads. Set CTR_TRAINING_REPO to it.
+TRAINING_REPO = os.environ.get("CTR_TRAINING_REPO", "").strip()
+
+
+def _training_csv() -> Path:
+    if DATA_PATH.exists():
+        return DATA_PATH
+    if not TRAINING_REPO:
+        raise SystemExit(
+            "No training data. It is deliberately not in this repo — set CTR_TRAINING_REPO to "
+            "the private Hugging Face dataset holding train_data.csv "
+            "(see scripts/hf/publish_assets.py)."
+        )
+    from huggingface_hub import hf_hub_download
+
+    print(f"Fetching training data from {TRAINING_REPO} ...")
+    return Path(hf_hub_download(repo_id=TRAINING_REPO, repo_type="dataset",
+                                filename="train_data.csv"))
 OUTPUT_PATH = HERE.parent.parent / "app" / "ml" / "ctr_model.joblib"
 
 
 def main() -> None:
-    df = pd.read_csv(DATA_PATH)
+    df = pd.read_csv(_training_csv())
     X = df[FEATURES]
     y = np.log1p(df["click_rate"])
 

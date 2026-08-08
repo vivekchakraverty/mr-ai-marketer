@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { generateEmail, type GenerateEmailResponse } from '../api/client'
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
+import ScreenBackdrop from '../components/ScreenBackdrop'
 import { label, primaryButton, textarea } from '../styles/styleKit'
+import SaveButton from '../components/SaveButton'
 
 const EXAMPLE_PLACEHOLDER =
   'e.g. Write a last-chance promotional email for an e-commerce sunglasses brand’s summer sale: ' +
@@ -55,6 +57,7 @@ export default function EmailWriter(): React.JSX.Element {
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '22px 34px 60px' }}>
+      <ScreenBackdrop video="email" />
       <div
         style={{ font: "700 13px 'Quicksand'", color: 'var(--accent)', cursor: 'pointer', marginBottom: 14 }}
         onClick={goCreate}
@@ -131,6 +134,13 @@ export default function EmailWriter(): React.JSX.Element {
             >
               {copied ? 'Copied ✓' : 'Copy'}
             </div>
+            <SaveButton
+              libraryId={result.libraryId}
+              tool="Email"
+              title={fields.instruction.trim().slice(0, 60) || 'Marketing email'}
+              subtitle="Marketing email"
+              content={result.text}
+            />
           </div>
           <div
             style={{

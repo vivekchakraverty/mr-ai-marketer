@@ -2,6 +2,7 @@ import { useState } from 'react'
 import BlueskyAnalytics from '../components/BlueskyAnalytics'
 import EmailTracking from '../components/EmailTracking'
 import OutreachCrm from '../components/leadgen/OutreachCrm'
+import ScreenBackdrop from '../components/ScreenBackdrop'
 import SegmentedControl from '../components/SegmentedControl'
 import { sectionEyebrow } from '../styles/styleKit'
 
@@ -22,6 +23,9 @@ export default function Analytics(): React.JSX.Element {
 
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '30px 34px 60px' }}>
+      {tab === 'Outreach CRM' && <ScreenBackdrop video="outreach" />}
+      {tab === 'Email' && <ScreenBackdrop video="emailtrack" />}
+      {tab === 'Bluesky' && <ScreenBackdrop video="bluesky" />}
       <div style={{ marginBottom: 22 }}>
         <div style={sectionEyebrow}>Analytics</div>
         <div style={{ font: "700 30px 'Kalam'", color: 'var(--ink)', marginTop: 4 }}>{tab}</div>

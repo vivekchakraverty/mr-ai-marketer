@@ -19,6 +19,8 @@ injected as `draft_writer` — see app/main.py's startup wiring).
 
 from __future__ import annotations
 
+from .. import config
+
 import html
 import logging
 import re
@@ -33,8 +35,13 @@ from .. import db
 
 log = logging.getLogger(__name__)
 
-SPACE_BASE_URL = "https://vivekchakraverty-mail-tracker.hf.space"
-SYNC_SECRET = "REDACTED-ROTATED-SECRET"
+# Your own tracking Space (see README). Empty disables open/click tracking rather than
+# routing anyone's mail through a third party's host.
+SPACE_BASE_URL = config.MAIL_TRACKER_URL
+# Read from the environment, never hardcoded. The value that used to sit here was a real
+# shared secret for one person's Space; committed, it was a secret every reader of the repo
+# had. Empty means the sync is skipped rather than sent unauthenticated.
+SYNC_SECRET = config.MAIL_TRACKER_SYNC_SECRET
 
 _SYNC_INTERVAL_SECONDS = 180
 
@@ -141,6 +148,13 @@ def sync_from_space() -> dict:
     """Pull new open/click events since the last sync. Never raises — a
     network blip or a sleeping Space must not take down the caller (the
     background loop below, or the on-demand /mail-tracking/sync endpoint)."""
+    if not SPACE_BASE_URL or not SYNC_SECRET:
+        # Nothing to sync against, or no credential for it. Skipped quietly rather than
+        # polling an unconfigured host every three minutes, and never sent without the
+        # secret — an unauthenticated /events call is a request to be refused, or worse,
+        # answered by someone else's Space.
+        return {"synced": 0, "ok": False, "detail": "tracking not configured"}
+
     cursor = db.max_space_event_id()
     try:
         resp = httpx.get(

@@ -1,6 +1,8 @@
 import type { CSSProperties } from 'react'
 import { useAppStore } from '../state/store'
+import AccountMenu from './AccountMenu'
 import marketerIcon from '../assets/marketer-icon.png'
+import MusicToggle from './MusicToggle'
 
 const navBase: CSSProperties = {
   display: 'flex',
@@ -22,6 +24,38 @@ function navStyle(active: boolean): CSSProperties {
   }
 }
 
+/**
+ * A cog, drawn the way the rest of the app draws icons — CSS boxes rather than an SVG.
+ * Four bars crossed at 45° make eight teeth; the body disc covers their middles so only
+ * the tips show, and the hole is punched in the button's own background colour, which is
+ * why that colour has to be passed in rather than assumed.
+ */
+function CogGlyph({ color, holeColor, size = 19 }: { color: string; holeColor: string; size?: number }): React.JSX.Element {
+  return (
+    <div style={{ position: 'relative', width: size, height: size }}>
+      {[0, 45, 90, 135].map((angle) => (
+        <div
+          key={angle}
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            width: size * 0.2,
+            height: size,
+            marginLeft: -(size * 0.1),
+            marginTop: -(size * 0.5),
+            borderRadius: size * 0.05,
+            background: color,
+            transform: `rotate(${angle}deg)`
+          }}
+        />
+      ))}
+      <div style={{ position: 'absolute', inset: size * 0.14, borderRadius: '50%', background: color }} />
+      <div style={{ position: 'absolute', inset: size * 0.36, borderRadius: '50%', background: holeColor }} />
+    </div>
+  )
+}
+
 export default function NavBar(): React.JSX.Element {
   const route = useAppStore((s) => s.route)
   const goHome = useAppStore((s) => s.goHome)
@@ -29,9 +63,10 @@ export default function NavBar(): React.JSX.Element {
   const goCreate = useAppStore((s) => s.goCreate)
   const goEngage = useAppStore((s) => s.goEngage)
   const goAnalytics = useAppStore((s) => s.goAnalytics)
+  const goManage = useAppStore((s) => s.goManage)
+  const goCommunity = useAppStore((s) => s.goCommunity)
   const goDistribute = useAppStore((s) => s.goDistribute)
   const goLibrary = useAppStore((s) => s.goLibrary)
-  const hfUsername = useAppStore((s) => s.hfUsername)
   const goSettings = useAppStore((s) => s.goSettings)
 
   return (
@@ -82,6 +117,12 @@ export default function NavBar(): React.JSX.Element {
           <div style={navStyle(route === 'analytics')} onClick={goAnalytics}>
             Analytics
           </div>
+          <div style={navStyle(route === 'manage')} onClick={goManage}>
+            Manage
+          </div>
+          <div style={navStyle(route === 'community')} onClick={goCommunity}>
+            Community
+          </div>
           <div style={navStyle(route === 'distribute')} onClick={goDistribute}>
             Distribute
           </div>
@@ -90,6 +131,28 @@ export default function NavBar(): React.JSX.Element {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div
+            title="Settings"
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: '50%',
+              background: route === 'settings' ? 'var(--accent)' : 'var(--surface)',
+              border: '2.5px solid var(--border)',
+              boxShadow: route === 'settings' ? 'var(--shadow-sm)' : 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              flexShrink: 0
+            }}
+            onClick={goSettings}
+          >
+            <CogGlyph
+              color={route === 'settings' ? 'var(--accent-ink)' : 'var(--ink-muted)'}
+              holeColor={route === 'settings' ? 'var(--accent)' : 'var(--surface)'}
+            />
+          </div>
           <div
             style={{
               display: 'flex',
@@ -121,25 +184,11 @@ export default function NavBar(): React.JSX.Element {
           >
             + New content
           </div>
-          <span
-            title={hfUsername ? `${hfUsername} — Settings` : 'Settings'}
-            style={{
-              width: 34,
-              height: 34,
-              borderRadius: '50%',
-              background: 'var(--avatar-bg)',
-              border: '2.5px solid var(--border)',
-              color: 'var(--avatar-ink)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              font: "700 14px 'Quicksand'",
-              cursor: 'pointer'
-            }}
-            onClick={goSettings}
-          >
-            {(hfUsername?.[0] ?? 'V').toUpperCase()}
-          </span>
+          {/* Opens the connected-accounts panel. Settings still lives on the cog; this
+              answers "am I signed in to Bluesky?" without a trip through four screens. */}
+          <AccountMenu />
+          {/* Last in the row, so it sits in the top-right corner. */}
+          <MusicToggle />
         </div>
       </div>
 

@@ -1,18 +1,21 @@
 import { useEffect, useState } from 'react'
 import {
   getLeadgenSchema,
+  getModalStatus,
   getSocialPostSchema,
+  provisionModalBackend,
   pushLeadgenEnv,
   pushSocialPostEnv,
   verifyHfToken,
   verifyLeadgen,
   verifySocialPost,
-  type EnvSetting
+  type EnvSetting,
+  type ModalProvisionStatus
 } from '../api/client'
 import { useAppStore } from '../state/store'
 import { label, primaryButtonSmall, secondaryButtonSmall, select, textInput } from '../styles/styleKit'
 import type { AppSettings } from '../../../main/settingsStore'
-import type { UpdateCheckResult } from '../../../main/updateChecker'
+import BackupPanel from '../components/BackupPanel'
 
 const EMPTY: AppSettings = {
   hfToken: '',
@@ -20,7 +23,7 @@ const EMPTY: AppSettings = {
   mastodonInstance: '',
   mastodonAccessToken: '',
   googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
-  brandForge: { spaceId: '' },
+  brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '' },
   topicScout: {
     contactEmail: '',
     githubToken: '',
@@ -29,7 +32,10 @@ const EMPTY: AppSettings = {
     twitterAuthToken: '',
     twitterCt0: '',
     geo: 'US'
-  }
+  },
+  // Filled in by the Community section's Account tab, not here — the login is a phone-code
+  // flow, not a field to paste. Present so a save from this screen doesn't drop it.
+  telegram: { apiId: '', apiHash: '', session: '', username: '' }
 }
 
 type Check = { state: 'idle' | 'checking' | 'ok' | 'error'; detail?: string }
@@ -52,8 +58,14 @@ export default function Settings(): React.JSX.Element {
   const [saved, setSaved] = useState('')
   const [error, setError] = useState('')
   const [checks, setChecks] = useState<Record<string, Check>>({})
-  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null)
+  // Read from the store rather than local state: the main process pushes download progress
+  // into the store, and a download started here has to keep driving the banner after this
+  // screen is closed. Two copies of this would drift the moment either happened.
+  const updateInfo = useAppStore((s) => s.updateInfo)
+  const setUpdateInfo = useAppStore((s) => s.setUpdateInfo)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [modalStatus, setModalStatus] = useState<ModalProvisionStatus | null>(null)
+  const [provisioning, setProvisioning] = useState(false)
 
   useEffect(() => {
     async function boot(): Promise<void> {
@@ -132,6 +144,59 @@ export default function Settings(): React.JSX.Element {
     await reloadSchema()
   }
 
+  // Provisioning outlives an HTTP request (the first deploy builds a container
+  // image), so the backend runs it in a thread and we poll. Status lives on the
+  // backend, so a deploy started before this screen was opened still shows up.
+  // A failure here means the build has no modal SDK — leave the section idle.
+  useEffect(() => {
+    getModalStatus()
+      .then(setModalStatus)
+      .catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    if (modalStatus?.status !== 'running') return
+    const timer = setInterval(() => {
+      getModalStatus()
+        .then(setModalStatus)
+        .catch(() => undefined)
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [modalStatus?.status])
+
+  // Remember a successful deploy so the section still reads as set up after a
+  // restart, when the backend's in-memory status is back to idle.
+  useEffect(() => {
+    if (modalStatus?.status !== 'ready' || settings.brandForge.modalProvisionedAt) return
+    const next: AppSettings = {
+      ...settings,
+      brandForge: { ...settings.brandForge, modalProvisionedAt: new Date().toISOString() }
+    }
+    setSettings(next)
+    void window.api.settings.setAll(next)
+  }, [modalStatus?.status, settings])
+
+  async function handleProvisionModal(): Promise<void> {
+    setProvisioning(true)
+    setError('')
+    try {
+      // Persist first so Brand Studio picks the tokens up for generation. The
+      // deploy itself uses the typed values, so no Save is required first.
+      await window.api.settings.setAll(settings)
+      setModalStatus(
+        await provisionModalBackend(
+          settings.brandForge.modalTokenId.trim(),
+          settings.brandForge.modalTokenSecret.trim(),
+          settings.hfToken.trim()
+        )
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setProvisioning(false)
+    }
+  }
+
   async function handleSave(): Promise<void> {
     setSaving(true)
     setError('')
@@ -167,7 +232,7 @@ export default function Settings(): React.JSX.Element {
     }
   }
 
-  async function runCheck(target: 'supabase' | 'bluesky' | 'llm' | 'hf'): Promise<void> {
+  async function runCheck(target: 'bluesky' | 'llm' | 'hf'): Promise<void> {
     setChecks((c) => ({ ...c, [target]: { state: 'checking' } }))
     try {
       await pushPendingSocialPost() // save whatever's typed before testing it
@@ -202,7 +267,7 @@ export default function Settings(): React.JSX.Element {
   async function handleCheckForUpdate(): Promise<void> {
     setCheckingUpdate(true)
     try {
-      setUpdateInfo(await window.api.checkForUpdate())
+      setUpdateInfo(await window.api.update.check())
     } finally {
       setCheckingUpdate(false)
     }
@@ -234,8 +299,7 @@ export default function Settings(): React.JSX.Element {
     Discovery: ['searxng', 'reacher']
   }
 
-  const VERIFIER_FOR: [RegExp, 'supabase' | 'bluesky' | 'llm' | 'hf'][] = [
-    [/supabase/i, 'supabase'],
+  const VERIFIER_FOR: [RegExp, 'bluesky' | 'llm' | 'hf'][] = [
     [/bluesky/i, 'bluesky'],
     [/gemini|llm/i, 'llm']
   ]
@@ -329,7 +393,7 @@ export default function Settings(): React.JSX.Element {
             <input
               value={settings.mastodonInstance}
               onChange={(e) => setSettings((s) => ({ ...s, mastodonInstance: e.target.value }))}
-              placeholder="hachyderm.io"
+              placeholder="mastodon.social"
               style={textInput}
             />
             <label style={{ ...label, marginTop: 10 }}>Access token</label>
@@ -354,9 +418,87 @@ export default function Settings(): React.JSX.Element {
               onChange={(e) =>
                 setSettings((s) => ({ ...s, brandForge: { ...s.brandForge, spaceId: e.target.value } }))
               }
-              placeholder="vivekchakraverty/brandforge-qwen3-small (default)"
+              placeholder="your-username/your-brandforge-space"
               style={textInput}
             />
+          </Section>
+
+          <Section
+            title="Brand Studio GPU"
+            optional
+            blurb="Brand Studio runs on the Hugging Face Space you deploy. Connect your own Modal account to generate text and visuals on your own GPU instead — Modal gives new accounts around $30 of free GPU credit. Set BRANDFORGE_MODEL to your merged model repo and BRANDFORGE_IMAGE_BUCKET to the HF Bucket holding the FLUX.2 klein weights (see the README), then sign up at modal.com, open Settings → API Tokens → New token, and paste both halves below. Modal charges per second of GPU time; set a cap under Usage & Billing → Budgets in their dashboard."
+            accent="var(--tool-social)"
+          >
+            <label style={label}>Modal token ID</label>
+            <input
+              type="password"
+              value={settings.brandForge.modalTokenId}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, brandForge: { ...s.brandForge, modalTokenId: e.target.value } }))
+              }
+              placeholder="ak-..."
+              style={textInput}
+            />
+            <label style={{ ...label, marginTop: 10 }}>Modal token secret</label>
+            <input
+              type="password"
+              value={settings.brandForge.modalTokenSecret}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, brandForge: { ...s.brandForge, modalTokenSecret: e.target.value } }))
+              }
+              placeholder="as-..."
+              style={textInput}
+            />
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+              <button
+                onClick={handleProvisionModal}
+                disabled={
+                  provisioning ||
+                  modalStatus?.status === 'running' ||
+                  !settings.brandForge.modalTokenId.trim() ||
+                  !settings.brandForge.modalTokenSecret.trim()
+                }
+                style={primaryButtonSmall}
+              >
+                {modalStatus?.status === 'running' ? 'Setting up…' : 'Set up my GPU'}
+              </button>
+              {modalStatus?.status === 'running' && (
+                <span style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-faint)' }}>
+                  {Math.floor(modalStatus.elapsedSeconds / 60)}m {modalStatus.elapsedSeconds % 60}s elapsed
+                </span>
+              )}
+              {modalStatus?.status !== 'running' && settings.brandForge.modalProvisionedAt && (
+                <span style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-faint)' }}>
+                  Set up {new Date(settings.brandForge.modalProvisionedAt).toLocaleDateString()} — re-run after
+                  changing your HF token.
+                </span>
+              )}
+            </div>
+
+            {modalStatus && modalStatus.status !== 'idle' && (
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: '8px 12px',
+                  borderRadius: 12,
+                  border: '2px solid var(--border)',
+                  background: 'var(--surface-alt, transparent)',
+                  font: "600 12px 'Quicksand'",
+                  color: modalStatus.status === 'error' ? 'var(--danger, #d14343)' : 'var(--ink)'
+                }}
+              >
+                {modalStatus.message}
+                {modalStatus.status === 'running' && <div style={{ marginTop: 4 }}>{modalStatus.hint}</div>}
+                {modalStatus.appPageUrl && (
+                  <div style={{ marginTop: 4 }}>
+                    <a href={modalStatus.appPageUrl} target="_blank" rel="noreferrer">
+                      View it in your Modal dashboard
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
           </Section>
 
           <Section
@@ -505,30 +647,90 @@ export default function Settings(): React.JSX.Element {
             </Section>
           ))}
 
+          {/* ---- backups ------------------------------------------------ */}
+          <Section
+            title="Backups"
+            blurb="Everything this app has made lives in database files on this machine and nowhere else. A backup is the only way back from a bad reset or a failing disk."
+            accent="var(--tool-distribute)"
+          >
+            <BackupPanel />
+          </Section>
+
           {/* ---- updates ------------------------------------------------ */}
-          <Section title="App updates" blurb={`You're on version ${updateInfo?.currentVersion ?? '0.1.0'}.`} accent="var(--tool-guest)">
-            {updateInfo?.updateAvailable && (
+          <Section
+            title="App updates"
+            blurb={`You're on version ${updateInfo?.currentVersion ?? '0.1.0'}.`}
+            accent="var(--tool-guest)"
+          >
+            {updateInfo?.phase === 'available' && (
               <div style={{ font: "700 12.5px 'Quicksand'", color: 'var(--accent-deep)', marginBottom: 10 }}>
                 Version {updateInfo.latestVersion} is out.{' '}
                 <span
                   style={{ textDecoration: 'underline', cursor: 'pointer' }}
-                  onClick={() => updateInfo.downloadUrl && window.api.openExternal(updateInfo.downloadUrl)}
+                  onClick={() => void window.api.update.download()}
                 >
-                  Grab it →
+                  Download it →
                 </span>
+                <div style={{ font: "600 11.5px 'Quicksand'", color: 'var(--ink-muted)', marginTop: 4 }}>
+                  Around 600MB the first time. Later updates are usually much smaller — only
+                  the parts that changed get downloaded.
+                </div>
               </div>
             )}
-            {updateInfo && !updateInfo.updateAvailable && !updateInfo.error && (
+
+            {updateInfo?.phase === 'downloading' && (
+              <div style={{ font: "700 12.5px 'Quicksand'", color: 'var(--accent-deep)', marginBottom: 10 }}>
+                Downloading {updateInfo.latestVersion}… {updateInfo.percent ?? 0}%
+                <div style={{ font: "600 11.5px 'Quicksand'", color: 'var(--ink-muted)', marginTop: 4 }}>
+                  You can keep working. The app only restarts when you tell it to.
+                </div>
+              </div>
+            )}
+
+            {updateInfo?.phase === 'ready' && (
+              <div style={{ font: "700 12.5px 'Quicksand'", color: 'var(--accent-deep)', marginBottom: 10 }}>
+                Version {updateInfo.latestVersion} is downloaded.{' '}
+                <span
+                  style={{ textDecoration: 'underline', cursor: 'pointer' }}
+                  onClick={() => void window.api.update.install()}
+                >
+                  Restart and install →
+                </span>
+                <div style={{ font: "600 11.5px 'Quicksand'", color: 'var(--ink-muted)', marginTop: 4 }}>
+                  Or just close the app when you're done — it installs on the way out. Your
+                  data and settings are kept either way.
+                </div>
+              </div>
+            )}
+
+            {updateInfo?.phase === 'up-to-date' && (
               <div style={{ font: "700 12.5px 'Quicksand'", color: 'var(--accent)', marginBottom: 10 }}>
-                You're up to date ✓
+                You&apos;re up to date ✓
               </div>
             )}
-            <div
-              style={{ ...secondaryButtonSmall, opacity: checkingUpdate ? 0.6 : 1, display: 'inline-block' }}
-              onClick={checkingUpdate ? undefined : handleCheckForUpdate}
-            >
-              {checkingUpdate ? 'Checking…' : 'Check for updates'}
-            </div>
+
+            {/* Running from source. Not a failure, and not something a developer can fix by
+                clicking the button again — so say which it is. */}
+            {updateInfo?.devMode && (
+              <div style={{ font: "700 12.5px 'Quicksand'", color: 'var(--ink-muted)', marginBottom: 10 }}>
+                Updates are off in a development build.
+              </div>
+            )}
+
+            {updateInfo?.phase === 'error' && (
+              <div style={{ font: "700 12.5px 'Quicksand'", color: 'var(--danger-ink)', marginBottom: 10 }}>
+                {updateInfo.error}
+              </div>
+            )}
+
+            {updateInfo?.phase !== 'downloading' && (
+              <div
+                style={{ ...secondaryButtonSmall, opacity: checkingUpdate ? 0.6 : 1, display: 'inline-block' }}
+                onClick={checkingUpdate ? undefined : handleCheckForUpdate}
+              >
+                {checkingUpdate ? 'Checking…' : 'Check for updates'}
+              </div>
+            )}
           </Section>
 
           {error && (

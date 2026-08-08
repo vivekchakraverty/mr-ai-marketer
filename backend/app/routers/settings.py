@@ -73,12 +73,27 @@ def _spg_config():
     return spg_config
 
 
+# Settings the vendored project supports but this app deliberately does not offer.
+#
+# The standalone project can store its corpus in Supabase and generate through Google
+# Gemini. This app is single-user and runs on the user's own machine, so it pins
+# DB_BACKEND=sqlite and LLM_PROVIDER=hf (see config.py) — offering the cloud variants in
+# Settings would present accounts to sign up for that nothing here would ever use, and let
+# a user set a combination the app then overrides. Filtered here rather than by editing the
+# vendored .env.example, which is upstream's file.
+_CLOUD_ONLY_SETTINGS = {
+    "DB_BACKEND", "SUPABASE_URL", "SUPABASE_SERVICE_KEY",
+    "LLM_PROVIDER", "GEMINI_API_KEY", "GEMINI_MODEL",
+}
+
+
 @router.get("/social-post/schema", response_model=list[EnvSettingOut])
 def social_post_schema() -> list[EnvSettingOut]:
     """The settings the Social Post Generator understands.
 
-    Derived from the vendored package's own .env.example, so adding a documented
-    variable there makes it appear in the Settings screen with no UI change.
+    Derived from the vendored package's own .env.example, minus the hosted-infrastructure
+    options this app never uses — so adding a documented variable there makes it appear in
+    the Settings screen with no UI change.
     """
     spg_config = _spg_config()
     return [
@@ -92,6 +107,7 @@ def social_post_schema() -> list[EnvSettingOut]:
             isSet=spg_config.is_set(s.name),
         )
         for s in spg_config.load_schema()
+        if s.name not in _CLOUD_ONLY_SETTINGS
     ]
 
 
@@ -113,7 +129,7 @@ def apply_social_post_env(body: ApplyEnvRequest) -> ApplyEnvResponse:
 
 @router.post("/social-post/verify/{target}", response_model=VerifyResponse)
 def verify_social_post(target: str) -> VerifyResponse:
-    """Test a configured credential for real (supabase | bluesky | llm | hf)."""
+    """Test a configured credential for real (bluesky | llm | hf)."""
     spg_config = _spg_config()
     verifier = spg_config.VERIFIERS.get(target)
     if verifier is None:
@@ -178,3 +194,22 @@ def verify_leadgen(target: str) -> VerifyResponse:
         )
     ok, detail = verifier()
     return VerifyResponse(valid=ok, detail=detail)
+
+
+# ---------------------------------------------------------------------------
+# Hosted assets
+# ---------------------------------------------------------------------------
+
+
+@router.get("/assets")
+def assets() -> dict:
+    """Which datasets and models are here, and where each one comes from.
+
+    Datasets and models are fetched from Hugging Face on first use rather than shipped in
+    the build (see services/hf_assets.py). When a tool says its catalogue is empty, this is
+    the endpoint that says why: no repo configured, or configured but not fetched yet.
+    """
+    from ..services import hf_assets
+
+    rows = hf_assets.status()
+    return {"assets": rows, "allPresent": all(r["present"] for r in rows)}

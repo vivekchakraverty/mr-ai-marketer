@@ -5,8 +5,10 @@ import { useAppStore } from '../state/store'
 import { BLOG_GOAL_OPTIONS } from '../state/types'
 import SegmentedControl from '../components/SegmentedControl'
 import MarkdownPanel from '../components/MarkdownPanel'
+import ScreenBackdrop from '../components/ScreenBackdrop'
 import SendToDistributionModal from '../components/SendToDistributionModal'
 import { label, paperCard, pill, primaryButton, primaryButtonSmall, secondaryButtonSmall, textInput, textarea } from '../styles/styleKit'
+import SaveButton from '../components/SaveButton'
 
 export default function BlogWriter(): React.JSX.Element {
   const fields = useAppStore((s) => s.fields.blog)
@@ -40,6 +42,7 @@ export default function BlogWriter(): React.JSX.Element {
 
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '22px 34px 60px' }}>
+      <ScreenBackdrop video="blog" />
       <div style={{ font: "700 13px 'Quicksand'", color: 'var(--accent)', cursor: 'pointer', marginBottom: 14 }} onClick={goCreate}>
         ← Create
       </div>
@@ -138,6 +141,13 @@ export default function BlogWriter(): React.JSX.Element {
                   >
                     Export .docx
                   </div>
+                  <SaveButton
+                    libraryId={result.libraryId}
+                    tool="Blog"
+                    title={result.title}
+                    subtitle="Blog article"
+                    content={result.markdown}
+                  />
                   <div style={primaryButtonSmall} onClick={() => setShowSend(true)}>
                     Send to Distribution →
                   </div>

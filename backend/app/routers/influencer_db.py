@@ -25,11 +25,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from .. import config
+from ..services import hf_assets
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/influencer-db", tags=["influencer-db"])
 
+# The catalogue is fetched from Hugging Face on first use rather than shipped in the build
+# (services/hf_assets.py). This path stays as the dev-checkout fallback.
 XLSX_PATH = Path(__file__).resolve().parent.parent / "data" / "influencer_database.xlsx"
 SHEET_NAME = "Sheet1"
 
@@ -75,7 +78,8 @@ _load_lock = threading.Lock()
 def _load() -> pd.DataFrame:
     """Parse the xlsx into the shape the API serves. Called once, under _load_lock."""
     # read_only keeps openpyxl from materializing styling for ~14.6k x 25 cells.
-    raw = pd.read_excel(XLSX_PATH, sheet_name=SHEET_NAME, engine_kwargs={"read_only": True})
+    path = hf_assets.path_for("influencers")
+    raw = pd.read_excel(path, sheet_name=SHEET_NAME, engine_kwargs={"read_only": True})
     df = raw.rename(columns=_COLUMN_MAP)
     df = df[[c for c in _COLUMN_MAP.values() if c in df.columns]].copy()
 

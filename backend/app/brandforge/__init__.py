@@ -3,7 +3,7 @@ src/* for the mr-ai-marketer backend.
 
 Only the pieces needed at *inference* time live here — no RAG index, no
 embeddings, no book corpus. The branding-book knowledge is baked into the
-fine-tuned Qwen3-8B weights (vivekchakraverty/qwen3-8b-brandforge-*-lora),
+fine-tuned Qwen3-8B LoRA weights,
 so a plain prompt reproduces the teacher's grounding without retrieval.
 
 The prompt format (sections.build_student_messages) is copied verbatim from

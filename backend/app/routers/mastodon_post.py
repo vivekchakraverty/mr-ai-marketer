@@ -40,6 +40,7 @@ from pydantic import BaseModel
 
 from .. import db
 from ..services import mastodon as masto
+from ..services import mastodon_gate as gate
 from ..services.mastodon import MastodonError
 
 log = logging.getLogger(__name__)
@@ -199,18 +200,9 @@ class PublishedRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _policy_payload(policy: masto.InstancePolicy) -> dict:
-    return {
-        "instance": policy.info.host,
-        "title": policy.info.title,
-        "rules": [{"id": r.id, "text": r.text, "hint": r.hint} for r in policy.rules],
-        "extendedDescription": policy.extended_description,
-    }
-
-
 def _load_policy(instance: str) -> masto.InstancePolicy:
     try:
-        return masto.fetch_policy(instance)
+        return gate.load_policy(instance)
     except MastodonError as err:
         raise HTTPException(status_code=502, detail=str(err)) from None
 
@@ -268,7 +260,7 @@ def accept_policy(body: AcceptRequest) -> dict:
                 f"Reload and review the current version before accepting."
             ),
         )
-    db.record_mastodon_ack(policy.info.host, current_hash, _policy_payload(policy))
+    gate.record(policy)
     log.info("[mastodon-post] rules accepted for %s (%s)", policy.info.host, current_hash)
     return {"accepted": True, "instance": policy.info.host, "policyHash": current_hash}
 
@@ -285,32 +277,17 @@ def revoke_policy(instance: str) -> dict:
 
 
 def _require_accepted(instance: str) -> masto.InstancePolicy:
-    """Load the policy and refuse unless it is currently accepted.
+    """The gate, as a 409. See services/mastodon_gate.py for what it enforces and why.
 
-    This is the gate. Every path that puts words on the fediverse goes through
-    it, and it re-fetches rather than trusting the stored hash, so a rule change
-    upstream takes effect on the next generation and not whenever someone
-    happens to reopen the rules screen.
+    Every path that puts words on the fediverse — or reads other people's off it —
+    goes through this.
     """
-    policy = _load_policy(instance)
-    ack = db.get_mastodon_ack(policy.info.host)
-    if not ack:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Read {policy.info.host}'s rules and accept them before generating "
-                f"posts for it."
-            ),
-        )
-    if ack["policy_hash"] != policy.fingerprint:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"{policy.info.host} has changed its rules since you accepted them. "
-                f"Review the new version before generating anything else."
-            ),
-        )
-    return policy
+    try:
+        return gate.require_accepted(instance)
+    except gate.PolicyNotAccepted as err:
+        raise HTTPException(status_code=409, detail=str(err)) from None
+    except MastodonError as err:
+        raise HTTPException(status_code=502, detail=str(err)) from None
 
 
 # ---------------------------------------------------------------------------
@@ -357,11 +334,9 @@ def status(instance: str = "") -> StatusResponse:
     missing: list[str] = []
     if not instance.strip():
         missing.append("Mastodon instance")
-    if (os.environ.get("LLM_PROVIDER") or "gemini") == "hf":
-        if not (os.environ.get("HF_TOKEN") or "").strip():
-            missing.append("HF_TOKEN")
-    elif not (os.environ.get("GEMINI_API_KEY") or "").strip():
-        missing.append("GEMINI_API_KEY")
+    # Hugging Face only — see the note in routers/social_post.py.
+    if not (os.environ.get("HF_TOKEN") or "").strip():
+        missing.append("HF_TOKEN")
 
     try:
         niches = spg_db.list_niches()
@@ -786,45 +761,11 @@ DISCLOSURE_LINE = "🤖 Written with AI assistance."
 def _compliance_for(policy: masto.InstancePolicy, disclose: bool) -> ComplianceOut:
     """Turn the instance's own rules into concrete instructions for this post.
 
-    Everything here is derived from text the instance actually published — no
-    generic best-practice padding. If a server says nothing about automation, we
-    say nothing about it either, rather than inventing a requirement it never
-    asked for.
+    The notes come from gate.policy_notes, which Engage's terms panel also reads,
+    so the two screens can never tell the user different things about the same
+    server.
     """
-    haystack = " ".join(
-        [r.text + " " + r.hint for r in policy.rules] + [policy.extended_description]
-    ).lower()
-
-    notes: list[str] = []
-    if "generative ai" in haystack or "generative-ai" in haystack or "ai must be" in haystack:
-        notes.append(
-            f"{policy.info.host} requires generative-AI use to be disclosed — keep the "
-            f"disclosure line, or write your own before posting."
-        )
-    if "solely post ai" in haystack or "only ai" in haystack:
-        notes.append(
-            "This instance forbids accounts that post *only* AI-generated content. "
-            "This tool has to sit alongside your own posting, not replace it."
-        )
-    if any(t in haystack for t in ("advertis", "promot", "commercial", "spam", "seo")):
-        notes.append(
-            "This instance restricts commercial promotion. Posts that read as "
-            "advertising are a rules problem no disclosure fixes."
-        )
-    if "bot" in haystack or "automat" in haystack:
-        notes.append(
-            "Automated posting here is subject to rules — check whether yours needs "
-            "the bot flag set on your profile, or unlisted visibility."
-        )
-    if any(
-        t in haystack
-        for t in ("not for personal use", "corporate account", "unofficial corporate")
-    ):
-        notes.append(
-            f"{policy.info.host} restricts non-personal (company, agency, project, bot) "
-            f"accounts — several are invite-only and unapproved ones get suspended. "
-            f"Confirm your account type is permitted before posting as a brand."
-        )
+    notes = gate.policy_notes(policy)
 
     return ComplianceOut(
         disclosureApplied=disclose,

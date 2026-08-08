@@ -14,6 +14,7 @@ import {
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import MarkdownPanel from './MarkdownPanel'
+import SaveButton from './SaveButton'
 import {
   card,
   chip,
@@ -474,6 +475,13 @@ export default function BrandForge(): React.JSX.Element {
                   <div style={primaryButtonSmall} onClick={copyVoiceCard}>
                     {copied ? 'Copied ✓' : 'Copy voice card'}
                   </div>
+                  <SaveButton
+                    libraryId={result.libraryId}
+                    tool="Brand"
+                    title={`${intake?.brand_name || 'Your brand'} — Brand Document`}
+                    subtitle="Brand document"
+                    content={result.markdown}
+                  />
                 </div>
               )}
             </div>
@@ -568,7 +576,7 @@ export default function BrandForge(): React.JSX.Element {
                   <div>
                     <div style={sectionEyebrow}>Brand images</div>
                     <div style={{ font: "600 12.5px 'Quicksand'", color: 'var(--ink-muted)', marginTop: 3 }}>
-                      Logo mark, mood board and social header from the Visual Direction Brief — via HF text-to-image, billed to your token.
+                      Logo mark, mood board and social header from the Visual Direction Brief. Uses your Modal image GPU after setup, otherwise HF text-to-image.
                     </div>
                   </div>
                   <div

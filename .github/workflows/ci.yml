@@ -1,0 +1,87 @@
+name: CI
+
+# The checks CONTRIBUTING.md asks contributors to run, enforced on the way in. Deliberately
+# cheap: no packaging, no GPU, no network-dependent tool tests — that's what build.yml is for,
+# and a CI job that takes twenty minutes is a CI job people learn to ignore.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A new push to a PR makes the in-flight run for that PR pointless.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # Only what the tests need. Installing requirements.lock.txt here would drag in torch,
+      # chromadb and the whole model stack for a suite that touches none of it — several
+      # minutes and a few GB per run, to test SQLite and some string handling.
+      #
+      # This list was derived by running the suite in a clean venv and adding packages until it
+      # passed, not by reading imports — the routers under test import transitively (brand_forge
+      # -> brandforge.export -> docx) and reading only the test files misses most of it. If you
+      # add a test that imports something new, this is the list that needs updating, and the
+      # failure will be a collection-time ModuleNotFoundError that names the missing package.
+      - name: Install test dependencies
+        run: >
+          pip install pytest httpx fastapi "pydantic>=2" pillow
+          modal gradio_client python-docx
+
+      - name: Run tests
+        working-directory: backend
+        run: python -m pytest app/tests -q
+
+  frontend:
+    name: Frontend typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+
+      # `npm ci` rather than `npm install`: it installs exactly the lockfile and fails if
+      # package.json and the lock have drifted apart, which is a thing worth failing on.
+      - name: Install dependencies
+        working-directory: electron
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: electron
+        run: npm run typecheck
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history. Scanning only the tip would miss a credential that was committed and
+          # then removed in a later commit — which is the usual way secrets actually leak, and
+          # is precisely the shape of the one this repo already had.
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml

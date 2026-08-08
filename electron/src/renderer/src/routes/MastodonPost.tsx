@@ -18,6 +18,9 @@ import {
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, textInput } from '../styles/styleKit'
+import HashtagSuggester from '../components/HashtagSuggester'
+import ScreenBackdrop from '../components/ScreenBackdrop'
+import SaveButton from '../components/SaveButton'
 
 /**
  * The Mastodon Post Creator.
@@ -200,6 +203,7 @@ export default function MastodonPost(): React.JSX.Element {
 
   return (
     <div style={{ maxWidth: 1120, margin: '0 auto', padding: '22px 34px 60px' }}>
+      <ScreenBackdrop video="mastodon" />
       <div
         style={{ font: "700 13px 'Quicksand'", color: 'var(--accent)', cursor: 'pointer', marginBottom: 14 }}
         onClick={goCreate}
@@ -240,7 +244,7 @@ export default function MastodonPost(): React.JSX.Element {
             value={instanceDraft}
             onChange={(e) => setInstanceDraft(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && void handleConnectInstance()}
-            placeholder="hachyderm.io"
+            placeholder="mastodon.social"
             style={{ ...textInput, flex: 1 }}
           />
           <div
@@ -412,6 +416,16 @@ export default function MastodonPost(): React.JSX.Element {
               linked={linked}
               onLink={handleLink}
               instance={policy.instance}
+            />
+          )}
+
+          {(fields.niche || fields.userInput.trim()) && (
+            <HashtagSuggester
+              draft={(result?.text ?? '').trim() || fields.userInput}
+              postText={result?.text ?? ''}
+              niche={fields.niche}
+              platform="mastodon"
+              charLimit={policy.maxCharacters}
             />
           )}
         </>
@@ -642,11 +656,20 @@ function Draft({
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <div style={{ font: "700 18px 'Kalam'", color: 'var(--ink)' }}>Here you go</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <SaveButton
+            libraryId={result.libraryId}
+            tool="Mastodon"
+            title={`Mastodon post · ${instance || 'draft'}`}
+            subtitle="Mastodon post"
+            content={result.text}
+          />
           <div
             style={{ font: "700 12px 'Quicksand'", color: result.overLimit ? 'var(--danger-ink)' : 'var(--ink-faint)' }}
           >
             {result.characters} / {result.maxCharacters} characters
             {result.overLimit ? ' — too long, trim it' : ''}
+          </div>
           </div>
         </div>
 
