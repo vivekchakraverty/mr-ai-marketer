@@ -31,6 +31,7 @@ export default function SocialPost(): React.JSX.Element {
   const setSocialField = useAppStore((s) => s.setSocialField)
   const goCreate = useAppStore((s) => s.goCreate)
   const goSettings = useAppStore((s) => s.goSettings)
+  const sendToEngage = useAppStore((s) => s.sendToEngage)
 
   const [status, setStatus] = useState<SocialStatus | null>(null)
   const [niches, setNiches] = useState<SocialNiche[]>([])
@@ -445,6 +446,18 @@ export default function SocialPost(): React.JSX.Element {
               >
                 {copied ? 'Copied ✓' : 'Copy'}
               </div>
+              {/* Engage's post box is Bluesky's, so this only makes sense for a
+                  Bluesky draft — offering it for an X or LinkedIn post would send
+                  a draft written to the wrong norms to the wrong network. */}
+              {fields.platform === 'bluesky' && (
+                <div
+                  style={secondaryButtonSmall}
+                  title="Open Engage with this post in the Bluesky box, ready to send"
+                  onClick={() => sendToEngage(result.text)}
+                >
+                  Send to Engage →
+                </div>
+              )}
               <div style={secondaryButtonSmall} onClick={handleGenerate}>
                 Try again
               </div>

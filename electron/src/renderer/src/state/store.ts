@@ -104,6 +104,17 @@ interface AppState {
 
   setUpdateInfo: (info: UpdateState | null) => void
   dismissUpdateBanner: () => void
+
+  // Handoff from a composer tool to Engage's Bluesky post box. Write-once: Engage
+  // takes it on arrival, so coming back later does not silently repopulate a box
+  // the user already emptied.
+  engageDraft: string | null
+  sendToEngage: (text: string) => void
+  // Reads and clears in one step, and returns null if it was already taken.
+  // The atomicity is load-bearing: StrictMode runs an effect body twice against
+  // the same closure, so a read-then-clear pair appended the draft twice. Taking
+  // it makes the second pass a no-op.
+  takeEngageDraft: () => string | null
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -208,5 +219,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       updateInfo: info,
       updateBannerDismissed: info?.phase === 'ready' ? false : s.updateBannerDismissed
     })),
-  dismissUpdateBanner: () => set({ updateBannerDismissed: true })
+  dismissUpdateBanner: () => set({ updateBannerDismissed: true }),
+
+  engageDraft: null,
+  // Navigating is part of the action, not a separate step the caller has to
+  // remember — "send to Engage" that leaves you on the previous screen is a
+  // clipboard button with extra ceremony.
+  sendToEngage: (text) => set({ engageDraft: text, route: 'engage', tool: null, readerItem: null }),
+  takeEngageDraft: () => {
+    const draft = get().engageDraft
+    if (draft !== null) set({ engageDraft: null })
+    return draft
+  }
 }))

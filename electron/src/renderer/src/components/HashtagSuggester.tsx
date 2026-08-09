@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { suggestHashtags, type HashtagSuggestion, type HashtagSuggestResponse } from '../api/client'
 import { chip, label, primaryButtonSmall, secondaryButtonSmall } from '../styles/styleKit'
+import { useAppStore } from '../state/store'
 import SaveButton from './SaveButton'
 
 /**
@@ -75,6 +76,7 @@ export default function HashtagSuggester({
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [copied, setCopied] = useState('')
+  const sendToEngage = useAppStore((s) => s.sendToEngage)
 
   const canRun = Boolean(draft.trim() || niche.trim())
 
@@ -256,6 +258,19 @@ export default function HashtagSuggester({
                 }}
               >
                 {copied === 'post' ? 'Copied ✓' : 'Copy post + tags'}
+              </div>
+            )}
+            {/* Engage's post box belongs to Bluesky, so this only appears for a
+                Bluesky draft. Sends whatever the tray currently holds — post plus
+                the selected tags when there is a post, the tags alone when there
+                is not, which is the case where you already pasted the post there. */}
+            {platform === 'bluesky' && (
+              <div
+                style={secondaryButtonSmall}
+                title="Open Engage with this in the Bluesky box, ready to send"
+                onClick={() => sendToEngage(combined)}
+              >
+                {postText.trim() ? 'Send post + tags to Engage →' : 'Send tags to Engage →'}
               </div>
             )}
             {/* Nothing else keeps hashtag sets — the suggester has no library entry of its

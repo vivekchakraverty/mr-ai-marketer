@@ -58,7 +58,12 @@ const REASON_VERB: Record<string, string> = {
   unverified: 'removed verification'
 }
 
-const POST_TEXT_LIMIT = 3000
+// Bluesky's actual ceiling. This read 3000 until a draft handed over from the
+// Social Post composer made the gap matter: nothing validates length on the way
+// out (the router just strips and sends), so an over-long post counted up to a
+// limit that did not exist and then failed at the API. Typing is capped here and
+// the counter goes red for a handed-over draft, which maxLength cannot truncate.
+const POST_TEXT_LIMIT = 300
 
 function timeAgo(iso: string): string {
   const then = new Date(iso).getTime()
@@ -338,6 +343,8 @@ function FeedCard({
 
 export default function Engage(): React.JSX.Element {
   const goSettings = useAppStore((s) => s.goSettings)
+  const engageDraft = useAppStore((s) => s.engageDraft)
+  const takeEngageDraft = useAppStore((s) => s.takeEngageDraft)
 
   const [network, setNetwork] = useState<Network>('bluesky')
   const [status, setStatus] = useState<EngageStatus | null>(null)
@@ -348,6 +355,29 @@ export default function Engage(): React.JSX.Element {
   const [posting, setPosting] = useState(false)
   const [busyKey, setBusyKey] = useState('')
   const [error, setError] = useState('')
+
+  // Only reachable via a handed-over draft — maxLength stops typing past the cap
+  // but does not truncate a value set programmatically.
+  const postOverLimit = postText.length > POST_TEXT_LIMIT
+
+  // A draft handed over from a composer tool (Social Post's "Send to Engage").
+  // Consumed once, so returning to Engage later does not refill a box the user
+  // has since emptied.
+  //
+  // The append branch is defensive rather than load-bearing: `postText` is local
+  // state and this screen unmounts on every route change, so in practice the box
+  // is always empty on arrival. It costs one line and stops the handoff eating a
+  // draft if the composer is ever persisted.
+  useEffect(() => {
+    if (!engageDraft) return
+    // Take rather than read-then-clear. StrictMode runs this body twice against
+    // the same closure, so `engageDraft` is still set on the second pass; only an
+    // atomic take makes that pass a no-op instead of appending the post again.
+    const draft = takeEngageDraft()
+    if (!draft) return
+    setNetwork('bluesky')
+    setPostText((current) => (current.trim() ? `${current.trimEnd()}\n\n${draft}` : draft))
+  }, [engageDraft, takeEngageDraft])
 
   // Only asked for once the Bluesky side is actually being looked at — opening
   // Engage on the Mastodon tab should not log into Bluesky in the background.
@@ -532,12 +562,20 @@ export default function Engage(): React.JSX.Element {
               style={{ ...textarea, minHeight: 92, background: 'var(--surface)' }}
             />
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-              <span style={{ font: "700 11px 'Quicksand'", color: 'var(--ink-fainter)' }}>
+              <span
+                style={{
+                  font: "700 11px 'Quicksand'",
+                  color: postOverLimit ? 'var(--danger-ink)' : 'var(--ink-fainter)'
+                }}
+              >
                 {postText.length}/{POST_TEXT_LIMIT}
+                {postOverLimit ? ' — too long, trim it' : ''}
               </span>
               <div
-                style={{ ...primaryButtonSmall, opacity: posting || !postText.trim() ? 0.55 : 1 }}
-                onClick={posting || !postText.trim() ? undefined : () => void handleCreatePost()}
+                style={{ ...primaryButtonSmall, opacity: posting || !postText.trim() || postOverLimit ? 0.55 : 1 }}
+                onClick={
+                  posting || !postText.trim() || postOverLimit ? undefined : () => void handleCreatePost()
+                }
               >
                 Post
               </div>
