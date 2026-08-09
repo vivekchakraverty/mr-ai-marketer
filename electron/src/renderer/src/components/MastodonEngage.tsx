@@ -19,9 +19,12 @@ import {
   type MastodonRelationship,
   type MastodonSearchResult,
   type MastodonSession,
+  type MastodonMedia,
   type MastodonStatusAction,
-  type MastodonTerms
+  type MastodonTerms,
+  type PostMediaItem
 } from '../api/client'
+import PostMedia from './PostMedia'
 import { useAppStore } from '../state/store'
 import { chip, label, primaryButtonSmall, secondaryButtonSmall, segGroup, segItem, select, textarea, textInput } from '../styles/styleKit'
 
@@ -163,6 +166,27 @@ const eyebrow: CSSProperties = {
 }
 
 const muted: CSSProperties = { font: "600 12.5px/1.6 'Quicksand'", color: 'var(--ink-muted)' }
+
+/**
+ * Mastodon's attachment shape -> the shared one PostMedia renders.
+ *
+ * The only real difference is the field name (`type` vs `kind`); the vocabularies
+ * already agree on image/video/gifv/audio. Mastodon serves video as a direct MP4,
+ * so `isHls` stays false and the player needs no hls.js for this side.
+ */
+function toPostMediaItem(m: MastodonMedia): PostMediaItem {
+  const known = ['image', 'video', 'gifv', 'audio'] as const
+  const kind = (known as readonly string[]).includes(m.type)
+    ? (m.type as PostMediaItem['kind'])
+    : 'unknown'
+  return {
+    kind,
+    url: m.url || m.previewUrl,
+    previewUrl: m.previewUrl || m.url,
+    description: m.description,
+    isHls: false
+  }
+}
 
 // ---------------------------------------------------------------------------
 // The terms region — above the embed, deliberately
@@ -851,36 +875,7 @@ function StatusCard({
         )}
 
         {!hidden && post.media.length > 0 && (
-          <div style={{ display: 'flex', gap: 7, marginTop: 8, flexWrap: 'wrap' }}>
-            {post.media.map((m) => (
-              <span key={m.url || m.previewUrl} title={m.description || m.type}>
-                {m.type === 'image' || m.type === 'gifv' ? (
-                  <img
-                    src={m.previewUrl}
-                    alt={m.description}
-                    style={{
-                      width: 104,
-                      height: 78,
-                      objectFit: 'cover',
-                      borderRadius: 10,
-                      border: '2px solid var(--border)',
-                      cursor: 'pointer',
-                      // Sensitive media stays behind the same fold as the text.
-                      filter: post.sensitive && !revealed ? 'blur(14px)' : 'none'
-                    }}
-                    onClick={() => void window.api.openExternal(m.url || m.previewUrl)}
-                  />
-                ) : (
-                  <span
-                    style={{ ...actionButton(false, false), display: 'inline-block' }}
-                    onClick={() => void window.api.openExternal(m.url || m.previewUrl)}
-                  >
-                    {m.type} ↗
-                  </span>
-                )}
-              </span>
-            ))}
-          </div>
+          <PostMedia media={post.media.map(toPostMediaItem)} sensitive={post.sensitive} revealed={revealed} />
         )}
 
         {post.hashtags.length > 0 && (

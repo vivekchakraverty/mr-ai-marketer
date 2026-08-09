@@ -1153,6 +1153,23 @@ export interface EngageStatus {
   handle: string | null
 }
 
+/**
+ * One piece of media on a post. The Bluesky and Mastodon routers deliberately
+ * emit the same shape, so `PostMedia` renders either without an adapter.
+ * `isHls` is the one network-specific flag — Bluesky video arrives as an HLS
+ * playlist, Mastodon's as a plain MP4.
+ */
+export interface PostMediaItem {
+  kind: 'image' | 'video' | 'gifv' | 'audio' | 'link' | 'unknown'
+  url: string
+  previewUrl: string
+  description: string
+  isHls?: boolean
+  aspectRatio?: number | null
+  title?: string
+  domain?: string
+}
+
 export interface FeedPost {
   uri: string
   cid: string
@@ -1183,6 +1200,7 @@ export interface FeedPost {
   authorMuted: boolean
   authorBlocking: string | null
   authorBlockedBy: boolean
+  media: PostMediaItem[]
 }
 
 export interface FeedResponse {

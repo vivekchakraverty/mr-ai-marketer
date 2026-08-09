@@ -29,6 +29,28 @@ class EngageStatus(BaseModel):
     handle: str | None = None
 
 
+class MediaOut(BaseModel):
+    """One piece of media on a post, in the shape both feeds share.
+
+    Deliberately the same field names the Mastodon panel already emits
+    (routers/mastodon_engage.py::MediaOut) so one frontend component can render
+    either network's posts without a per-network adapter. `kind` is the union of
+    both vocabularies; `isHls` is the one genuinely Bluesky-specific bit.
+    """
+
+    kind: str  # image | video | gifv | audio | link | unknown
+    url: str = ""  # full-size image, or the video source
+    previewUrl: str = ""  # thumbnail / poster frame
+    description: str = ""  # alt text
+    # Bluesky serves video as an HLS playlist, which Chromium cannot play from a
+    # plain <video src>. The frontend attaches hls.js when this is set.
+    isHls: bool = False
+    aspectRatio: float | None = None
+    # Link cards only.
+    title: str = ""
+    domain: str = ""
+
+
 class FeedPost(BaseModel):
     uri: str
     cid: str
@@ -59,6 +81,7 @@ class FeedPost(BaseModel):
     authorMuted: bool = False
     authorBlocking: str | None = None
     authorBlockedBy: bool = False
+    media: list[MediaOut] = []
 
 
 class FeedResponse(BaseModel):
@@ -175,6 +198,93 @@ def _viewer_flags(post: Any) -> dict[str, str | bool | None]:
     }
 
 
+def _aspect_ratio(obj: Any) -> float | None:
+    """width/height off an atproto aspectRatio, or None if absent or degenerate.
+
+    Sent so the frontend can reserve the right box before the image loads, which
+    is what stops a feed from jumping around as thumbnails arrive.
+    """
+    ratio = getattr(obj, "aspect_ratio", None) or getattr(obj, "aspectRatio", None)
+    width = getattr(ratio, "width", 0) or 0
+    height = getattr(ratio, "height", 0) or 0
+    if width > 0 and height > 0:
+        return round(width / height, 4)
+    return None
+
+
+def _embed_media(embed: Any) -> list[MediaOut]:
+    """Media out of a hydrated Bluesky embed view.
+
+    Dispatches on which attributes the view carries rather than on its `$type`
+    string. The atproto package has renamed and re-namespaced these view models
+    more than once; the shapes themselves have been stable, so duck-typing
+    survives upgrades that a string match would not.
+
+    Handles the four embeds that carry viewable media. A bare quote post
+    (`record#view` with no media of its own) yields nothing here — the quoted
+    post's own text is already shown by the client, and recursing into it would
+    put someone else's images in the middle of this post's card.
+    """
+    if embed is None:
+        return []
+
+    # recordWithMedia: a quote post that also carries its own images or video.
+    # The media hangs off `.media`; unwrap and treat it as a plain embed.
+    nested = getattr(embed, "media", None)
+    if nested is not None:
+        return _embed_media(nested)
+
+    # images#view
+    images = getattr(embed, "images", None)
+    if isinstance(images, (list, tuple)):
+        return [
+            MediaOut(
+                kind="image",
+                url=str(getattr(img, "fullsize", "") or getattr(img, "thumb", "") or ""),
+                previewUrl=str(getattr(img, "thumb", "") or getattr(img, "fullsize", "") or ""),
+                description=str(getattr(img, "alt", "") or ""),
+                aspectRatio=_aspect_ratio(img),
+            )
+            for img in images
+        ]
+
+    # video#view — `playlist` is an HLS manifest, not a playable file URL.
+    playlist = getattr(embed, "playlist", None)
+    if playlist:
+        return [
+            MediaOut(
+                kind="video",
+                url=str(playlist),
+                previewUrl=str(getattr(embed, "thumbnail", "") or ""),
+                description=str(getattr(embed, "alt", "") or ""),
+                isHls=True,
+                aspectRatio=_aspect_ratio(embed),
+            )
+        ]
+
+    # external#view — a link preview card.
+    external = getattr(embed, "external", None)
+    if external is not None:
+        uri = str(getattr(external, "uri", "") or "")
+        domain = ""
+        if uri:
+            from urllib.parse import urlparse
+
+            domain = (urlparse(uri).hostname or "").removeprefix("www.")
+        return [
+            MediaOut(
+                kind="link",
+                url=uri,
+                previewUrl=str(getattr(external, "thumb", "") or ""),
+                title=str(getattr(external, "title", "") or ""),
+                description=str(getattr(external, "description", "") or ""),
+                domain=domain,
+            )
+        ]
+
+    return []
+
+
 def _post_view_to_feed_post(
     post: Any,
     *,
@@ -201,12 +311,20 @@ def _post_view_to_feed_post(
         reason=reason,
         reasonSubject=reason_subject,
         isRead=is_read,
+        media=_embed_media(getattr(post, "embed", None)),
         **_viewer_flags(post),
         **_author_fields(author),
     )
 
 
 def _notification_to_feed_post(notification: Any, me_did: str | None = None) -> FeedPost:
+    """A notification as a feed card.
+
+    No media: a notification carries the raw *record*, not a hydrated post view,
+    so any embed on it holds blob references rather than CDN URLs. Rendering them
+    would mean an extra getPosts round-trip per notification. The card links to
+    the post, which is where someone goes to see the picture anyway.
+    """
     record = getattr(notification, "record", None)
     author = notification.author
     is_post = _is_feed_post_record(record)

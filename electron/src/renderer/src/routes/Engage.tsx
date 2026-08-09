@@ -21,6 +21,7 @@ import {
   type FeedPost
 } from '../api/client'
 import MastodonEngage from '../components/MastodonEngage'
+import PostMedia from '../components/PostMedia'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import { useAppStore } from '../state/store'
 import { primaryButtonSmall, secondaryButtonSmall, segGroup, segItem, sectionEyebrow, textarea } from '../styles/styleKit'
@@ -233,9 +234,14 @@ function FeedCard({
           </div>
         ) : (
           <div style={{ font: "600 12.5px/1.5 'Quicksand'", color: 'var(--ink-fainter)', marginTop: 3 }}>
-            {post.isPost ? 'Post has no text.' : 'Profile activity'}
+            {post.isPost ? (post.media.length ? 'Media only.' : 'Post has no text.') : 'Profile activity'}
           </div>
         )}
+
+        {/* Bluesky has no per-post sensitive flag the way Mastodon does — content
+            filtering there is label-based and applied by the viewer's moderation
+            prefs, which this panel does not read. So media renders unblurred. */}
+        <PostMedia media={post.media} />
 
         <div style={{ display: 'flex', gap: 14, marginTop: 7, font: "700 11px 'Quicksand'", color: 'var(--ink-fainter)', flexWrap: 'wrap' }}>
           {post.replies > 0 && <span>{post.replies} replies</span>}
