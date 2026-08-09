@@ -76,7 +76,8 @@
     "mac": {
       "target": "dmg",
       "icon": "../build/icon.png",
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "artifactName": "${name}-${version}-${arch}.${ext}"
     },
     "linux": {
       "target": [
@@ -85,6 +86,7 @@
       ],
       "icon": "../build/icon.png",
       "category": "Office",
+      "artifactName": "${name}-${version}-${arch}.${ext}",
       "synopsis": "Local-first AI marketing suite",
       "maintainer": "Vivek Chakraverty <vivekchakraverty@gmail.com>",
       "syncDesktopName": true
