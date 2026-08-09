@@ -36,6 +36,10 @@ export default function SocialPost(): React.JSX.Element {
   const [status, setStatus] = useState<SocialStatus | null>(null)
   const [niches, setNiches] = useState<SocialNiche[]>([])
   const [result, setResult] = useState<SocialGenerateResponse | null>(null)
+  // Recent posts for this request, sent back on a rewrite so the model is told
+  // what not to repeat. Capped at three — enough to break the model out of its
+  // favourite opening without spending the prompt budget on old drafts.
+  const [previousTexts, setPreviousTexts] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
@@ -68,11 +72,20 @@ export default function SocialPost(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  async function handleGenerate(): Promise<void> {
+  /**
+   * Generate a post, or rewrite the one already on screen.
+   *
+   * `rewrite` keeps the current result visible while the new one is being
+   * written. Clearing it made the whole panel — including the button just
+   * clicked — vanish, leaving the only busy indicator on the primary button
+   * a couple of hundred pixels up the page, which read as nothing happening.
+   */
+  async function handleGenerate(rewrite = false): Promise<void> {
     if (!fields.userInput.trim() || !fields.niche) return
+    if (loading) return
     setLoading(true)
     setError('')
-    setResult(null)
+    if (!rewrite) setResult(null)
     setPostImage(null)
     setImageError('')
     setLinked('')
@@ -82,9 +95,16 @@ export default function SocialPost(): React.JSX.Element {
         fields.userInput,
         fields.niche,
         fields.platform,
-        fields.sourceUrl
+        fields.sourceUrl,
+        // What it has already written for this request. Without this the prompt
+        // is byte-identical every time and the model reliably opens with the same
+        // sentence, so "Try again" returned the same post in different words.
+        rewrite ? previousTexts : []
       )
       setResult(res)
+      // A fresh generate starts the history over — a new topic should not be
+      // steered away from the wording of the last one.
+      setPreviousTexts((prev) => (rewrite ? [...prev, res.text].slice(-3) : [res.text]))
       void refreshLibrary()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -279,7 +299,7 @@ export default function SocialPost(): React.JSX.Element {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div
             style={{ ...primaryButtonSmall, opacity: loading || !fields.niche ? 0.6 : 1 }}
-            onClick={loading || !fields.niche ? undefined : handleGenerate}
+            onClick={loading || !fields.niche ? undefined : () => void handleGenerate()}
           >
             {loading ? (fields.sourceUrl.trim() ? 'Reading the link…' : 'Thinking…') : 'Write it'}
           </div>
@@ -458,8 +478,12 @@ export default function SocialPost(): React.JSX.Element {
                   Send to Engage →
                 </div>
               )}
-              <div style={secondaryButtonSmall} onClick={handleGenerate}>
-                Try again
+              <div
+                style={{ ...secondaryButtonSmall, opacity: loading ? 0.6 : 1 }}
+                title="Write a different post for the same request"
+                onClick={loading ? undefined : () => void handleGenerate(true)}
+              >
+                {loading ? 'Rewriting…' : 'Try again'}
               </div>
               <div
                 style={{ ...secondaryButtonSmall, opacity: imageLoading ? 0.6 : 1 }}

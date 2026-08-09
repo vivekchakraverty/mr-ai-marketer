@@ -504,7 +504,49 @@ options, no hashtag suggestions unless they belong in the post, no quotation \
 marks around the whole thing.
 
 The request: {user_input}
+{avoid_section}"""
+
+# Rendered only when the caller is asking for another attempt at a request it has
+# already generated for.
+#
+# This exists because temperature alone does not do the job. With an identical
+# prompt, this model reproduces its own opening sentence almost verbatim across
+# attempts — measured at temperature 0.9, four regenerations of one request all
+# began "I used to stress about posting at optimal times." They differed in
+# length and in the back half, so nothing looked broken from the API's side, but
+# a person clicking "try again" was handed the same post in different words.
+#
+# Two things were needed to actually shift it, and the first attempt at this had
+# only the second:
+#
+#  1. Position. This renders LAST, after the request. An earlier version sat
+#     above "Write ONE post about the following" and changed nothing — the model
+#     followed the instruction nearest the end and reproduced its opening anyway.
+#  2. Naming the banned words outright. "Write something different" is too vague
+#     to overcome the pull of the exemplars; quoting the exact opening it must
+#     not use is not.
+_AVOID_TEMPLATE = """
+IMPORTANT — this is a retry. You have already written the following for this
+exact request and the author rejected it. They want a different post, not a
+reworded one:
+
+{previous}
+
+Hard constraints for this attempt:
+- Your first sentence must NOT begin with any of these openings: {banned}
+- Do not reuse the sentence pattern of any opening above, even with different
+  words. If a previous attempt opened by recalling a past habit, do not open by
+  recalling a past habit.
+- Change the way in: if the last attempt was a personal anecdote, try a direct
+  claim, a question, a concrete detail, or an observation about the reader.
+- Do not merely shorten, lengthen, or paraphrase what is above.
+- Every other instruction in this brief still applies.
 """
+
+# How much of a previous opening to quote back as banned. Long enough to pin the
+# actual phrasing, short enough that the model is not just told to avoid one long
+# string it was never going to reproduce exactly.
+_BANNED_OPENING_WORDS = 8
 
 # Only rendered when the author supplied a link. The rules are explicit because
 # this section is the one place facts may legitimately come from: without saying
@@ -567,12 +609,18 @@ def generate_post(
     exemplar_texts: Sequence[str],
     kb_summaries: Sequence[str],
     source: FetchedSource | None = None,
+    avoid_texts: Sequence[str] = (),
 ) -> str:
     """Generate one post grounded in exemplars (style) and KB entries (facts).
 
     `source`, when given, is a page the author asked to write about (see
     src/sources.py). It is the only sanctioned origin for facts the request did
     not itself contain.
+
+    `avoid_texts` are posts already generated for this same request — pass them
+    when the author is asking for another attempt. Temperature alone does not
+    produce a different post here (see _AVOID_TEMPLATE for the measurement); the
+    model has to be told what it already wrote.
 
     Temperature is high-ish: this is the one creative call in the system, and the
     anti-copying instruction needs room to actually diverge from the exemplars.
@@ -615,6 +663,24 @@ def generate_post(
     else:
         source_section = ""
 
+    kept = [t.strip() for t in avoid_texts if t and t.strip()]
+    if kept:
+        banned = []
+        for text in kept:
+            words = text.split()[:_BANNED_OPENING_WORDS]
+            if words:
+                opening = " ".join(words)
+                if opening not in banned:
+                    banned.append(opening)
+        avoid_section = _AVOID_TEMPLATE.format(
+            previous="\n\n".join(
+                f"--- Attempt {i} ---\n{t}" for i, t in enumerate(kept, 1)
+            ),
+            banned="; ".join(f'"{b}…"' for b in banned) or "(none)",
+        )
+    else:
+        avoid_section = ""
+
     prompt = _GENERATION_PROMPT.format(
         niche=niche,
         platform=platform,
@@ -622,6 +688,7 @@ def generate_post(
         exemplar_section=exemplar_section,
         platform_norms=platform_norms(platform),
         source_section=source_section,
+        avoid_section=avoid_section,
         user_input=user_input.strip(),
     )
     return _call(prompt, temperature=0.9, max_output_tokens=600)

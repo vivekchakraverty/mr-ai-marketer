@@ -611,9 +611,13 @@ export function generateSocialPost(
   userInput: string,
   niche: string,
   platform: string,
-  sourceUrl = ''
+  sourceUrl = '',
+  // Posts already written for this same request. Sent on a rewrite so the model
+  // is told what not to repeat — the prompt is otherwise byte-identical between
+  // attempts and the model reliably reproduces its own opening line.
+  avoidTexts: string[] = []
 ): Promise<SocialGenerateResponse> {
-  return postJson('/social-post/generate', { userInput, niche, platform, sourceUrl })
+  return postJson('/social-post/generate', { userInput, niche, platform, sourceUrl, avoidTexts })
 }
 
 export async function generateSocialPostImage(

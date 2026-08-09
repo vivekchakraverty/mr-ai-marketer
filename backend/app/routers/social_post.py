@@ -38,6 +38,11 @@ router = APIRouter(prefix="/social-post", tags=["social-post"])
 
 PLATFORMS = ["bluesky", "x", "linkedin", "mastodon"]
 
+# Earlier attempts to show the model when it is asked to try again. Three is
+# enough to break it out of its preferred opening; more just spends prompt budget
+# on drafts nobody kept.
+MAX_AVOID_TEXTS = 3
+
 
 # --- lazy imports ----------------------------------------------------------
 # The vendored package pulls in torch via sentence-transformers, so importing it
@@ -81,6 +86,10 @@ class GenerateRequest(BaseModel):
     niche: str
     platform: str = "bluesky"
     sourceUrl: str = ""
+    # Posts already written for this request, sent when the caller is asking for
+    # another attempt. Empty for a first generation. Capped server-side so a
+    # client cannot grow the prompt without bound.
+    avoidTexts: list[str] = []
 
 
 class ExemplarOut(BaseModel):
@@ -374,6 +383,10 @@ def generate(body: GenerateRequest) -> GenerateResponse:
             niche=body.niche,
             platform=body.platform,
             source_url=body.sourceUrl,
+            # Bounded here rather than trusting the caller: each attempt is up to
+            # 300 characters and they all ride in the prompt, so an unbounded list
+            # would quietly eat the generation budget.
+            avoid_texts=[t for t in body.avoidTexts if t.strip()][-MAX_AVOID_TEXTS:],
         )
     except telemetry.ConsentRequired as err:
         # 409: the caller must show the consent screen, not treat this as an error.

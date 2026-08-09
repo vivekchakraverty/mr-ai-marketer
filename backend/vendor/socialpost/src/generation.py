@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from . import embeddings, llm, sources, telemetry
@@ -147,6 +148,7 @@ def generate(
     platform: str = "bluesky",
     persist: bool = True,
     source_url: str = "",
+    avoid_texts: Sequence[str] = (),
 ) -> GenerationResult:
     """Generate one post grounded in the niche's exemplars and the platform KB.
 
@@ -156,6 +158,11 @@ def generate(
     sources.SourceError rather than silently generating an ungrounded post, since
     a post that quietly ignores the link the author supplied is worse than an
     error that says why.
+
+    `avoid_texts` are posts already generated for this same request. Pass them
+    when the author has asked for another attempt: an identical prompt produces a
+    near-identical post however high the temperature, so the model has to be shown
+    what it already wrote (see llm._AVOID_TEMPLATE).
 
     `persist=False` skips the generations row — used by tests and CLI probes that
     should not pollute the learning loop, and it also skips the consent gate and
@@ -206,6 +213,7 @@ def generate(
         exemplar_texts=[e.text for e in exemplars],
         kb_summaries=[k.summary for k in kb_articles],
         source=fetched,
+        avoid_texts=avoid_texts,
     )
 
     generation_id: int | None = None
