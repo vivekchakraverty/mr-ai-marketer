@@ -45,11 +45,43 @@ jobs:
       # each run means a release built today and one built next week can ship different
       # libraries — a fresh resolve currently picks protobuf 6.x where this app is tested
       # against 5.29.6, which is exactly the drift a release job should never invent.
-      - name: Install backend dependencies
+      # Linux only, and before the lock: on Linux the default PyPI torch wheel declares six
+      # CUDA dependencies (nvidia-cublas, nvidia-cudnn-cu13, nvidia-cusparselt-cu13,
+      # nvidia-nccl-cu13, nvidia-nvshmem-cu13, triton) that the Windows wheel does not. They
+      # add 2-3GB, which took the Linux artifact to 5.67GB against Windows' 573MB and pushed
+      # its release assets past GitHub's hard 2GiB-per-asset limit — failing the publish for
+      # every platform, not just Linux.
+      #
+      # Nothing in the packaged app uses a local GPU. torch is here for sentence-transformers
+      # embeddings on CPU; the only CUDA code in the tree (brandforge/modal_*.py,
+      # docmaker/beam_app.py) runs on remote Modal and Beam workers, never in this binary.
+      #
+      # requirements.lock.txt was generated on Windows, so it pins torch==2.12.1 without those
+      # Linux-only transitives. Installing the CPU wheel first satisfies that pin (2.12.1+cpu
+      # matches ==2.12.1) so the lock step leaves it alone rather than pulling the CUDA build.
+      - name: Install CPU-only torch (Linux)
+        if: matrix.platform == 'linux'
         working-directory: backend
         run: |
           python -m venv .venv
+          .venv/bin/pip install --index-url https://download.pytorch.org/whl/cpu torch==2.12.1
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          ${{ matrix.platform == 'linux' && 'true' || 'python -m venv .venv' }}
           ${{ matrix.platform == 'win' && '.venv\\Scripts\\pip' || '.venv/bin/pip' }} install -r requirements.lock.txt pyinstaller
+
+      - name: Confirm torch carries no CUDA payload (Linux)
+        if: matrix.platform == 'linux'
+        working-directory: backend
+        run: |
+          .venv/bin/python -c "import torch; print('torch', torch.__version__)"
+          if .venv/bin/pip list --format=freeze | grep -iE '^(nvidia|triton)'; then
+            echo "::error::CUDA packages present in the Linux venv — the release assets will exceed GitHub's 2GiB limit."
+            exit 1
+          fi
+          echo "No nvidia/triton packages present."
 
       # See resources/ffmpeg/README.md — the static binaries aren't committed (large, and
       # license-bearing), so they're fetched here. DocuMaker and TutorialMaker shell out to
@@ -170,7 +202,12 @@ jobs:
   release:
     name: Publish release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    # `always()` so one platform failing cannot silently cancel the release for the others.
+    # This has now bitten twice: a Linux .deb missing its maintainer field, then a Linux
+    # asset over GitHub's size limit — both times Windows and macOS had built cleanly and
+    # their installers were thrown away. A missing platform is a visible gap in the release;
+    # no release at all is a green-looking run that shipped nothing.
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -179,6 +216,37 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+
+      # GitHub rejects any single release asset of 2GiB or more, and rejects it at upload
+      # time — which fails the whole publish, taking every other platform's installer with
+      # it. Drop oversized files here instead, loudly, so the rest of the release survives.
+      - name: Drop assets over GitHub's 2GiB limit
+        run: |
+          limit=$((2 * 1024 * 1024 * 1024))
+          shopt -s nullglob
+          for f in artifacts/*; do
+            [ -f "$f" ] || continue
+            size=$(stat -c%s "$f")
+            if [ "$size" -ge "$limit" ]; then
+              echo "::warning::$(basename "$f") is $((size / 1048576))MB and exceeds GitHub's 2GiB asset limit — excluded from the release."
+              rm -f "$f"
+            fi
+          done
+          echo "Assets to publish:"
+          ls -lh artifacts/ | awk 'NR>1 {print "  " $5 "\t" $9}'
+
+      # A release with no installer is worse than a failed job, because nobody re-reads a
+      # green run. latest.yml alone is not a release — it would point the updater at
+      # installers that were never uploaded.
+      - name: Require at least one installer
+        run: |
+          shopt -s nullglob
+          installers=(artifacts/*.exe artifacts/*.dmg artifacts/*.AppImage artifacts/*.deb)
+          if [ ${#installers[@]} -eq 0 ]; then
+            echo "::error::No installer survived the build. Nothing to release."
+            exit 1
+          fi
+          echo "${#installers[@]} installer(s) present."
 
       - name: Publish
         uses: softprops/action-gh-release@v2
