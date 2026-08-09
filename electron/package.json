@@ -3,7 +3,15 @@
   "version": "0.2.0",
   "description": "Mr. AI Marketer — desktop marketing studio",
   "main": "./out/main/index.js",
-  "author": "Vivek Chakraverty",
+  "homepage": "https://github.com/vivekchakraverty/mr-ai-marketer",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vivekchakraverty/mr-ai-marketer.git"
+  },
+  "author": {
+    "name": "Vivek Chakraverty",
+    "email": "vivekchakraverty@gmail.com"
+  },
   "license": "MIT",
   "private": true,
   "scripts": {
@@ -74,7 +82,11 @@
         "deb"
       ],
       "icon": "../build/icon.png",
-      "category": "Office"
+      "category": "Office",
+      "desktopName": "mr-ai-marketer.desktop",
+      "synopsis": "Local-first AI marketing suite",
+      "maintainer": "Vivek Chakraverty <vivekchakraverty@gmail.com>",
+      "syncDesktopName": true
     },
     "nsis": {
       "oneClick": false,
