@@ -3,6 +3,9 @@ node_modules/
 electron/out/
 electron/dist/
 electron/dist-electron/
+# TypeScript's incremental-build cache. Rewritten by every typecheck and build, so
+# tracking it meant a modified file in `git status` after any of them.
+*.tsbuildinfo
 
 # Python
 # Deliberately unscoped: Python lives in backend/, healthmon/, scripts/ and several
