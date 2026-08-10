@@ -3,3 +3,9 @@ requests>=2.31
 # Optional — without it the "Video search (yt-dlp)" check reports as skipped rather than
 # failing, so the monitor still runs on a bare Python.
 yt-dlp>=2024.1.1
+
+# Tray watcher only (python -m healthmon.tray). The CLI modes run without it, so a
+# bare install still gets `healthmon health` — it is the icon that needs this.
+pystray>=0.19
+# Pillow draws the tray icon at runtime; no image file is shipped.
+pillow>=10.0
