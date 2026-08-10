@@ -10,6 +10,7 @@ import HfGateModal from './components/HfGateModal'
 import DistributionGateModal from './components/DistributionGateModal'
 import LeadgenGateModal from './components/LeadgenGateModal'
 import UpdateBanner from './components/UpdateBanner'
+import ScrapDrawer from './components/ScrapDrawer'
 import Home from './routes/Home'
 import Research from './routes/Research'
 import CreateHub from './routes/CreateHub'
@@ -179,6 +180,9 @@ function App(): React.JSX.Element {
           <MainContent />
         </ErrorBoundary>
       </main>
+      {/* Outside <main> so it stays put while the route changes, and above it so a
+          scroll on the page never moves the shelf. */}
+      <ScrapDrawer />
       {hfGateOpen && <HfGateModal />}
       {distributionGateOpen && <DistributionGateModal />}
       {leadgenGateOpen && <LeadgenGateModal />}
