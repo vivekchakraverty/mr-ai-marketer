@@ -80,7 +80,13 @@ class DiscoveryResponse(BaseModel):
 
 
 class SyncRequest(BaseModel):
-    niche: str = Field(min_length=2, max_length=120)
+    # Optional, unlike DiscoverRequest's. There the niche IS the search query, so a
+    # blank one has nothing to look for. A sync only measures accounts already in the
+    # cohort, each carrying its own niche; this value just labels the owner account,
+    # and _sync_now() already falls back to "general" when it is empty. Requiring two
+    # characters here made "Sync now" fail with a 422 for anyone who had built a
+    # cohort without typing a niche first.
+    niche: str = Field(default="", max_length=120)
 
 
 class SyncResponse(BaseModel):

@@ -126,7 +126,15 @@ export default function BlueskyAnalytics(): React.JSX.Element {
   }
 
   async function sync(): Promise<void> {
-    if (!niche.trim()) return
+    // No niche guard, deliberately. There used to be an early return here, but the
+    // Sync now button never rendered as disabled — so on a blank niche the click
+    // did nothing at all, with no error, no spinner and no explanation.
+    //
+    // The requirement was not real either. A sync measures the accounts already in
+    // the cohort, which each carry their own niche; the field is only used to label
+    // the owner account, and the router already handles an empty one (_sync_now
+    // falls back to "general", and only re-labels the owner when a niche is given
+    // and differs). Discovery still needs it, because there it is the search query.
     setWorking('sync')
     setError('')
     setNote('')
