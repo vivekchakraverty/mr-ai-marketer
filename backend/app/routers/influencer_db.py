@@ -83,6 +83,16 @@ def _load() -> pd.DataFrame:
     df = raw.rename(columns=_COLUMN_MAP)
     df = df[[c for c in _COLUMN_MAP.values() if c in df.columns]].copy()
 
+    # A catalogue is allowed to omit columns. The public default one ships without
+    # Email and Mobile, and every column below is read unconditionally further down
+    # — _TEXT_COLUMNS fills them, `mobile` gets a regex applied, `_row_to_dict`
+    # reads both — so a missing one would be a KeyError rather than a blank cell.
+    # Fill the gaps once here and the rest of the pipeline stops caring which
+    # edition it was handed.
+    for col in _COLUMN_MAP.values():
+        if col not in df.columns:
+            df[col] = ""
+
     for col in _TEXT_COLUMNS:
         df[col] = df[col].fillna("").astype(str).str.strip()
 

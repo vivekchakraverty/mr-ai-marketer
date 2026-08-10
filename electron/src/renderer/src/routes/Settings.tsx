@@ -387,7 +387,7 @@ export default function Settings(): React.JSX.Element {
           <Section
             title="Data repositories"
             optional
-            blurb="Three tools read a catalogue or a model that isn't shipped inside the app — it's pulled from Hugging Face on first use and cached. Point each at a repo you own. Private repos work: they're fetched with the token above. Leave blank and the tool says which one is missing."
+            blurb="Three tools read a catalogue or a model that isn't shipped inside the app — it's pulled from Hugging Face on first use and cached. The Influencer Database has a public default and works with this left blank; set it only to use your own catalogue, for instance one with contact details. The other two have no default and their tool says so until you point it at a repo. Private repos work — they're fetched with the token above."
             accent="var(--accent-deep)"
           >
             <label style={label}>Influencer Database (dataset)</label>
@@ -396,7 +396,7 @@ export default function Settings(): React.JSX.Element {
               onChange={(e) =>
                 setSettings((s) => ({ ...s, hfAssets: { ...s.hfAssets, influencerRepo: e.target.value } }))
               }
-              placeholder="username/dataset-name"
+              placeholder="Optional — defaults to the public catalogue"
               style={textInput}
             />
             <label style={label}>Guest Post Suggester (dataset)</label>

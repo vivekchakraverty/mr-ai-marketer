@@ -62,6 +62,12 @@ class Asset:
     repo_type: str
     local: Path
     what: str
+    # A repo to fall back on when repo_env is unset, so the tool works on a fresh
+    # install with no configuration. Only ever a PUBLIC repo holding data that is
+    # fine to hand to everyone who installs the app — a default pointing at a
+    # private repo would just 401 for every user but its owner. Empty means the
+    # asset genuinely has no sensible default and the operator must name one.
+    default_repo: str = ""
 
 
 _APP = Path(__file__).resolve().parent.parent           # backend/app
@@ -89,6 +95,11 @@ ASSETS: dict[str, Asset] = {
         filename="influencer_database.xlsx",
         repo_env="HF_ASSETS_INFLUENCER_REPO",
         repo_type="dataset",
+        # Public edition: the same 14,632 profiles with the Email and Mobile columns
+        # removed, so the Influencer Database works on a fresh install without anyone
+        # having to publish a catalogue first. Set HF_ASSETS_INFLUENCER_REPO (Settings
+        # -> Data repositories) to override with your own, contacts included.
+        default_repo="vivekchakraverty/mr-ai-marketer-influencers-public",
         local=_APP / "data" / "influencer_database.xlsx",
         what="the Influencer Database catalogue",
     ),
@@ -114,11 +125,15 @@ ASSETS: dict[str, Asset] = {
 def repo_for(asset: Asset) -> str:
     """The HF repo id for an asset, or "" if none is configured.
 
-    Read at call time from the environment. Repo ids are not credentials — shipping one as a
-    default is fine and is how a public build finds its data — but nothing is defaulted here,
-    because the repos are the operator's to name.
+    Read at call time from the environment, falling back to the asset's default_repo.
+
+    Only assets whose data is genuinely publishable carry a default; the rest stay unset,
+    because the repos are the operator's to name and a default is a decision made on their
+    behalf. The influencer catalogue has one so its tool works on a fresh install, and the
+    edition it points at had its contact columns removed for exactly that reason. The
+    environment always wins, so pointing Settings at your own repo overrides it.
     """
-    return os.environ.get(asset.repo_env, "").strip()
+    return os.environ.get(asset.repo_env, "").strip() or asset.default_repo
 
 
 def _fetch(asset: Asset, token: Optional[str]) -> Path:
