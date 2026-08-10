@@ -4,7 +4,7 @@ import { app } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { leadgenBackendEnv } from './leadgen'
-import { getHfToken } from './settingsStore'
+import { getHfToken, getSettings } from './settingsStore'
 
 /** The one HF token the user configured at the top of Settings, handed to the backend
  * process at spawn so every tool that reads HF_TOKEN from the environment (the Lead Gen
@@ -14,6 +14,23 @@ import { getHfToken } from './settingsStore'
 function sharedTokenEnv(): Record<string, string> {
   const token = getHfToken()
   return token ? { HF_TOKEN: token } : {}
+}
+
+/** Hugging Face repos holding the datasets and model fetched on first use rather than
+ * shipped (backend/app/services/hf_assets.py reads these names from the environment).
+ *
+ * Without this the packaged app had no way to set them at all: the backend read its own
+ * environment, and nothing in an installed build ever wrote to it — so the Influencer
+ * Database, Guest Post Suggester and the Email Writer's CTR estimate all failed on any
+ * machine that wasn't a dev checkout with the files still on disk. Only set when present,
+ * so an operator exporting the variable before launch still wins. */
+function hfAssetEnv(): Record<string, string> {
+  const { influencerRepo, guestPostRepo, ctrModelRepo } = getSettings().hfAssets
+  const env: Record<string, string> = {}
+  if (influencerRepo.trim()) env.HF_ASSETS_INFLUENCER_REPO = influencerRepo.trim()
+  if (guestPostRepo.trim()) env.HF_ASSETS_GUEST_POST_REPO = guestPostRepo.trim()
+  if (ctrModelRepo.trim()) env.HF_ASSETS_CTR_MODEL_REPO = ctrModelRepo.trim()
+  return env
 }
 
 export const BACKEND_PORT = 8756
@@ -55,7 +72,8 @@ function spawnDevBackend(): ChildProcessWithoutNullStreams {
       DATA_DIR: app.getPath('userData'),
       MRAIM_API_TOKEN: API_TOKEN,
       ...leadgenBackendEnv(),
-      ...sharedTokenEnv()
+      ...sharedTokenEnv(),
+      ...hfAssetEnv()
     }
   })
 }
@@ -84,7 +102,8 @@ function spawnPackagedBackend(): ChildProcessWithoutNullStreams {
       MRAIM_API_TOKEN: API_TOKEN,
       PATH: `${ffmpegDir()}${pathSep}${process.env.PATH ?? ''}`,
       ...leadgenBackendEnv(),
-      ...sharedTokenEnv()
+      ...sharedTokenEnv(),
+      ...hfAssetEnv()
     }
   })
 }

@@ -20,6 +20,7 @@ import BackupPanel from '../components/BackupPanel'
 const EMPTY: AppSettings = {
   hfToken: '',
   youtubeApiKey: '',
+  hfAssets: { influencerRepo: '', guestPostRepo: '', ctrModelRepo: '' },
   mastodonInstance: '',
   mastodonAccessToken: '',
   googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
@@ -381,6 +382,44 @@ export default function Settings(): React.JSX.Element {
               placeholder="Optional"
               style={textInput}
             />
+          </Section>
+
+          <Section
+            title="Data repositories"
+            optional
+            blurb="Three tools read a catalogue or a model that isn't shipped inside the app — it's pulled from Hugging Face on first use and cached. Point each at a repo you own. Private repos work: they're fetched with the token above. Leave blank and the tool says which one is missing."
+            accent="var(--accent-deep)"
+          >
+            <label style={label}>Influencer Database (dataset)</label>
+            <input
+              value={settings.hfAssets.influencerRepo}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, hfAssets: { ...s.hfAssets, influencerRepo: e.target.value } }))
+              }
+              placeholder="username/dataset-name"
+              style={textInput}
+            />
+            <label style={label}>Guest Post Suggester (dataset)</label>
+            <input
+              value={settings.hfAssets.guestPostRepo}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, hfAssets: { ...s.hfAssets, guestPostRepo: e.target.value } }))
+              }
+              placeholder="username/dataset-name"
+              style={textInput}
+            />
+            <label style={label}>Email Writer CTR model (model)</label>
+            <input
+              value={settings.hfAssets.ctrModelRepo}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, hfAssets: { ...s.hfAssets, ctrModelRepo: e.target.value } }))
+              }
+              placeholder="username/model-name"
+              style={textInput}
+            />
+            <div style={{ font: "600 11.5px/1.5 'Quicksand'", color: 'var(--ink-faint)', marginTop: 8 }}>
+              Changing these takes effect next time the app starts — the backend reads them when it launches.
+            </div>
           </Section>
 
           <Section

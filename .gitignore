@@ -72,3 +72,13 @@ nul
 # .tools/ is the documented place to drop a semgrep venv so the script can find it.
 .security-reports/
 .tools/
+
+# Datasets and the CTR model. These are fetched from Hugging Face on first use
+# (backend/app/services/hf_assets.py) and must not live in the repo — its own rule, which
+# these four files were violating. The influencer catalogue was the reason it matters: it
+# holds ~14.6k people including 590 phone numbers, and it was downloadable from this repo
+# while it was public. Configure the repos in Settings → Data repositories.
+backend/app/data/influencer_database.xlsx
+backend/app/ml/ctr_model.joblib
+backend/vendor/guestpostsuggester/data/guest_post_database.xlsx
+backend/vendor/guestpostsuggester/data/opr_scores.json

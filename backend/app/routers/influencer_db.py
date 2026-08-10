@@ -122,10 +122,16 @@ def _data() -> pd.DataFrame:
     if _df is None:
         with _load_lock:
             if _df is None:
-                if not XLSX_PATH.exists():
-                    raise HTTPException(status_code=500, detail=f"Influencer database file is missing: {XLSX_PATH}")
+                # No XLSX_PATH.exists() guard here, deliberately. It used to sit in front of
+                # this call and made the Hugging Face path unreachable: a packaged install has
+                # no local copy by design, so it failed with "file is missing" having never
+                # tried to fetch. hf_assets.path_for() already checks the local copy first and
+                # falls back to the configured repo, and its own error names the asset and the
+                # variable to set.
                 try:
                     _df = _load()
+                except hf_assets.AssetError as err:
+                    raise HTTPException(status_code=500, detail=str(err)) from None
                 except HTTPException:
                     raise
                 except Exception as err:  # noqa: BLE001 — surface a parse failure as a normal API error

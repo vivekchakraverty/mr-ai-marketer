@@ -45,9 +45,29 @@ export interface TelegramSettings {
   username: string
 }
 
+/**
+ * Hugging Face repos holding the datasets and the model the app fetches on first use
+ * rather than shipping (see backend/app/services/hf_assets.py).
+ *
+ * These are repo ids, not credentials, but they are deliberately not defaulted anywhere:
+ * a build that defaults them points every installation at whoever published it. They had
+ * no configuration path at all before — the backend read them from its environment, and
+ * nothing in a packaged install could set that environment — so the tools that depend on
+ * them failed on any machine without a dev checkout.
+ */
+export interface HfAssetSettings {
+  /** dataset: influencer_database.xlsx — the Influencer Database catalogue */
+  influencerRepo: string
+  /** dataset: guest_post_database.xlsx + opr_scores.json — the Guest Post Suggester */
+  guestPostRepo: string
+  /** model: ctr_model.joblib + ctr_reference_stats.json — the Email Writer's CTR estimate */
+  ctrModelRepo: string
+}
+
 export interface AppSettings {
   hfToken: string
   youtubeApiKey: string
+  hfAssets: HfAssetSettings
   // Mastodon Post Creator. The instance is not a secret and is the more important
   // of the two — it decides the rules and the character limit. The token is only
   // needed for full-text search and for linking a published post back to its draft.
@@ -66,7 +86,8 @@ export interface AppSettings {
  * whole group when one is given, so saving a single Telegram field would mean restating the
  * other three. The nested groups merge key-by-key on write, so the type says so too.
  */
-export type SettingsPatch = Partial<Omit<AppSettings, 'googleAds' | 'brandForge' | 'topicScout' | 'telegram'>> & {
+export type SettingsPatch = Partial<Omit<AppSettings, 'googleAds' | 'brandForge' | 'topicScout' | 'telegram' | 'hfAssets'>> & {
+  hfAssets?: Partial<HfAssetSettings>
   googleAds?: Partial<GoogleAdsSettings>
   brandForge?: Partial<BrandForgeSettings>
   topicScout?: Partial<TopicScoutSettings>
@@ -76,6 +97,7 @@ export type SettingsPatch = Partial<Omit<AppSettings, 'googleAds' | 'brandForge'
 const EMPTY_SETTINGS: AppSettings = {
   hfToken: '',
   youtubeApiKey: '',
+  hfAssets: { influencerRepo: '', guestPostRepo: '', ctrModelRepo: '' },
   mastodonInstance: '',
   mastodonAccessToken: '',
   googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
@@ -109,6 +131,7 @@ function withDefaults(parsed: Partial<AppSettings>): AppSettings {
   return {
     ...EMPTY_SETTINGS,
     ...parsed,
+    hfAssets: { ...EMPTY_SETTINGS.hfAssets, ...(parsed.hfAssets ?? {}) },
     googleAds: { ...EMPTY_SETTINGS.googleAds, ...(parsed.googleAds ?? {}) },
     brandForge: { ...EMPTY_SETTINGS.brandForge, ...(parsed.brandForge ?? {}) },
     topicScout: { ...EMPTY_SETTINGS.topicScout, ...(parsed.topicScout ?? {}) },
@@ -166,6 +189,7 @@ export function setSettings(partial: SettingsPatch): AppSettings {
   const next: AppSettings = {
     ...current,
     ...partial,
+    hfAssets: { ...current.hfAssets, ...(partial.hfAssets ?? {}) },
     googleAds: { ...current.googleAds, ...(partial.googleAds ?? {}) },
     brandForge: { ...current.brandForge, ...(partial.brandForge ?? {}) },
     topicScout: { ...current.topicScout, ...(partial.topicScout ?? {}) },

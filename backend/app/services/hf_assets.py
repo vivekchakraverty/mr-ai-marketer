@@ -140,9 +140,13 @@ def path_for(key: str, token: Optional[str] = None, required: bool = True) -> Op
     """Local path to an asset, downloading it once if needed.
 
     `token` is the user's own Hugging Face token. A gated or private repo needs it; a public
-    one does not, which is why it is optional rather than demanded up front.
+    one does not, which is why it is optional rather than demanded up front. When a caller
+    passes nothing it falls back to HF_TOKEN, which Electron already puts in the backend's
+    environment from Settings — otherwise every call site would have to thread the token
+    through its own request model, and a private repo would 401 for the ones that don't.
     """
     asset = ASSETS[key]
+    token = token or os.environ.get("HF_TOKEN", "").strip() or None
 
     cached = _resolved.get(key)
     if cached is not None and cached.exists():
