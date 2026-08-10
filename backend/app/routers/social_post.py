@@ -289,17 +289,57 @@ def delete_niche(name: str, purge: bool = False) -> dict:
 
 @router.post("/niches/{name}/collect")
 def collect_niche(name: str, limit: int = 25) -> dict:
-    """Run one ingest pass for a niche so it has something to learn from."""
-    from vendor.socialpost.src.jobs import ingest
+    """Collect posts for a niche, and bootstrap its exemplar pool if it has none.
+
+    A plain ingest is not enough for a niche that was just added. Exemplars are
+    ranked on a post's 48h engagement, and `ingest` deliberately refuses anything
+    older than 44h (MAX_POST_AGE) so every post it stores still has a real 48h
+    bucket ahead of it. On a new niche that means nothing qualifies for roughly two
+    days: the niche shows "952 posts · 0 exemplars" and generation silently falls
+    back to platform norms, with no indication that waiting is all that's required.
+
+    So a cold start runs the bootstrap recipe the vendored jobs document but no
+    caller was using — ingest.py's own comment describes it and explains why the
+    two halves must be used together:
+
+      1. ingest with max_age=168h, reaching into the 50h-7d window that the normal
+         44h ceiling excludes. Without this, step 2 matches nothing.
+      2. snapshot.backfill_48h(), which records those older posts' current counts
+         as an approximate 48h snapshot. Engagement has plateaued by 48h, so on a
+         post already days old the current count is close to what a real capture
+         would have recorded.
+      3. refresh_exemplars for this niche, so the pool exists on return rather than
+         at some point in the next 24 hours.
+
+    Only on a cold start. An established niche keeps the plain 44h ingest: its posts
+    are getting real 48h captures on schedule, and approximating them would replace
+    measurements with estimates for no gain.
+    """
+    from datetime import timedelta
+
+    from vendor.socialpost.src.db import JobRun
+    from vendor.socialpost.src.jobs import ingest, refresh_exemplars, snapshot
+
+    spg_db, _, _, _ = _spg()
+    cold_start = spg_db.niche_data_counts(name).get("exemplars", 0) == 0
 
     try:
-        ingest.run(only_niche=name, limit=limit)
+        if cold_start:
+            ingest.run(
+                only_niche=name,
+                limit=limit,
+                max_age=timedelta(hours=ingest.BOOTSTRAP_MAX_AGE_HOURS),
+            )
+            with JobRun("snapshot_backfill") as job:
+                snapshot.backfill_48h(job, dry_run=False)
+            refresh_exemplars.run(only_niche=name)
+        else:
+            ingest.run(only_niche=name, limit=limit)
     except SystemExit as err:  # the job raises SystemExit for an unknown niche
         raise HTTPException(status_code=400, detail=str(err)) from None
     except Exception as err:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Collection failed: {err}") from None
 
-    spg_db, _, _, _ = _spg()
     counts = spg_db.niche_data_counts(name)
     return {"posts": counts["posts"], "exemplars": counts["exemplars"]}
 
