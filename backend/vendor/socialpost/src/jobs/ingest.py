@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from .. import bluesky
 from ..db import (
@@ -79,6 +79,7 @@ def run(
     only_niche: str | None = None,
     limit: int = DEFAULT_LIMIT_PER_KEYWORD,
     max_age: timedelta = MAX_POST_AGE,
+    until: "datetime | None" = None,
 ) -> None:
     niches = load_niches()
     if only_niche:
@@ -99,7 +100,7 @@ def run(
             job.note(f"max post age overridden to {max_age.total_seconds() / 3600:.0f}h")
         for niche, keywords in niches.items():
             try:
-                _ingest_niche(job, niche, keywords, limit, dry_run, max_age)
+                _ingest_niche(job, niche, keywords, limit, dry_run, max_age, until)
             except Exception as err:  # noqa: BLE001 — one bad niche must not sink the rest
                 log.exception("Niche %r failed", niche)
                 job.note(f"niche {niche!r} failed: {type(err).__name__}: {err}")
@@ -113,6 +114,7 @@ def _ingest_niche(
     limit: int,
     dry_run: bool,
     max_age: timedelta = MAX_POST_AGE,
+    until: "datetime | None" = None,
 ) -> None:
     """Collect one niche from both sources, then write posts + authors.
 
@@ -126,7 +128,7 @@ def _ingest_niche(
     # want one row per URI, not one per keyword that matched it.
     found: dict[str, bluesky.BskyPost] = {}
     for keyword in keywords:
-        for post in bluesky.search_posts(keyword, limit=limit):
+        for post in bluesky.search_posts(keyword, limit=limit, until=until):
             found.setdefault(post.uri, post)
 
     from_search = len(found)

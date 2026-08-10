@@ -311,6 +311,7 @@ def search_posts(
     sort: str = "latest",
     lang: str | None = "en",
     since: datetime | None = None,
+    until: datetime | None = None,
 ) -> list[BskyPost]:
     """Search posts by keyword, paging until `limit` results.
 
@@ -318,6 +319,14 @@ def search_posts(
     posts, which would make the exemplar pool a rich-get-richer loop. We want a
     representative sample and let refresh_exemplars.py do the ranking against
     follower-normalised engagement.
+
+    `until` bounds the *newest* result, and is what makes a cold-start backfill
+    possible. sort='latest' returns the most recent matches, so on an active
+    keyword every result is hours old — raising a max-age ceiling only permits
+    older posts through the filter, it never asks for them. Passing until=now-50h
+    is what actually reaches the 50h-7d window that snapshot.py's --backfill-48h
+    works on. Without it a brand-new niche cannot have exemplars until its own
+    posts age past 48h, however high the ceiling is set.
     """
     client = get_client()
     out: list[BskyPost] = []
@@ -335,6 +344,8 @@ def search_posts(
             params["cursor"] = cursor
         if since:
             params["since"] = since.astimezone(timezone.utc).isoformat()
+        if until:
+            params["until"] = until.astimezone(timezone.utc).isoformat()
 
         try:
             resp = with_backoff(client.app.bsky.feed.search_posts, params)

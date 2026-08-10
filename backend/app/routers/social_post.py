@@ -43,6 +43,11 @@ PLATFORMS = ["bluesky", "x", "linkedin", "mastodon"]
 # on drafts nobody kept.
 MAX_AVOID_TEXTS = 3
 
+# How far back a cold-start ingest reaches. Just past snapshot.py's BACKFILL_MIN_AGE of 50h,
+# so the posts it collects are immediately eligible for an approximate 48h snapshot rather
+# than having to age into one.
+BOOTSTRAP_UNTIL_HOURS = 52
+
 
 # --- lazy imports ----------------------------------------------------------
 # The vendored package pulls in torch via sentence-transformers, so importing it
@@ -315,7 +320,7 @@ def collect_niche(name: str, limit: int = 25) -> dict:
     are getting real 48h captures on schedule, and approximating them would replace
     measurements with estimates for no gain.
     """
-    from datetime import timedelta
+    from datetime import datetime, timedelta, timezone
 
     from vendor.socialpost.src.db import JobRun
     from vendor.socialpost.src.jobs import ingest, refresh_exemplars, snapshot
@@ -325,11 +330,21 @@ def collect_niche(name: str, limit: int = 25) -> dict:
 
     try:
         if cold_start:
+            # `until` is what actually reaches back; max_age only stops old posts being
+            # rejected once they arrive. sort='latest' returns the newest matches, so on an
+            # active keyword every result is hours old however high the ceiling — measured:
+            # a new "literature" niche collected 103 posts spanning 1h41m, none older than
+            # 48h, so the backfill matched nothing and the pool stayed empty. Asking for
+            # posts *older than* 50h lands squarely in the 50h-7d window backfill_48h wants.
             ingest.run(
                 only_niche=name,
                 limit=limit,
                 max_age=timedelta(hours=ingest.BOOTSTRAP_MAX_AGE_HOURS),
+                until=datetime.now(timezone.utc) - timedelta(hours=BOOTSTRAP_UNTIL_HOURS),
             )
+            # Then a normal pass for recent posts, so the niche is not seeded exclusively
+            # with days-old material. These age into their own real 48h snapshots later.
+            ingest.run(only_niche=name, limit=limit)
             with JobRun("snapshot_backfill") as job:
                 snapshot.backfill_48h(job, dry_run=False)
             refresh_exemplars.run(only_niche=name)
