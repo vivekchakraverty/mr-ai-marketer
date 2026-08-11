@@ -4,6 +4,7 @@ import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import { label, primaryButton, textarea } from '../styles/styleKit'
+import BrandVoiceSelect from '../components/BrandVoiceSelect'
 import SaveButton from '../components/SaveButton'
 
 const EXAMPLE_PLACEHOLDER =
@@ -26,6 +27,7 @@ export default function EmailWriter(): React.JSX.Element {
   const [error, setError] = useState('')
   const [result, setResult] = useState<GenerateEmailResponse | null>(null)
   const [copied, setCopied] = useState(false)
+  const [brandVoiceId, setBrandVoiceId] = useState('')
 
   async function handleGenerate(): Promise<void> {
     if (!fields.instruction.trim()) return
@@ -34,7 +36,7 @@ export default function EmailWriter(): React.JSX.Element {
     setResult(null)
     setCopied(false)
     try {
-      const res = await generateEmail(fields.instruction.trim())
+      const res = await generateEmail(fields.instruction.trim(), brandVoiceId)
       setResult(res)
       void refreshLibrary()
     } catch (err) {
@@ -94,6 +96,11 @@ export default function EmailWriter(): React.JSX.Element {
             style={textarea}
           />
         </div>
+        <BrandVoiceSelect
+          value={brandVoiceId}
+          onChange={setBrandVoiceId}
+          hint="The email will follow this brand's tone and guardrails."
+        />
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
           <div
             style={{ ...primaryButton, padding: '11px 26px', display: 'inline-block', opacity: loading ? 0.6 : 1 }}

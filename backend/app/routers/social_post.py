@@ -27,6 +27,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from ..services import brand_voice
 from ..services.genqueue import queue_slot
 from PIL import Image
 from pydantic import BaseModel
@@ -93,6 +94,10 @@ class GenerateRequest(BaseModel):
     niche: str
     platform: str = "bluesky"
     sourceUrl: str = ""
+    # Optional Library id of a Brand Studio document. Folded into user_input, and in its
+    # compact form: a full voice card would outweigh the author's own instruction at
+    # post length, and crowd the exemplars the generator ranks on.
+    brandVoiceId: str = ""
     # Posts already written for this request, sent when the caller is asking for
     # another attempt. Empty for a first generation. Capped server-side so a
     # client cannot grow the prompt without bound.
@@ -436,7 +441,7 @@ def generate(body: GenerateRequest) -> GenerateResponse:
 
     try:
         result = generation.generate(
-            user_input=body.userInput,
+            user_input=brand_voice.apply_voice(body.userInput, body.brandVoiceId, compact=True),
             niche=body.niche,
             platform=body.platform,
             source_url=body.sourceUrl,

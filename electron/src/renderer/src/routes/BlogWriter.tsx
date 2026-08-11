@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { generateBlog, type GenerateBlogResponse } from '../api/client'
 import BackendImage from '../components/BackendImage'
+import BrandVoiceSelect from '../components/BrandVoiceSelect'
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import { BLOG_GOAL_OPTIONS } from '../state/types'
@@ -21,6 +22,7 @@ export default function BlogWriter(): React.JSX.Element {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showSend, setShowSend] = useState(false)
+  const [brandVoiceId, setBrandVoiceId] = useState('')
 
   async function handleGenerate(): Promise<void> {
     if (!requireHf()) return
@@ -31,7 +33,7 @@ export default function BlogWriter(): React.JSX.Element {
     setLoading(true)
     setError('')
     try {
-      const res = await generateBlog(fields)
+      const res = await generateBlog(fields, brandVoiceId)
       setResult(res)
       void refreshLibrary()
     } catch (err) {
@@ -103,6 +105,11 @@ export default function BlogWriter(): React.JSX.Element {
             <label style={label}>Content goal</label>
             <SegmentedControl options={BLOG_GOAL_OPTIONS} value={fields.contentGoal} onChange={(v) => setBlogField('contentGoal', v)} />
           </div>
+          <BrandVoiceSelect
+            value={brandVoiceId}
+            onChange={setBrandVoiceId}
+            hint="The article will be written in this brand's voice."
+          />
           <div>
             <label style={label}>Target word count</label>
             <input

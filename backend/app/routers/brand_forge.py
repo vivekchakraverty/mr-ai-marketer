@@ -26,6 +26,7 @@ from ..brandforge.client import BrandForgeError, text_to_image
 from ..brandforge.export import to_docx_bytes, to_markdown, to_voice_system_prompt
 from ..brandforge.imaging import ASSET_PROMPT_SPECS, ColorSwatch, build_image_prompt, extract_palette
 from ..brandforge.intake import TBD, BrandIntake, demo_brand_dict, validate_intake
+from ..services import brand_voice
 from ..brandforge.sections import (
     BRAND_CATEGORIES,
     BUSINESS_MODELS,
@@ -283,6 +284,22 @@ def modal_provision(body: ModalProvisionRequest) -> ModalStatusOut:
     except BrandForgeError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
     return ModalStatusOut(**{k: v for k, v in state.items() if k in ModalStatusOut.model_fields})
+
+
+class BrandVoiceOut(BaseModel):
+    id: str
+    title: str
+    createdAt: str
+
+
+@router.get("/voices", response_model=list[BrandVoiceOut])
+def list_voices() -> list[BrandVoiceOut]:
+    """Finished brand documents that other tools can write in the voice of.
+
+    Only documents with a voice card on disk are listed, so the dropdown cannot offer a
+    brand that would then have no effect on generation.
+    """
+    return [BrandVoiceOut(**v) for v in brand_voice.list_voices()]
 
 
 @router.get("/modal/status", response_model=ModalStatusOut)

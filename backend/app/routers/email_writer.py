@@ -6,6 +6,7 @@ from ..services.genqueue import queue_slot
 from pydantic import BaseModel
 
 from .. import db
+from ..services import brand_voice
 from ..services import email_writer as email_writer_service
 
 router = APIRouter(prefix="/email-writer", tags=["email-writer"])
@@ -13,6 +14,9 @@ router = APIRouter(prefix="/email-writer", tags=["email-writer"])
 
 class GenerateEmailRequest(BaseModel):
     instruction: str
+    # Optional Library id of a Brand Studio document. When set, its voice card is folded
+    # into the instruction so the email is written in that brand's voice.
+    brandVoiceId: str = ""
     # Only used on a fresh install, to fetch the CTR model from Hugging Face the first time.
     # The Space call itself is authenticated inside services/email_writer.
     hfToken: str = ""
@@ -32,6 +36,10 @@ def generate_email(body: GenerateEmailRequest) -> GenerateEmailResponse:
     instruction = body.instruction.strip()
     if not instruction:
         raise HTTPException(status_code=400, detail="Tell me what the email should be about.")
+
+    # The Space takes one free-text `instruction` and no system prompt, so this is the only
+    # place the brand context can reach the model.
+    instruction = brand_voice.apply_voice(instruction, body.brandVoiceId)
 
     try:
         # Space call + CTR now live in services/email_writer so the Lead Gen Agent can reuse

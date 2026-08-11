@@ -41,6 +41,7 @@ from ..services.genqueue import queue_slot
 from pydantic import BaseModel
 
 from .. import db
+from ..services import brand_voice
 from ..services import mastodon as masto
 from ..services import mastodon_gate as gate
 from ..services.mastodon import MastodonError
@@ -157,6 +158,9 @@ class GenerateRequest(BaseModel):
     userInput: str
     accessToken: str = ""
     sourceUrl: str = ""
+    # Optional Library id of a Brand Studio document; folded into user_input in compact
+    # form for the same length reasons as the Bluesky composer.
+    brandVoiceId: str = ""
     discloseAi: bool = True
 
 
@@ -844,7 +848,7 @@ def generate(body: GenerateRequest) -> GenerateResponse:
 
     try:
         text = spg_llm.generate_post(
-            user_input=body.userInput,
+            user_input=brand_voice.apply_voice(body.userInput, body.brandVoiceId, compact=True),
             niche=body.niche,
             platform=PLATFORM,
             exemplar_texts=[e["text"] for e in exemplars],

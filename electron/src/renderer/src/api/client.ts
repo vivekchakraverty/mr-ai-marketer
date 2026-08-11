@@ -252,9 +252,26 @@ export interface GenerateBlogResponse {
   libraryId: string
 }
 
-export async function generateBlog(fields: BlogFields): Promise<GenerateBlogResponse> {
+/**
+ * A finished Brand Studio document that other tools can write in the voice of.
+ *
+ * Brand Studio saves a "voice card" with every document — a compact brief of tone, voice
+ * traits and guardrails, built to be handed to another model. Passing an id to a generate
+ * call folds that card into the request so the output sounds like the brand.
+ */
+export interface BrandVoice {
+  id: string
+  title: string
+  createdAt: string
+}
+
+export function listBrandVoices(): Promise<BrandVoice[]> {
+  return getJson('/brand-forge/voices')
+}
+
+export async function generateBlog(fields: BlogFields, brandVoiceId = ''): Promise<GenerateBlogResponse> {
   const hfToken = (await window.api.settings.getHfToken()) ?? ''
-  return postJson('/blog-writer/generate', { ...fields, hfToken })
+  return postJson('/blog-writer/generate', { ...fields, brandVoiceId, hfToken })
 }
 
 // Email Writer runs the user's fine-tuned marketing-email model on a free HF CPU Space,
@@ -268,12 +285,12 @@ export interface GenerateEmailResponse {
   ctrBucket: 'below average' | 'typical' | 'above average' | 'strong'
 }
 
-export async function generateEmail(instruction: string): Promise<GenerateEmailResponse> {
+export async function generateEmail(instruction: string, brandVoiceId = ''): Promise<GenerateEmailResponse> {
   // The token is only used the first time on a machine, to fetch the CTR model from Hugging
   // Face — it isn't bundled with the app any more. Sent every call because the backend is
   // the only side that knows whether the model is already on disk.
   const settings = await window.api.settings.getAll()
-  return postJson('/email-writer/generate', { instruction, hfToken: settings.hfToken })
+  return postJson('/email-writer/generate', { instruction, brandVoiceId, hfToken: settings.hfToken })
 }
 
 export interface GuestSite {
@@ -638,9 +655,10 @@ export function generateSocialPost(
   // Posts already written for this same request. Sent on a rewrite so the model
   // is told what not to repeat — the prompt is otherwise byte-identical between
   // attempts and the model reliably reproduces its own opening line.
-  avoidTexts: string[] = []
+  avoidTexts: string[] = [],
+  brandVoiceId = ''
 ): Promise<SocialGenerateResponse> {
-  return postJson('/social-post/generate', { userInput, niche, platform, sourceUrl, avoidTexts })
+  return postJson('/social-post/generate', { userInput, niche, platform, sourceUrl, avoidTexts, brandVoiceId })
 }
 
 export async function generateSocialPostImage(
@@ -848,7 +866,8 @@ export async function generateMastodonPost(
   niche: string,
   userInput: string,
   sourceUrl = '',
-  discloseAi = true
+  discloseAi = true,
+  brandVoiceId = ''
 ): Promise<MastodonGenerateResponse> {
   return postJson('/mastodon-post/generate', {
     instance,
@@ -856,6 +875,7 @@ export async function generateMastodonPost(
     userInput,
     sourceUrl,
     discloseAi,
+    brandVoiceId,
     accessToken: await mastodonToken()
   })
 }

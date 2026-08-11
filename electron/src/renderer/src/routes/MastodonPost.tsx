@@ -18,6 +18,7 @@ import {
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, textInput } from '../styles/styleKit'
+import BrandVoiceSelect from '../components/BrandVoiceSelect'
 import HashtagSuggester from '../components/HashtagSuggester'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import SaveButton from '../components/SaveButton'
@@ -50,6 +51,7 @@ export default function MastodonPost(): React.JSX.Element {
   const [collecting, setCollecting] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [brandVoiceId, setBrandVoiceId] = useState('')
   const [copied, setCopied] = useState(false)
 
   const [postedUrl, setPostedUrl] = useState('')
@@ -164,7 +166,8 @@ export default function MastodonPost(): React.JSX.Element {
         fields.niche,
         fields.userInput,
         fields.sourceUrl,
-        fields.discloseAi
+        fields.discloseAi,
+        brandVoiceId
       )
       setResult(res)
       void refreshLibrary()
@@ -365,6 +368,14 @@ export default function MastodonPost(): React.JSX.Element {
                   onChange={(e) => setField('sourceUrl', e.target.value)}
                   placeholder="https://… a release note, article or changelog to pull the facts from"
                   style={textInput}
+                />
+              </div>
+
+              <div>
+                <BrandVoiceSelect
+                  value={brandVoiceId}
+                  onChange={setBrandVoiceId}
+                  hint="Posts follow this brand's tone and guardrails."
                 />
               </div>
 

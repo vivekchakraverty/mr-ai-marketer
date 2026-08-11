@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from ..services import brand_voice
 from ..services.genqueue import queue_slot
 from gradio_client import Client
 from pydantic import BaseModel
@@ -38,6 +39,8 @@ class GenerateBlogRequest(BaseModel):
     brief: str = ""
     targetWordCount: int = 1200
     contentGoal: str = "Informational"
+    # Optional Library id of a Brand Studio document; folded into `brief` below.
+    brandVoiceId: str = ""
     hfToken: str = ""
 
 
@@ -72,7 +75,7 @@ def generate_blog(body: GenerateBlogRequest) -> GenerateBlogResponse:
             topic=body.topic,
             primary=body.primaryKeyword,
             secondary=body.secondaryKeyword,
-            brief=body.brief,
+            brief=brand_voice.apply_voice(body.brief, body.brandVoiceId),
             target_wordcount=body.targetWordCount,
             content_goal=body.contentGoal,
             hf_token=body.hfToken,

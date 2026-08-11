@@ -16,6 +16,7 @@ import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, textInput } from '../styles/styleKit'
 import BackendImage from '../components/BackendImage'
+import BrandVoiceSelect from '../components/BrandVoiceSelect'
 import HashtagSuggester from '../components/HashtagSuggester'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import SaveButton from '../components/SaveButton'
@@ -54,6 +55,7 @@ export default function SocialPost(): React.JSX.Element {
   const [showNiches, setShowNiches] = useState(false)
   const [newNiche, setNewNiche] = useState('')
   const [newKeywords, setNewKeywords] = useState('')
+  const [brandVoiceId, setBrandVoiceId] = useState('')
   const [busyNiche, setBusyNiche] = useState<string | null>(null)
 
   async function refresh(): Promise<void> {
@@ -99,7 +101,8 @@ export default function SocialPost(): React.JSX.Element {
         // What it has already written for this request. Without this the prompt
         // is byte-identical every time and the model reliably opens with the same
         // sentence, so "Try again" returned the same post in different words.
-        rewrite ? previousTexts : []
+        rewrite ? previousTexts : [],
+        brandVoiceId
       )
       setResult(res)
       // A fresh generate starts the history over — a new topic should not be
@@ -245,6 +248,11 @@ export default function SocialPost(): React.JSX.Element {
       >
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
           <div>
+            <BrandVoiceSelect
+              value={brandVoiceId}
+              onChange={setBrandVoiceId}
+              hint="Posts follow this brand's tone and guardrails."
+            />
             <label style={label}>Niche</label>
             <select
               value={fields.niche}
