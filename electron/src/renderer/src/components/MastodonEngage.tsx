@@ -25,6 +25,7 @@ import {
   type PostMediaItem
 } from '../api/client'
 import PostMedia from './PostMedia'
+import { mastodonThemeCss } from './mastodonTheme'
 import { useAppStore } from '../state/store'
 import { chip, label, primaryButtonSmall, secondaryButtonSmall, segGroup, segItem, select, textarea, textInput } from '../styles/styleKit'
 
@@ -111,6 +112,9 @@ type WebviewHandle = HTMLElement & {
   goBack: () => void
   canGoBack: () => boolean
   getURL: () => string
+  /** Blink-level stylesheet injection. Returns a key that removeInsertedCSS undoes. */
+  insertCSS: (css: string) => Promise<string>
+  removeInsertedCSS: (key: string) => Promise<void>
 }
 
 const WebView = 'webview' as unknown as React.FC<{
@@ -501,7 +505,42 @@ function InstanceEmbed({
 }): React.JSX.Element {
   const ref = useRef<WebviewHandle | null>(null)
   const [collapsed, setCollapsed] = useState(false)
+  const [themed, setThemed] = useState(() => localStorage.getItem('mraim.mastodonThemed') !== 'off')
   const url = `https://${host}${path}`
+
+  /**
+   * Paint the embed in the app's colours.
+   *
+   * Re-applied on every `dom-ready` because a full page load drops injected CSS, and
+   * Mastodon is a single-page app that still does real loads on reload and on sign-in.
+   * The insertion key is kept so turning the toggle off can remove exactly what was added
+   * rather than reloading the page and losing the user's place.
+   */
+  useEffect(() => {
+    const view = ref.current
+    if (!view || locked || collapsed) return
+
+    let key = ''
+    let cancelled = false
+
+    async function apply(): Promise<void> {
+      if (cancelled || !themed) return
+      try {
+        key = await view!.insertCSS(await mastodonThemeCss())
+      } catch {
+        // insertCSS is unavailable until the guest page is attached; the dom-ready
+        // listener below covers that case.
+      }
+    }
+
+    void apply()
+    view.addEventListener('dom-ready', apply)
+    return () => {
+      cancelled = true
+      view.removeEventListener('dom-ready', apply)
+      if (key) void view.removeInsertedCSS(key).catch(() => {})
+    }
+  }, [themed, locked, collapsed, host])
 
   return (
     <div style={{ ...panel, padding: 12, marginBottom: 14 }}>
@@ -532,6 +571,21 @@ function InstanceEmbed({
             }
           >
             ↻
+          </div>
+          <div
+            style={actionButton(themed, false)}
+            title={
+              themed
+                ? "Showing this server in the app's colours. Turn off for Mastodon's own theme."
+                : "Showing Mastodon's own theme."
+            }
+            onClick={() => {
+              const next = !themed
+              setThemed(next)
+              localStorage.setItem('mraim.mastodonThemed', next ? 'on' : 'off')
+            }}
+          >
+            Theme
           </div>
           <div style={actionButton(false, false)} onClick={() => void window.api.openExternal(url)}>
             Open in browser ↗
