@@ -33,6 +33,24 @@ function hfAssetEnv(): Record<string, string> {
   return env
 }
 
+/** Brand Studio's bring-your-own-GPU settings, handed over at spawn.
+ *
+ * modal_backend.py and modal_image_backend.py read BRANDFORGE_MODEL and
+ * BRANDFORGE_IMAGE_BUCKET from the environment at import time, and nothing in a packaged
+ * install could ever write it — so the BYO-Modal path could not deploy and generation fell
+ * back to the hosted Space, which bills its publisher rather than the user. These two are
+ * what make "runs on your own GPU, billed to you" actually true.
+ *
+ * Only set when present, so an operator exporting them before launch still wins. */
+function brandForgeEnv(): Record<string, string> {
+  const { modelRepo, imageBucket, spaceId } = getSettings().brandForge
+  const env: Record<string, string> = {}
+  if (modelRepo.trim()) env.BRANDFORGE_MODEL = modelRepo.trim()
+  if (imageBucket.trim()) env.BRANDFORGE_IMAGE_BUCKET = imageBucket.trim()
+  if (spaceId.trim()) env.BRANDFORGE_SPACE = spaceId.trim()
+  return env
+}
+
 export const BACKEND_PORT = 8756
 export const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`
 
@@ -73,6 +91,7 @@ function spawnDevBackend(): ChildProcessWithoutNullStreams {
       MRAIM_API_TOKEN: API_TOKEN,
       ...leadgenBackendEnv(),
       ...sharedTokenEnv(),
+      ...brandForgeEnv(),
       ...hfAssetEnv()
     }
   })
@@ -103,6 +122,7 @@ function spawnPackagedBackend(): ChildProcessWithoutNullStreams {
       PATH: `${ffmpegDir()}${pathSep}${process.env.PATH ?? ''}`,
       ...leadgenBackendEnv(),
       ...sharedTokenEnv(),
+      ...brandForgeEnv(),
       ...hfAssetEnv()
     }
   })

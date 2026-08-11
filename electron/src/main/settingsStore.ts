@@ -20,6 +20,13 @@ export interface BrandForgeSettings {
   // ISO timestamp of the last successful deploy — drives the "already set up"
   // state in Settings so we don't re-deploy on every visit.
   modalProvisionedAt: string
+  // The merged model the GPU function loads, and the bucket holding the image
+  // weights. modal_backend.py and modal_image_backend.py read these from the
+  // environment at import, and nothing in a packaged install could write it — so
+  // the bring-your-own-GPU path could never deploy, and generation silently fell
+  // back to the hosted Space. No defaults: they are repos the user pushes.
+  modelRepo: string
+  imageBucket: string
 }
 
 // Topic Scout runs key-free by default. Everything here unlocks one extra source
@@ -101,7 +108,7 @@ const EMPTY_SETTINGS: AppSettings = {
   mastodonInstance: '',
   mastodonAccessToken: '',
   googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
-  brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '' },
+  brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '', modelRepo: '', imageBucket: '' },
   topicScout: {
     contactEmail: '',
     githubToken: '',

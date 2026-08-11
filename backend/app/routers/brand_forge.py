@@ -243,17 +243,19 @@ def generate_section(body: GenerateSectionRequest) -> SectionOut:
     intake = _build_intake(body.intake)
 
     use_modal = bool(body.modalTokenId.strip() and body.modalTokenSecret.strip())
-    # Resolved rather than read from the environment: space.py supplies a fallback Space, so
-    # checking BRANDFORGE_SPACE alone would reject a request the Space path can serve. This
-    # only fires if that fallback is ever cleared, and stays a 400 because an unconfigured
-    # generator is the caller's setup rather than an upstream fault.
+    # Three states, and the refusal is the point of the third. Modal runs on the caller's own
+    # workspace and bills them; a Space they named is theirs to pay for; with neither there is
+    # no way to generate that does not spend somebody else's money, because the published
+    # Space forwards to its publisher's Modal function. Refusing beats quietly billing them.
+    # 400 rather than 502 — this is the caller's setup, not an upstream fault.
     if not use_modal and not (body.spaceId.strip() or space.DEFAULT_SPACE_ID):
         raise HTTPException(
             status_code=400,
             detail=(
-                "Brand Studio has no generator configured yet. Connect your Modal account in "
-                "Settings → Brand Studio to run it on your own GPU, or set BRANDFORGE_SPACE "
-                "to a Space you have deployed."
+                "Brand Studio needs your Modal account connected. Open Settings → Brand "
+                "Studio GPU, paste your Modal tokens and run the setup — generation then "
+                "runs on your own GPU and is billed to you. (Alternatively, point it at a "
+                "BrandForge Space you have deployed yourself.)"
             ),
         )
     try:

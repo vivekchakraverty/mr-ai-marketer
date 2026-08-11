@@ -24,7 +24,7 @@ const EMPTY: AppSettings = {
   mastodonInstance: '',
   mastodonAccessToken: '',
   googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
-  brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '' },
+  brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '', modelRepo: '', imageBucket: '' },
   topicScout: {
     contactEmail: '',
     githubToken: '',
@@ -448,9 +448,27 @@ export default function Settings(): React.JSX.Element {
           <Section
             title="Brand Studio GPU"
             optional
-            blurb="Brand Studio runs on the Hugging Face Space you deploy. Connect your own Modal account to generate text and visuals on your own GPU instead — Modal gives new accounts around $30 of free GPU credit. Set BRANDFORGE_MODEL to your merged model repo and BRANDFORGE_IMAGE_BUCKET to the HF Bucket holding the FLUX.2 klein weights (see the README), then sign up at modal.com, open Settings → API Tokens → New token, and paste both halves below. Modal charges per second of GPU time; set a cap under Usage & Billing → Budgets in their dashboard."
+            blurb="Brand Studio generates on your own Modal GPU, billed to you per second. This is required — there is no shared fallback, because the hosted BrandForge Space forwards every section to its publisher's Modal function and would spend their money instead of yours. Sign up at modal.com, open Settings → API Tokens → New token, paste both halves below, add the two repos you pushed, then run the setup. Modal gives new accounts around $30 of free credit; set a cap under Usage & Billing → Budgets."
             accent="var(--tool-social)"
           >
+            <label style={label}>Merged model repo</label>
+            <input
+              value={settings.brandForge.modelRepo}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, brandForge: { ...s.brandForge, modelRepo: e.target.value } }))
+              }
+              placeholder="your-username/your-merged-brandforge-model"
+              style={textInput}
+            />
+            <label style={label}>Image weights bucket</label>
+            <input
+              value={settings.brandForge.imageBucket}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, brandForge: { ...s.brandForge, imageBucket: e.target.value } }))
+              }
+              placeholder="your-username/your-flux-bucket"
+              style={textInput}
+            />
             <label style={label}>Modal token ID</label>
             <input
               type="password"

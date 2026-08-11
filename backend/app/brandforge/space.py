@@ -13,21 +13,19 @@ from gradio_client import Client
 from .. import config
 from .client import BrandForgeError
 
-# The Space Brand Studio talks to unless BRANDFORGE_SPACE says otherwise.
+# No hardcoded default, and the reason is worth keeping because one was briefly here.
 #
-# This is a deliberate exception to the rule in config.py that no hosted endpoint gets a
-# default, and it is worth being clear about the cost: every installation that has not set
-# the variable generates on this one account's Space. It is free CPU hardware, so the price
-# is a shared queue rather than a bill, and the owner is the one who chose to publish it.
+# The published BrandForge Space looks free: protected visibility means an anonymous
+# gradio_client reaches /generate_section with no token at all. It is not free. Its own
+# docstring calls it "a thin proxy to a Modal GPU function" — the Space holds no model and
+# forwards every request to a Modal T4 billed per second to whoever deployed it. Defaulting
+# to it spends the publisher's money on every document any install generates, twelve
+# sections at a time.
 #
-# It works for anyone because the Space is *protected*, not private — Hugging Face keeps the
-# source private while serving the running app publicly, so an anonymous gradio_client can
-# call /generate_section without a token.
-#
-# The environment variable still wins, so an operator running their own copy overrides this
-# without touching the code.
-FALLBACK_SPACE_ID = "vivekchakraverty/brandforge-qwen3-small"
-DEFAULT_SPACE_ID = config.BRANDFORGE_SPACE or FALLBACK_SPACE_ID
+# So the only Space used is one the operator names, via Settings or BRANDFORGE_SPACE, and
+# it is theirs to pay for. With neither that nor Modal connected, brand_forge.py refuses
+# rather than quietly billing someone else.
+DEFAULT_SPACE_ID = config.BRANDFORGE_SPACE
 
 # Cache one client per (space_id, token) — building a Client fetches the Space
 # config over the network, which also wakes a sleeping free Space.
