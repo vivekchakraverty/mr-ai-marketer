@@ -526,7 +526,7 @@ function InstanceEmbed({
     async function apply(): Promise<void> {
       if (cancelled || !themed) return
       try {
-        key = await view!.insertCSS(await mastodonThemeCss())
+        key = await view!.insertCSS(mastodonThemeCss())
       } catch {
         // insertCSS is unavailable until the guest page is attached; the dom-ready
         // listener below covers that case.
