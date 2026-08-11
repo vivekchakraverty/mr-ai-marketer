@@ -17,10 +17,23 @@ import modal
 APP_NAME = "mr-ai-marketer-image-generator"
 FUNCTION_NAME = "generate_image"
 SOURCE_MODEL = "black-forest-labs/FLUX.2-klein-4B"
-# Your own HF Bucket holding the FLUX.2 klein weights. See the README for creating one.
-BUCKET_ID = os.environ.get("BRANDFORGE_IMAGE_BUCKET", "").strip()
-BUCKET_URI = f"hf://buckets/{BUCKET_ID}"
-BUCKET_PAGE = f"https://huggingface.co/buckets/{BUCKET_ID}"
+
+# The published FLUX.2 klein export: a public model repo holding a standard Diffusers
+# pipeline (model_index.json, transformer/, text_encoder/, vae/, tokenizer/, scheduler/).
+#
+# This used to read an HF *Bucket* URI from BRANDFORGE_IMAGE_BUCKET and sync it with
+# `hf buckets sync`. Two things were wrong with that: the variable had no default, so a
+# packaged install always resolved it to "" and the deploy failed on `hf://buckets/`; and
+# the weights are not in a bucket at all, they are in a model repo, which snapshot_download
+# reads directly. The repo is public, so any user's token can fetch it.
+DEFAULT_MODEL_REPO = "vivekchakraverty/image-generator-marketer"
+# BRANDFORGE_IMAGE_BUCKET keeps its name for compatibility with anything already setting it.
+MODEL_REPO = (
+    os.environ.get("BRANDFORGE_IMAGE_MODEL", "").strip()
+    or os.environ.get("BRANDFORGE_IMAGE_BUCKET", "").strip()
+    or DEFAULT_MODEL_REPO
+)
+BUCKET_PAGE = f"https://huggingface.co/{MODEL_REPO}"
 MODEL_DIR = "/models/image-generator-marketer"
 
 # FLUX.2 klein 4B needs about 13 GB of VRAM; an L4 provides enough headroom for
@@ -52,9 +65,10 @@ def _build_image(secret: modal.Secret) -> modal.Image:
         .run_commands(
             # FLUX.2 klein support is currently released from Diffusers main.
             "pip install --no-cache-dir git+https://github.com/huggingface/diffusers.git",
-            # Buckets are object storage, not model repositories, so sync their
-            # files into a local Diffusers directory before the container starts.
-            f"hf buckets sync {BUCKET_URI} {MODEL_DIR}",
+            # Bake the pipeline in. 23.7 GB is far too much to pull on a cold start,
+            # and local_dir gives _generate_image a plain directory to load from.
+            "python -c \"from huggingface_hub import snapshot_download; "
+            f"snapshot_download('{MODEL_REPO}', local_dir='{MODEL_DIR}')\"",
             secrets=[secret],
         )
     )

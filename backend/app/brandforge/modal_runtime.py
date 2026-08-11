@@ -28,11 +28,13 @@ from .modal_image_backend import (
 )
 from .sections import SECTION_SPECS, build_student_messages
 
-# The first deploy builds a container image and bakes in 3.4 GB of base weights,
-# which is slow enough that the UI has to say so up front.
+# The first deploy builds two container images and bakes the weights into them: about
+# 3.4 GB for the text model, and roughly 24 GB for the FLUX.2 image pipeline. The second
+# of those dominates, and it is slow enough that the UI has to say so up front rather than
+# leave a progress bar looking stuck.
 FIRST_DEPLOY_HINT = (
-    "The first setup builds text and image GPU containers and can take 5-15 minutes. "
-    "Later runs reuse them and are quick."
+    "The first setup builds text and image GPU containers and can take 15-30 minutes, "
+    "most of it downloading the image model. Later runs reuse them and are quick."
 )
 
 
@@ -92,8 +94,8 @@ def _explain(exc: Exception) -> str:
         )
     if "model_index.json" in low or "not found" in low or "repository" in low or "bucket" in low:
         return (
-            "Modal couldn't load the image model. Put a standard Diffusers export in "
-            f"{IMAGE_BUCKET_PAGE}, then run setup again. ({text})"
+            "Modal couldn't load the image model. Confirm that your Hugging Face token can "
+            f"read {IMAGE_BUCKET_PAGE}, then run setup again. ({text})"
         )
     return f"Modal setup failed: {text}"
 

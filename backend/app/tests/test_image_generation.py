@@ -29,10 +29,12 @@ class _FakeModalRuntime:
         return _png_bytes()
 
 
-def test_modal_image_worker_uses_the_flux_bucket():
+def test_modal_image_worker_loads_the_flux_pipeline():
     assert modal_image_backend.SOURCE_MODEL == "black-forest-labs/FLUX.2-klein-4B"
-    # The bucket is user-configured, so assert the URI shape rather than one account's id.
-    assert modal_image_backend.BUCKET_URI.startswith("hf://buckets/")
+    # A model repo, not an hf://buckets/ URI. The bucket form was the reason this worker
+    # could never deploy: the env var had no default, so it resolved to "hf://buckets/".
+    assert "/" in modal_image_backend.MODEL_REPO
+    assert not modal_image_backend.MODEL_REPO.startswith("hf://")
     assert modal_image_backend.MODEL_DIR == "/models/image-generator-marketer"
 
 
