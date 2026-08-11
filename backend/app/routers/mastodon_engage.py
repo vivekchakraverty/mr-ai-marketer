@@ -37,7 +37,9 @@ import uuid
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from ..services.genqueue import queue_slot
 from pydantic import BaseModel
 
 from ..services import mastodon as masto
@@ -897,7 +899,7 @@ def search(body: SearchRequest) -> SearchOut:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/compose", response_model=ActionOut)
+@router.post("/compose", response_model=ActionOut, dependencies=[Depends(queue_slot("model"))])
 def compose(body: ComposeRequest) -> ActionOut:
     """Post, or reply to someone. The one call that puts new words on the fediverse."""
     policy = _gated(body)

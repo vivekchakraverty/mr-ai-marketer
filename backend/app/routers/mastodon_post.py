@@ -35,7 +35,9 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from ..services.genqueue import queue_slot
 from pydantic import BaseModel
 
 from .. import db
@@ -803,7 +805,7 @@ def _norms_for(policy: masto.InstancePolicy) -> list[str]:
     ]
 
 
-@router.post("/generate", response_model=GenerateResponse)
+@router.post("/generate", response_model=GenerateResponse, dependencies=[Depends(queue_slot("model"))])
 def generate(body: GenerateRequest) -> GenerateResponse:
     """Write one post — but only for an instance whose rules have been accepted."""
     if not body.userInput.strip():

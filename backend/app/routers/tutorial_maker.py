@@ -3,7 +3,9 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from ..services.genqueue import queue_slot
 from pydantic import BaseModel
 
 from .. import config, db
@@ -56,7 +58,7 @@ def _outputs_url(path) -> str:
     return "/outputs/" + path.resolve().relative_to(config.OUTPUTS_DIR.resolve()).as_posix()
 
 
-@router.post("/generate", response_model=GenerateTutorialResponse)
+@router.post("/generate", response_model=GenerateTutorialResponse, dependencies=[Depends(queue_slot("model"))])
 def generate_tutorial_endpoint(body: GenerateTutorialRequest) -> GenerateTutorialResponse:
     if not body.topic.strip():
         raise HTTPException(status_code=400, detail="Topic is required.")

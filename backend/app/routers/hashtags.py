@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from ..services.genqueue import queue_slot
 from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
@@ -73,7 +75,7 @@ def _niche_keywords(niche: str) -> list[str]:
         return []
 
 
-@router.post("/suggest", response_model=SuggestResponse)
+@router.post("/suggest", response_model=SuggestResponse, dependencies=[Depends(queue_slot("model"))])
 def suggest(body: SuggestRequest) -> SuggestResponse:
     from ..services import hashtags
 

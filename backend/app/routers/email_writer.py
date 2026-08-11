@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from ..services.genqueue import queue_slot
 from pydantic import BaseModel
 
 from .. import db
@@ -25,7 +27,7 @@ class GenerateEmailResponse(BaseModel):
     ctrBucket: str
 
 
-@router.post("/generate", response_model=GenerateEmailResponse)
+@router.post("/generate", response_model=GenerateEmailResponse, dependencies=[Depends(queue_slot("space"))])
 def generate_email(body: GenerateEmailRequest) -> GenerateEmailResponse:
     instruction = body.instruction.strip()
     if not instruction:

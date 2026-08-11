@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .services.genqueue import QueueFull as GenQueueFull
+
 from . import config, db  # imports app.config as a side effect, which sets up the vendor sys.path
 from .routers import (
     backup,
@@ -158,6 +160,29 @@ def on_startup() -> None:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/queue")
+def queue() -> dict:
+    """How much generation work is in flight. Polled by the queue indicator.
+
+    Deliberately outside the token-protected tool routers and as cheap as /health: the
+    renderer polls this while anything is running, and it must never be the thing that is
+    slow or contended.
+    """
+    from .services import genqueue
+
+    return genqueue.status()
+
+
+@app.exception_handler(GenQueueFull)
+async def _queue_full(_request: Request, exc: GenQueueFull) -> JSONResponse:
+    """429 rather than 500: the request was refused because the queue is full, which is a
+    "come back shortly", not a fault. The message is already user-facing — the queue raises
+    it with the wait described in plain words — so it passes straight through as `detail`,
+    matching the shape every other error in this app uses.
+    """
+    return JSONResponse(status_code=429, content={"detail": str(exc)})
 
 
 app.include_router(settings.router)

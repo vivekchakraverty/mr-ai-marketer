@@ -13,7 +13,9 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from ..services.genqueue import queue_slot
 from PIL import Image
 from pydantic import BaseModel
 
@@ -232,7 +234,7 @@ def meta() -> dict:
     }
 
 
-@router.post("/section", response_model=SectionOut)
+@router.post("/section", response_model=SectionOut, dependencies=[Depends(queue_slot("space"))])
 def generate_section(body: GenerateSectionRequest) -> SectionOut:
     """Generate ONE section on the Space. The frontend calls this per section
     (incremental progress) and for single-section regeneration."""
@@ -325,7 +327,7 @@ def assemble(body: AssembleRequest) -> AssembleResponse:
     )
 
 
-@router.post("/images", response_model=BrandImagesResponse)
+@router.post("/images", response_model=BrandImagesResponse, dependencies=[Depends(queue_slot("image"))])
 def generate_images(body: BrandImagesRequest) -> BrandImagesResponse:
     intake = _build_intake(body.intake)
     if not body.hfToken.strip():

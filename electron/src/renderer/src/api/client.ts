@@ -2284,3 +2284,23 @@ export async function telegramLinkChat(chatId: string, role: 'open' | 'paid', ti
   const creds = await telegramCreds()
   return postJson(`/community/account/chats/${encodeURIComponent(chatId)}/link`, { ...creds, role, title })
 }
+
+// ---------------------------------------------------------------------------
+// Generation queue (app/services/genqueue.py)
+//
+// Every generation endpoint holds a slot in a lane; this reports how many are
+// running and how many are waiting behind them. A 429 from any generation call
+// means the waiting room was full — its `detail` is already user-facing text.
+// ---------------------------------------------------------------------------
+
+export interface QueueStatus {
+  running: number
+  waiting: number
+  busy: boolean
+  queued: boolean
+  lanes: Record<string, { running: number; waiting: number; limit: number; maxWaiting: number }>
+}
+
+export function getQueueStatus(): Promise<QueueStatus> {
+  return getJson('/queue')
+}

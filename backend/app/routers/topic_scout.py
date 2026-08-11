@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from ..services.genqueue import queue_slot
 from pydantic import BaseModel
 
 from .. import db
@@ -146,7 +148,7 @@ def options() -> OptionsResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/discover", response_model=DiscoverResponse)
+@router.post("/discover", response_model=DiscoverResponse, dependencies=[Depends(queue_slot("model"))])
 def discover(body: DiscoverRequest) -> DiscoverResponse:
     engine, _ = _engine()
 

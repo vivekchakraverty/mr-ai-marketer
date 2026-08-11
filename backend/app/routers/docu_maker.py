@@ -3,7 +3,9 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
+
+from ..services.genqueue import queue_slot
 from pydantic import BaseModel
 
 from .. import config, db
@@ -39,7 +41,7 @@ def _outputs_url(path: Path) -> str:
     return "/outputs/" + path.resolve().relative_to(config.OUTPUTS_DIR.resolve()).as_posix()
 
 
-@router.post("/generate", response_model=GenerateDocuResponse)
+@router.post("/generate", response_model=GenerateDocuResponse, dependencies=[Depends(queue_slot("model"))])
 async def generate_docu(
     video: UploadFile,
     product: str = Form(""),

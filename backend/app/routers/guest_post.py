@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from ..services.genqueue import queue_slot
 from pydantic import BaseModel
 
 from .. import db
@@ -130,7 +132,7 @@ class AnalyzeResponse(BaseModel):
     suggestions: list[str]
 
 
-@router.post("/analyze", response_model=AnalyzeResponse)
+@router.post("/analyze", response_model=AnalyzeResponse, dependencies=[Depends(queue_slot("model"))])
 def analyze(body: AnalyzeRequest) -> AnalyzeResponse:
     site = _by_domain.get(body.domain)
     if not site:

@@ -6,7 +6,9 @@ import re
 import threading
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from ..services.genqueue import queue_slot
 from pydantic import BaseModel
 
 from .. import config, db
@@ -227,7 +229,7 @@ _SOURCE_LABELS = {
 }
 
 
-@router.post("/generate", response_model=GeneratePlanResponse)
+@router.post("/generate", response_model=GeneratePlanResponse, dependencies=[Depends(queue_slot("model"))])
 def generate_plan(body: GeneratePlanRequest) -> GeneratePlanResponse:
     if not body.productDescription.strip():
         raise HTTPException(status_code=400, detail="Please describe your product or service.")

@@ -4,7 +4,9 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from ..services.genqueue import queue_slot
 from gradio_client import Client
 from pydantic import BaseModel
 
@@ -57,7 +59,7 @@ def _outputs_url(path: Path) -> str:
     return "/outputs/" + path.resolve().relative_to(config.OUTPUTS_DIR.resolve()).as_posix()
 
 
-@router.post("/generate", response_model=GenerateBlogResponse)
+@router.post("/generate", response_model=GenerateBlogResponse, dependencies=[Depends(queue_slot("space"))])
 def generate_blog(body: GenerateBlogRequest) -> GenerateBlogResponse:
     if not body.topic.strip():
         raise HTTPException(status_code=400, detail="Topic is required.")

@@ -30,6 +30,7 @@ binaries = []
 hiddenimports = [
     "app.main",
     "app.routers.settings",
+    "app.services.genqueue",
     "app.routers.library",
     "app.routers.marketing_plan",
     "app.routers.blog_writer",

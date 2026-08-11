@@ -25,7 +25,9 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from ..services.genqueue import queue_slot
 from PIL import Image
 from pydantic import BaseModel
 
@@ -424,7 +426,7 @@ def _modal_runtime():
     return modal_runtime
 
 
-@router.post("/generate", response_model=GenerateResponse)
+@router.post("/generate", response_model=GenerateResponse, dependencies=[Depends(queue_slot("model"))])
 def generate(body: GenerateRequest) -> GenerateResponse:
     if not body.userInput.strip():
         raise HTTPException(status_code=400, detail="Tell it what to post about first.")
@@ -499,7 +501,7 @@ def generate(body: GenerateRequest) -> GenerateResponse:
     )
 
 
-@router.post("/images", response_model=GenerateImageResponse)
+@router.post("/images", response_model=GenerateImageResponse, dependencies=[Depends(queue_slot("image"))])
 def generate_image(body: GenerateImageRequest) -> GenerateImageResponse:
     """Create a visual companion for a generated post.
 
