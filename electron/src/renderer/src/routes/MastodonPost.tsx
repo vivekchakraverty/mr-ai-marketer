@@ -52,6 +52,10 @@ export default function MastodonPost(): React.JSX.Element {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [brandVoiceId, setBrandVoiceId] = useState('')
+  // Recent drafts for this request, sent back on a rewrite so the model is told what not
+  // to repeat. Capped at three — enough to break it out of its favourite opening without
+  // spending the prompt budget on old drafts.
+  const [previousTexts, setPreviousTexts] = useState<string[]>([])
   const [copied, setCopied] = useState(false)
 
   const [postedUrl, setPostedUrl] = useState('')
@@ -79,7 +83,7 @@ export default function MastodonPost(): React.JSX.Element {
 
   async function refreshAll(): Promise<void> {
     try {
-      const n = await listMastodonNiches()
+      const n = await listMastodonNiches(fields.instance)
       setNiches(n)
       if (!fields.niche && n.length) setField('niche', n[0].name)
     } catch (err) {
@@ -153,11 +157,17 @@ export default function MastodonPost(): React.JSX.Element {
     }
   }
 
-  async function handleGenerate(): Promise<void> {
+  /**
+   * Generate a post, or rewrite the one on screen.
+   *
+   * `rewrite` keeps the current draft visible while the next one is written — clearing it
+   * removed the button that had just been clicked, which reads as nothing happening.
+   */
+  async function handleGenerate(rewrite = false): Promise<void> {
     if (!fields.userInput.trim() || !fields.niche || !fields.instance) return
     setLoading(true)
     setError('')
-    setResult(null)
+    if (!rewrite) setResult(null)
     setLinked('')
     setPostedUrl('')
     try {
@@ -167,9 +177,13 @@ export default function MastodonPost(): React.JSX.Element {
         fields.userInput,
         fields.sourceUrl,
         fields.discloseAi,
-        brandVoiceId
+        brandVoiceId,
+        rewrite ? previousTexts : []
       )
       setResult(res)
+      // A fresh generate starts the history over: a new topic should not be steered away
+      // from the wording of the last one.
+      setPreviousTexts((prev) => (rewrite ? [...prev, res.text].slice(-3) : [res.text]))
       void refreshLibrary()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -400,7 +414,7 @@ export default function MastodonPost(): React.JSX.Element {
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div
                   style={{ ...primaryButtonSmall, opacity: loading || !fields.niche ? 0.6 : 1 }}
-                  onClick={loading || !fields.niche ? undefined : handleGenerate}
+                  onClick={loading || !fields.niche ? undefined : () => void handleGenerate(false)}
                 >
                   {loading ? (fields.sourceUrl.trim() ? 'Reading the link…' : 'Thinking…') : 'Write it'}
                 </div>
@@ -420,7 +434,7 @@ export default function MastodonPost(): React.JSX.Element {
                 setCopied(true)
                 setTimeout(() => setCopied(false), 1600)
               }}
-              onRetry={handleGenerate}
+              onRetry={() => void handleGenerate(true)}
               postedUrl={postedUrl}
               setPostedUrl={setPostedUrl}
               linking={linking}

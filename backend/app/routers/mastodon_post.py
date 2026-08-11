@@ -19,13 +19,28 @@ each because Mastodon is different, not because this was written second.
    settled post can be scored the moment it is collected. Collection therefore
    builds the exemplar pool in one pass, and there is no cold start.
 
-3. The corpus is namespaced.
+3. The corpus is namespaced per platform *and* per instance.
    Rows go into the vendored socialpost store (so embeddings, exemplar ranking
    and the LLM plumbing are shared, and vendor/socialpost stays unmodified) but
-   under a niche key of "<niche> · mastodon". Without that, the Bluesky
-   scheduler's refresh_exemplars — which deactivates a niche's entire pool and
-   replaces it — would periodically delete every Mastodon exemplar, and the two
-   tools would silently ground each other's drafts in the wrong platform's voice.
+   under a niche key of "<niche> · mastodon · <host>".
+
+   The platform half is what stops the Bluesky scheduler's refresh_exemplars —
+   which deactivates a niche's entire pool and replaces it — from periodically
+   deleting every Mastodon exemplar and leaving the two tools grounding each
+   other's drafts in the wrong platform's voice.
+
+   The instance half exists because an instance is a culture, not just an
+   endpoint. hachyderm.io and toot.garden reward visibly different registers, and
+   one pooled corpus averages them into a voice that suits neither. Splitting it
+   also brings what the tool learns into line with what it already asks
+   permission for, since the rules gate was per-instance from the start.
+
+   An instance with fewer than MIN_INSTANCE_EXEMPLARS of its own borrows from the
+   wider Mastodon pool until it has collected enough, so a newly added server is
+   grounded from its first post rather than starting blank. Rows written before
+   the split keep the old platform-only key and stay readable as fallback: which
+   instance they came from was never recorded, so assigning them now would be a
+   guess, and guessing wrong is the blending this is here to stop.
 """
 
 from __future__ import annotations
@@ -69,6 +84,10 @@ MIN_FOLLOWERS = 50
 
 PLATFORM = "mastodon"
 
+# Matches the Bluesky composer: each attempt is up to a few hundred characters and they
+# all ride in the prompt, so an unbounded list would quietly eat the generation budget.
+MAX_AVOID_TEXTS = 3
+
 
 def _spg():
     """Lazy handle on the vendored package (it pulls torch in via embeddings)."""
@@ -78,9 +97,54 @@ def _spg():
     return spg_db, embeddings, llm
 
 
-def _corpus_niche(niche: str) -> str:
-    """The namespaced key Mastodon rows live under. See the module docstring."""
+# Below this many exemplars of its own, an instance borrows from the wider Mastodon pool
+# rather than generating ungrounded. Eight is where the retrieval starts having something
+# to choose between; under that the "closest" exemplars are just whatever exists.
+MIN_INSTANCE_EXEMPLARS = 8
+
+
+def _corpus_niche(niche: str, host: str) -> str:
+    """The namespaced key Mastodon rows live under. See the module docstring.
+
+    Keyed by instance as well as platform, because an instance is a culture and not just
+    an endpoint. hachyderm.io and toot.garden reward visibly different registers, and a
+    single pooled corpus averages them into a voice that suits neither. The rules gate was
+    already per-instance and fingerprinted; this makes what the tool *learns* match what it
+    already asks permission for.
+    """
+    return f"{niche} · mastodon · {host}"
+
+
+def _legacy_corpus_niche(niche: str) -> str:
+    """The key used before the corpus was split by instance.
+
+    Rows written under it are not migrated. There is no record of which instance they came
+    from, so any assignment would be a guess, and guessing wrong is exactly the blending
+    this change exists to stop. They stay readable as fallback material instead, which
+    costs nothing and keeps existing installs grounded on the first post after updating.
+    """
     return f"{niche} · mastodon"
+
+
+def _fallback_keys(niche: str, host: str) -> list[str]:
+    """Corpora to borrow from when this instance has too few exemplars of its own.
+
+    A newly added instance starts empty, and a post grounded in a slightly-off register
+    beats one grounded in nothing — the borrowing stops by itself once the instance has
+    collected `MIN_INSTANCE_EXEMPLARS` of its own.
+
+    Read from the local acks table rather than `_accepted_hosts()`: this runs on the
+    generate path, and that helper makes a network call per instance to re-check
+    fingerprints. Borrowing style from an instance whose rules have since changed is not
+    the risk that check exists to prevent — publishing to it is, and that is gated
+    separately.
+    """
+    keys = [_legacy_corpus_niche(niche)]
+    for ack in db.list_mastodon_acks():
+        other = (ack.get("instance") or "").strip().lower().removeprefix("https://").strip("/")
+        if other and other != host:
+            keys.append(_corpus_niche(niche, other))
+    return keys
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +225,11 @@ class GenerateRequest(BaseModel):
     # Optional Library id of a Brand Studio document; folded into user_input in compact
     # form for the same length reasons as the Bluesky composer.
     brandVoiceId: str = ""
+    # Posts already written for this request, sent when the author asks for another
+    # attempt. Without them an identical prompt reproduces its own opening line however
+    # high the temperature — the Bluesky composer hit exactly this and fixed it the same
+    # way. Capped server-side so a client cannot grow the prompt without bound.
+    avoidTexts: list[str] = []
     discloseAi: bool = True
 
 
@@ -301,10 +370,15 @@ def _require_accepted(instance: str) -> masto.InstancePolicy:
 # ---------------------------------------------------------------------------
 
 
-def _counts(niche: str) -> tuple[int, int]:
-    """(posts, active exemplars) for one niche's Mastodon corpus."""
+def _counts(niche: str, host: str) -> tuple[int, int]:
+    """(posts, active exemplars) this instance has of its own.
+
+    Deliberately not counting borrowed material. The number answers "how well does this
+    tool know how to write for *this* instance", and folding in another server's corpus
+    would report a readiness the instance has not earned.
+    """
     spg_db, _, _ = _spg()
-    key = _corpus_niche(niche)
+    key = _corpus_niche(niche, host)
     client = spg_db.get_client()
     try:
         posts = (
@@ -349,11 +423,16 @@ def status(instance: str = "") -> StatusResponse:
     except Exception:  # noqa: BLE001
         niches = []
 
+    # Scoped to the instance being asked about. "Ready to ground" is a per-server
+    # question now: the same niche can be well stocked on one instance and empty on
+    # another, and a total across all of them would claim readiness this server has not.
+    host = (instance or "").strip().lower().removeprefix("https://").strip("/")
     posts = exemplars = 0
-    for row in niches:
-        p, e = _counts(row["name"])
-        posts += p
-        exemplars += e
+    if host:
+        for row in niches:
+            p, e = _counts(row["name"], host)
+            posts += p
+            exemplars += e
 
     out = StatusResponse(
         instance=instance.strip(),
@@ -390,16 +469,19 @@ def status(instance: str = "") -> StatusResponse:
 
 
 @router.get("/niches", response_model=list[NicheOut])
-def list_niches() -> list[NicheOut]:
+def list_niches(instance: str = "") -> list[NicheOut]:
     """Niches, shared with the Bluesky tool — a niche is a niche.
 
     The counts are Mastodon-only, because they answer "can this ground a
-    Mastodon draft?" and a Bluesky corpus cannot.
+    Mastodon draft?" and a Bluesky corpus cannot. They are also per-instance: the
+    same niche can be well grounded on one server and empty on another, and a
+    single number would hide that.
     """
     spg_db, _, _ = _spg()
+    host = (instance or "").strip().lower().removeprefix("https://").strip("/")
     out: list[NicheOut] = []
     for row in spg_db.list_niches():
-        posts, exemplars = _counts(row["name"])
+        posts, exemplars = _counts(row["name"], host) if host else (0, 0)
         out.append(
             NicheOut(
                 name=row["name"],
@@ -496,7 +578,7 @@ def _collect_niche(
     if not keywords:
         return CollectResponse(scanned=0, stored=0, skipped={}, exemplars=0)
 
-    key = _corpus_niche(niche)
+    key = _corpus_niche(niche, host)
     now = spg_db.utcnow()
     settled_before = now - timedelta(hours=MIN_SETTLE_HOURS)
 
@@ -601,7 +683,7 @@ def _collect_niche(
         on_conflict="post_uri,window_label",
     )
 
-    n_exemplars = _rebuild_pool(niche)
+    n_exemplars = _rebuild_pool(niche, host)
     log.info(
         "[mastodon-post] %s: scanned %d, stored %d, pool %d",
         niche,
@@ -614,7 +696,7 @@ def _collect_niche(
     )
 
 
-def _rebuild_pool(niche: str) -> int:
+def _rebuild_pool(niche: str, host: str) -> int:
     """Replace the niche's Mastodon exemplar pool from everything measured so far.
 
     A compact mirror of vendor/socialpost's refresh_exemplars, scoped to the
@@ -624,7 +706,7 @@ def _rebuild_pool(niche: str) -> int:
     timeline produces to be worth its cost.
     """
     spg_db, embeddings, _ = _spg()
-    key = _corpus_niche(niche)
+    key = _corpus_niche(niche, host)
     client = spg_db.get_client()
     now = spg_db.utcnow()
 
@@ -691,7 +773,7 @@ def _rebuild_pool(niche: str) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _retrieve_exemplars(niche: str, query: str, n: int = N_EXEMPLARS) -> list[dict]:
+def _retrieve_exemplars(niche: str, host: str, query: str, n: int = N_EXEMPLARS) -> list[dict]:
     """Top-n Mastodon exemplars for the niche, by blended similarity and score.
 
     Reimplemented over the client's public surface rather than the vendored
@@ -701,18 +783,26 @@ def _retrieve_exemplars(niche: str, query: str, n: int = N_EXEMPLARS) -> list[di
     import numpy as np
 
     spg_db, embeddings, _ = _spg()
-    key = _corpus_niche(niche)
     client = spg_db.get_client()
 
-    rows = (
-        client.table("exemplars")
-        .select("id, post_uri, score, embedding")
-        .eq("niche", key)
-        .eq("active", True)
-        .execute()
-        .data
-        or []
-    )
+    def _pool(keys: list[str]) -> list[dict]:
+        return (
+            client.table("exemplars")
+            .select("id, post_uri, score, embedding")
+            .in_("niche", keys)
+            .eq("active", True)
+            .execute()
+            .data
+            or []
+        )
+
+    rows = _pool([_corpus_niche(niche, host)])
+    # A thin pool means retrieval has nothing to choose between, so top it up from the
+    # wider Mastodon corpus rather than ground the post on two near-misses. Own exemplars
+    # still come first and this stops once the instance has enough of its own.
+    if len(rows) < MIN_INSTANCE_EXEMPLARS:
+        seen = {r["id"] for r in rows}
+        rows += [r for r in _pool(_fallback_keys(niche, host)) if r["id"] not in seen]
     rows = [r for r in rows if r.get("embedding") is not None]
     if not rows:
         return []
@@ -831,7 +921,7 @@ def generate(body: GenerateRequest) -> GenerateResponse:
     retrieval_query = (
         f"{body.userInput} {fetched.title}".strip() if fetched else body.userInput
     )
-    exemplars = _retrieve_exemplars(body.niche, retrieval_query)
+    exemplars = _retrieve_exemplars(body.niche, host, retrieval_query)
     compliance = _compliance_for(policy, body.discloseAi)
 
     # Leave room for the disclosure line so the finished post fits the instance's
@@ -854,6 +944,7 @@ def generate(body: GenerateRequest) -> GenerateResponse:
             exemplar_texts=[e["text"] for e in exemplars],
             kb_summaries=norms,
             source=fetched,
+            avoid_texts=[t for t in body.avoidTexts if t.strip()][-MAX_AVOID_TEXTS:],
         )
     except Exception as err:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=str(err)) from None
@@ -871,7 +962,7 @@ def generate(body: GenerateRequest) -> GenerateResponse:
                 {
                     "created_at": spg_db.iso(spg_db.utcnow()),
                     "user_input": body.userInput,
-                    "niche": _corpus_niche(body.niche),
+                    "niche": _corpus_niche(body.niche, host),
                     "output_text": text,
                     "exemplar_ids": [e["id"] for e in exemplars],
                     "kb_ids": [],
@@ -938,7 +1029,7 @@ def mark_published(body: PublishedRequest) -> dict:
             ),
         )
 
-    key = _corpus_niche(body.niche)
+    key = _corpus_niche(body.niche, host)
     uri = masto.corpus_uri(host, status.id)
     now = spg_db.utcnow()
 
@@ -1066,7 +1157,12 @@ def _run_mastodon_snapshot() -> None:
     client = spg_db.get_client()
     now = spg_db.utcnow()
 
-    niche_keys = [_corpus_niche(r["name"]) for r in spg_db.list_niches()]
+    # Hoisted: _accepted_hosts() re-checks each instance's rule fingerprint over the
+    # network, so evaluating it inside the comprehension would repeat that per niche.
+    hosts = _accepted_hosts()
+    niche_keys = [
+        _corpus_niche(r["name"], h) for r in spg_db.list_niches() for h in hosts
+    ]
     if not niche_keys:
         return
 

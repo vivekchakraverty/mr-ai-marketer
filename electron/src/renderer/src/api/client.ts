@@ -844,8 +844,11 @@ export function revokeMastodonPolicy(instance: string): Promise<{ accepted: bool
   return deleteJson(`/mastodon-post/policy/accept?instance=${encodeURIComponent(instance)}`)
 }
 
-export function listMastodonNiches(): Promise<MastodonNiche[]> {
-  return getJson('/mastodon-post/niches')
+/** Niche counts are per-instance: the same niche can be well grounded on one server and
+ *  empty on another, so the instance decides which corpus is being counted. */
+export function listMastodonNiches(instance = ''): Promise<MastodonNiche[]> {
+  const q = instance.trim() ? `?instance=${encodeURIComponent(instance.trim())}` : ''
+  return getJson(`/mastodon-post/niches${q}`)
 }
 
 export async function collectMastodonNiche(
@@ -867,7 +870,11 @@ export async function generateMastodonPost(
   userInput: string,
   sourceUrl = '',
   discloseAi = true,
-  brandVoiceId = ''
+  brandVoiceId = '',
+  // Posts already written for this request, sent on a rewrite so the model is told what
+  // not to repeat. Same reason as the Bluesky composer: an identical prompt reproduces
+  // its own opening line however high the temperature.
+  avoidTexts: string[] = []
 ): Promise<MastodonGenerateResponse> {
   return postJson('/mastodon-post/generate', {
     instance,
@@ -876,6 +883,7 @@ export async function generateMastodonPost(
     sourceUrl,
     discloseAi,
     brandVoiceId,
+    avoidTexts,
     accessToken: await mastodonToken()
   })
 }
