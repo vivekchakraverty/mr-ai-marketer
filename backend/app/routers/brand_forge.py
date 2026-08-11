@@ -241,6 +241,19 @@ def generate_section(body: GenerateSectionRequest) -> SectionOut:
     intake = _build_intake(body.intake)
 
     use_modal = bool(body.modalTokenId.strip() and body.modalTokenSecret.strip())
+    # Neither generator configured is the caller's setup, not an upstream fault, so it is a
+    # 400 rather than the 502 every other failure here returns. Checked before dispatch so
+    # the message can name both routes; space.py guards the same case for other callers.
+    if not use_modal and not (body.spaceId.strip() or config.BRANDFORGE_SPACE):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Brand Studio has no generator configured yet. Either deploy the BrandForge "
+                "Space to your own Hugging Face account and paste its id into Settings → "
+                "Brand Studio → Space ID, or connect your Modal account in the same section "
+                "to run it on your own GPU."
+            ),
+        )
     try:
         if use_modal:
             runtime = _modal_runtime()

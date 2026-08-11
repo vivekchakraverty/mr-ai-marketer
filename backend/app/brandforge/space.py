@@ -41,6 +41,18 @@ def generate_section(space_id: str, hf_token: str, intake: dict, section_name: s
     """One section from the Space. Raises BrandForgeError on failure (including
     the Space's own 'ERROR:'-prefixed responses)."""
     space_id = (space_id or "").strip() or DEFAULT_SPACE_ID
+    if not space_id:
+        # Without this the empty string reaches huggingface_hub, which rejects it as a
+        # malformed repo id — "Repo id must use alphanumeric chars, '-', '_' or '.'…" — and
+        # the user is left reading a validation error about a field they were never shown.
+        # Nothing is defaulted here on purpose: a shipped Space id would point every
+        # installation at one account and spend its quota.
+        raise BrandForgeError(
+            "Brand Studio has no generator configured yet. Either deploy the BrandForge "
+            "Space to your own Hugging Face account and paste its id into Settings → "
+            "Brand Studio → Space ID, or connect your Modal account in the same section "
+            "to run it on your own GPU."
+        )
 
     client = _get_client(space_id, hf_token)
     try:
