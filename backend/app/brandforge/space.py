@@ -13,9 +13,21 @@ from gradio_client import Client
 from .. import config
 from .client import BrandForgeError
 
-# No default. Brand Studio runs on the Space *you* deploy — set it in Settings, or via
-# the BRANDFORGE_SPACE environment variable.
-DEFAULT_SPACE_ID = config.BRANDFORGE_SPACE
+# The Space Brand Studio talks to unless BRANDFORGE_SPACE says otherwise.
+#
+# This is a deliberate exception to the rule in config.py that no hosted endpoint gets a
+# default, and it is worth being clear about the cost: every installation that has not set
+# the variable generates on this one account's Space. It is free CPU hardware, so the price
+# is a shared queue rather than a bill, and the owner is the one who chose to publish it.
+#
+# It works for anyone because the Space is *protected*, not private — Hugging Face keeps the
+# source private while serving the running app publicly, so an anonymous gradio_client can
+# call /generate_section without a token.
+#
+# The environment variable still wins, so an operator running their own copy overrides this
+# without touching the code.
+FALLBACK_SPACE_ID = "vivekchakraverty/brandforge-qwen3-small"
+DEFAULT_SPACE_ID = config.BRANDFORGE_SPACE or FALLBACK_SPACE_ID
 
 # Cache one client per (space_id, token) — building a Client fetches the Space
 # config over the network, which also wakes a sleeping free Space.
@@ -42,16 +54,14 @@ def generate_section(space_id: str, hf_token: str, intake: dict, section_name: s
     the Space's own 'ERROR:'-prefixed responses)."""
     space_id = (space_id or "").strip() or DEFAULT_SPACE_ID
     if not space_id:
-        # Without this the empty string reaches huggingface_hub, which rejects it as a
-        # malformed repo id — "Repo id must use alphanumeric chars, '-', '_' or '.'…" — and
-        # the user is left reading a validation error about a field they were never shown.
-        # Nothing is defaulted here on purpose: a shipped Space id would point every
-        # installation at one account and spend its quota.
+        # A backstop, not the normal path: DEFAULT_SPACE_ID has a fallback, so this only
+        # fires if that is cleared. It exists because the empty string otherwise reaches
+        # huggingface_hub and comes back as "Repo id must use alphanumeric chars, '-', '_'
+        # or '.'…" — a validation error about a field the user was never shown.
         raise BrandForgeError(
-            "Brand Studio has no generator configured yet. Either deploy the BrandForge "
-            "Space to your own Hugging Face account and paste its id into Settings → "
-            "Brand Studio → Space ID, or connect your Modal account in the same section "
-            "to run it on your own GPU."
+            "Brand Studio has no generator configured. Connect your Modal account in "
+            "Settings → Brand Studio to run it on your own GPU, or set BRANDFORGE_SPACE "
+            "to a Space you have deployed."
         )
 
     client = _get_client(space_id, hf_token)

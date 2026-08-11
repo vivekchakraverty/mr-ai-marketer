@@ -446,23 +446,6 @@ export default function Settings(): React.JSX.Element {
           </Section>
 
           <Section
-            title="BrandForge Space"
-            optional
-            blurb="Brand Studio (Research → Brand Studio) works out of the box against the hosted BrandForge Space — no setup needed. Leave this blank unless you want to point it at your own Space (owner/space-name). Your HF token above is used to reach it; brand images use HF text-to-image on the same token."
-            accent="var(--tool-social)"
-          >
-            <label style={label}>Space ID (override)</label>
-            <input
-              value={settings.brandForge.spaceId}
-              onChange={(e) =>
-                setSettings((s) => ({ ...s, brandForge: { ...s.brandForge, spaceId: e.target.value } }))
-              }
-              placeholder="your-username/your-brandforge-space"
-              style={textInput}
-            />
-          </Section>
-
-          <Section
             title="Brand Studio GPU"
             optional
             blurb="Brand Studio runs on the Hugging Face Space you deploy. Connect your own Modal account to generate text and visuals on your own GPU instead — Modal gives new accounts around $30 of free GPU credit. Set BRANDFORGE_MODEL to your merged model repo and BRANDFORGE_IMAGE_BUCKET to the HF Bucket holding the FLUX.2 klein weights (see the README), then sign up at modal.com, open Settings → API Tokens → New token, and paste both halves below. Modal charges per second of GPU time; set a cap under Usage & Billing → Budgets in their dashboard."
