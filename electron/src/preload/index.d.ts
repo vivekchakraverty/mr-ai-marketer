@@ -22,6 +22,8 @@ export interface MrAiMarketerApi {
     setAll: (partial: SettingsPatch) => Promise<AppSettings>
   }
   openFile: (path: string) => Promise<string>
+  /** Ask the user where to put these bytes. Resolves false if they cancelled. */
+  saveBytes: (suggestedName: string, data: Uint8Array) => Promise<boolean>
   openExternal: (url: string) => Promise<void>
   update: {
     check: () => Promise<UpdateState>

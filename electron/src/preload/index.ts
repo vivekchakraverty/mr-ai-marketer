@@ -29,6 +29,9 @@ const api = {
     setAll: (partial: SettingsPatch): Promise<AppSettings> => ipcRenderer.invoke('settings:set-all', partial)
   },
   openFile: (path: string): Promise<string> => ipcRenderer.invoke('shell:open-file', path),
+  /** Ask the user where to put these bytes. Resolves false if they cancelled. */
+  saveBytes: (suggestedName: string, data: Uint8Array): Promise<boolean> =>
+    ipcRenderer.invoke('dialog:save-bytes', suggestedName, data),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:open-external', url),
   update: {
     check: (): Promise<UpdateState> => ipcRenderer.invoke('update:check'),

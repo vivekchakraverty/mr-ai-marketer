@@ -1,4 +1,5 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, dialog, ipcMain } from 'electron'
+import { writeFile } from 'fs/promises'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { startBackend, stopBackend, waitForBackendHealth, API_TOKEN, BACKEND_URL } from './backend'
@@ -172,6 +173,28 @@ app.whenReady().then(async () => {
   ipcMain.handle('settings:get-all', () => getSettings())
   ipcMain.handle('settings:set-all', (_event, partial: SettingsPatch) => setSettings(partial))
   ipcMain.handle('shell:open-file', (_event, path: string) => shell.openPath(path))
+
+  /**
+   * Save bytes the renderer already holds to a location the user picks.
+   *
+   * The renderer sends the bytes rather than a path, and that is the point: it has them
+   * anyway (it fetched the image to display it), and a handler that took a path would be
+   * a "read any file on this machine and hand it back" primitive reachable from renderer
+   * code. Nothing here touches the filesystem except the file the user just named in a
+   * dialog they saw.
+   */
+  ipcMain.handle(
+    'dialog:save-bytes',
+    async (event, suggestedName: string, data: Uint8Array): Promise<boolean> => {
+      const owner = BrowserWindow.fromWebContents(event.sender)
+      const { canceled, filePath } = await (owner
+        ? dialog.showSaveDialog(owner, { defaultPath: suggestedName })
+        : dialog.showSaveDialog({ defaultPath: suggestedName }))
+      if (canceled || !filePath) return false
+      await writeFile(filePath, data)
+      return true
+    }
+  )
   ipcMain.handle('shell:open-external', (_event, url: string) => shell.openExternal(url))
   ipcMain.handle('update:check', () => checkForUpdate())
   ipcMain.handle('update:download', () => downloadUpdate())
