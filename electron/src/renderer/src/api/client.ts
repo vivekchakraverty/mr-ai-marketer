@@ -23,6 +23,29 @@ function authHeaders(extra?: Record<string, string>): Record<string, string> {
 }
 
 /**
+ * Fetch a backend-served file as an object URL, for `<img src>` and friends.
+ *
+ * An `<img>` tag cannot send a request header, so pointing one straight at
+ * `${backendUrl}/outputs/…` gets a 401 from the token middleware and renders as a broken
+ * image — which is exactly what every generated image in the app was doing. Fetching the
+ * bytes here, where the header can be attached, and handing the element a blob: URL is the
+ * fix that does not involve opening /outputs to callers that cannot prove who they are.
+ *
+ * Opening it was the tempting one-liner and is not safe: the mount also serves
+ * `outputs/influencers/influencers-<timestamp>.csv` and the tracker's exports, whose names
+ * are a date and a time rather than a UUID and so are within brute-force reach of any page
+ * the user has open.
+ *
+ * The caller owns the returned URL and must `URL.revokeObjectURL` it when done, or the blob
+ * is held for the lifetime of the window.
+ */
+export async function fetchObjectUrl(path: string): Promise<string> {
+  const res = await fetch(`${backendUrl}${path}`, { headers: authHeaders() })
+  if (!res.ok) throw new Error(`Couldn't load ${path} (HTTP ${res.status})`)
+  return URL.createObjectURL(await res.blob())
+}
+
+/**
  * Turn a failed response into an Error the UI can show as-is.
  *
  * Every HTTPException this backend raises carries a `detail` written for a

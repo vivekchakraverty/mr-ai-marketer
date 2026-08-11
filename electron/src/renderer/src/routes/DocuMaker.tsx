@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
-import { backendUrl, generateDocu, type GenerateDocuResponse } from '../api/client'
+import { generateDocu, type GenerateDocuResponse } from '../api/client'
+import BackendImage from '../components/BackendImage'
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import ScreenBackdrop from '../components/ScreenBackdrop'
@@ -150,8 +151,8 @@ export default function DocuMaker(): React.JSX.Element {
                     <p style={{ font: "600 15px/1.7 'Quicksand'", color: 'var(--ink-body)', margin: '8px 0 0' }}>{step.text}</p>
                     {step.imageUrl && (
                       <figure style={{ margin: '12px 0 0', textAlign: 'center' }}>
-                        <img
-                          src={`${backendUrl}${step.imageUrl}`}
+                        <BackendImage
+                          url={step.imageUrl}
                           alt={step.caption ?? step.heading}
                           style={{ maxWidth: '100%', borderRadius: 12, border: '2px solid var(--border-paper)', display: 'inline-block' }}
                         />

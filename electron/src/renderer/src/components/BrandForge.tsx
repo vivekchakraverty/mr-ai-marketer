@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   assembleBrandDocument,
-  backendUrl,
   generateBrandImages,
   generateBrandSection,
   getBrandForgeMeta,
@@ -13,6 +12,7 @@ import {
 } from '../api/client'
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
+import BackendImage from './BackendImage'
 import MarkdownPanel from './MarkdownPanel'
 import SaveButton from './SaveButton'
 import {
@@ -593,8 +593,8 @@ export default function BrandForge(): React.JSX.Element {
                       <div key={img.assetType}>
                         <div style={{ font: "700 11.5px 'Quicksand'", color: 'var(--ink-muted)', marginBottom: 5 }}>{img.assetType}</div>
                         {img.url ? (
-                          <img
-                            src={backendUrl + img.url}
+                          <BackendImage
+                            url={img.url}
                             alt={img.assetType}
                             style={{ width: '100%', borderRadius: 12, border: '2px solid var(--border)', display: 'block' }}
                           />

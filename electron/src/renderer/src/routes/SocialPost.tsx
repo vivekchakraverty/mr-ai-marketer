@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import {
-  backendUrl,
   collectSocialNiche,
   generateSocialPost,
   generateSocialPostImage,
@@ -16,6 +15,7 @@ import {
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, textInput } from '../styles/styleKit'
+import BackendImage from '../components/BackendImage'
 import HashtagSuggester from '../components/HashtagSuggester'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import SaveButton from '../components/SaveButton'
@@ -497,8 +497,8 @@ export default function SocialPost(): React.JSX.Element {
             )}
             {postImage && (
               <div style={{ marginTop: 14 }}>
-                <img
-                  src={backendUrl + postImage.url}
+                <BackendImage
+                  url={postImage.url}
                   alt="Generated visual for the post"
                   style={{
                     width: '100%',

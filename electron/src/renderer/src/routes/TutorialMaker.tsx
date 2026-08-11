@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { backendUrl, generateTutorial, type GenerateTutorialResponse } from '../api/client'
+import { generateTutorial, type GenerateTutorialResponse } from '../api/client'
+import BackendImage from '../components/BackendImage'
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import ScreenBackdrop from '../components/ScreenBackdrop'
@@ -193,8 +194,8 @@ export default function TutorialMaker(): React.JSX.Element {
                       <div style={{ font: "600 14px/1.65 'Quicksand'", color: 'var(--ink-body)', marginTop: 4 }}>{step.body}</div>
                       {step.imageUrl && (
                         <figure style={{ margin: '12px 0 0' }}>
-                          <img
-                            src={`${backendUrl}${step.imageUrl}`}
+                          <BackendImage
+                            url={step.imageUrl}
                             alt={step.caption ?? step.heading}
                             style={{ maxWidth: '100%', borderRadius: 12, border: '2px solid var(--border-paper)', display: 'block' }}
                           />

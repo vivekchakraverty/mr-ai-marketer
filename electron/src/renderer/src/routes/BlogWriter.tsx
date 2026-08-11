@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { backendUrl, generateBlog, type GenerateBlogResponse } from '../api/client'
+import { generateBlog, type GenerateBlogResponse } from '../api/client'
+import BackendImage from '../components/BackendImage'
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import { BLOG_GOAL_OPTIONS } from '../state/types'
@@ -163,8 +164,8 @@ export default function BlogWriter(): React.JSX.Element {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, marginTop: 24 }}>
                     {result.images.map((img, i) => (
                       <figure key={img.url} style={{ margin: 0 }}>
-                        <img
-                          src={`${backendUrl}${img.url}`}
+                        <BackendImage
+                          url={img.url}
                           alt={img.caption ?? `Illustration ${i + 1}`}
                           style={{ width: '100%', borderRadius: 12, border: '2px solid var(--border-paper)', display: 'block' }}
                         />
