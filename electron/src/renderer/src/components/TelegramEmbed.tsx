@@ -4,10 +4,13 @@ import { secondaryButtonSmall } from '../styles/styleKit'
 /**
  * Telegram Web, embedded.
  *
- * An Electron <webview> rather than an iframe, for the same reason the Mastodon panel in
- * Engage is one: Telegram Web sends `frame-ancestors 'none'`, so an iframe shows nothing.
- * A webview loads it as its own top-level document, which is the only way to have the real
- * client in the app rather than a read-only imitation of it.
+ * An Electron <webview> rather than an iframe: Telegram Web sends `frame-ancestors 'none'`,
+ * so an iframe shows nothing. A webview loads it as its own top-level document, which is
+ * the only way to have the real client in the app rather than a read-only imitation.
+ *
+ * Engage's Mastodon panel used to work the same way and no longer does — Mastodon has a
+ * documented API this app can render natively, so the embed there was replaced by a real
+ * feed. Telegram has no equivalent for the web client, which is why this one stays.
  *
  * Its `src` is allow-listed in main/index.ts by exact hostname, and it gets no preload, no
  * node integration and its own session partition — this is someone else's page, and the

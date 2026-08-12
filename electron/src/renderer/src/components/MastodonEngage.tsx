@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import {
   acceptMastodonPolicy,
   composeMastodonStatus,
@@ -25,14 +25,13 @@ import {
   type PostMediaItem
 } from '../api/client'
 import PostMedia from './PostMedia'
-import { mastodonThemeCss } from './mastodonTheme'
 import { useAppStore } from '../state/store'
 import { chip, label, primaryButtonSmall, secondaryButtonSmall, segGroup, segItem, select, textarea, textInput } from '../styles/styleKit'
 
 /**
  * Engage, Mastodon side.
  *
- * Three layers, in the order they appear, and the order matters:
+ * Two layers, in the order they appear, and the order matters:
  *
  *   1. The community's terms. Mastodon has no central terms of service — each
  *      server writes its own, and they genuinely differ about AI, automation and
@@ -40,14 +39,23 @@ import { chip, label, primaryButtonSmall, secondaryButtonSmall, segGroup, segIte
  *      the window into it, in the server's own words, and the actions below stay
  *      locked until it has been read. The backend enforces that too; this screen
  *      is not trusted to.
- *   2. The instance itself, embedded. A Mastodon server sends
- *      frame-ancestors 'none', so this is an Electron <webview> rather than an
- *      iframe — the real client, with its own login session, for everything a
- *      native panel will never cover.
- *   3. The common activities, natively: post with a visibility and a content
- *      warning, reply, boost, favourite, bookmark, mute a thread, pin, delete,
+ *   2. The timeline and the activities, natively — the same shape as the Bluesky
+ *      side of Engage: home, notifications, this server, federated, a hashtag,
+ *      bookmarks and favourites; post with a visibility and a content warning,
+ *      reply, boost, favourite, bookmark, mute a thread, pin, delete,
  *      follow/mute/block an account, follow a hashtag, search, and work through
- *      notifications.
+ *      notifications. Images and video render inline through PostMedia, the same
+ *      component the Bluesky feed uses.
+ *
+ * There was a third layer: the instance itself in an Electron <webview>, because a
+ * Mastodon server sends frame-ancestors 'none' and cannot be iframed. It is gone. It
+ * duplicated almost everything the native feed does, in a visibly foreign interface,
+ * and keeping it legible meant maintaining a stylesheet against another project's
+ * class names — which had already shipped broken once.
+ *
+ * Two things only it could do: direct messages, and Explore. Neither has a native
+ * screen here, so both are a trip to the browser. An account link opens the server
+ * in the user's own browser rather than in a panel pretending to be one.
  */
 
 type Busy = string
@@ -91,39 +99,6 @@ const VISIBILITY_SHORT: Record<string, string> = {
   private: 'Followers',
   direct: 'Direct'
 }
-
-/** Sections of the Mastodon web UI the embed's toolbar jumps to. */
-const EMBED_LINKS: { label: string; path: string }[] = [
-  { label: 'Home', path: '/home' },
-  { label: 'Notifications', path: '/notifications' },
-  { label: 'This server', path: '/public/local' },
-  { label: 'Explore', path: '/explore' },
-  { label: 'Messages', path: '/conversations' }
-]
-
-/**
- * <webview> is a DOM element Electron registers in the renderer, not a React
- * component, so React's JSX types have never heard of it. Casting the tag name
- * keeps the props we pass checked without an ambient declaration that would leak
- * `webview` into every file in the app.
- */
-type WebviewHandle = HTMLElement & {
-  reload: () => void
-  goBack: () => void
-  canGoBack: () => boolean
-  getURL: () => string
-  /** Blink-level stylesheet injection. Returns a key that removeInsertedCSS undoes. */
-  insertCSS: (css: string) => Promise<string>
-  removeInsertedCSS: (key: string) => Promise<void>
-}
-
-const WebView = 'webview' as unknown as React.FC<{
-  ref?: React.Ref<WebviewHandle>
-  src: string
-  partition: string
-  allowpopups?: string
-  style?: CSSProperties
-}>
 
 function timeAgo(iso: string): string {
   const then = new Date(iso).getTime()
@@ -486,165 +461,6 @@ function CommunityTerms({
 }
 
 // ---------------------------------------------------------------------------
-// The embed
-// ---------------------------------------------------------------------------
-
-function InstanceEmbed({
-  host,
-  path,
-  locked,
-  pending,
-  onPath
-}: {
-  host: string
-  path: string
-  locked: boolean
-  /** Rules still loading — don't claim they haven't been read yet. */
-  pending: boolean
-  onPath: (path: string) => void
-}): React.JSX.Element {
-  const ref = useRef<WebviewHandle | null>(null)
-  const [collapsed, setCollapsed] = useState(false)
-  const [themed, setThemed] = useState(() => localStorage.getItem('mraim.mastodonThemed') !== 'off')
-  const url = `https://${host}${path}`
-
-  /**
-   * Paint the embed in the app's colours.
-   *
-   * Re-applied on every `dom-ready` because a full page load drops injected CSS, and
-   * Mastodon is a single-page app that still does real loads on reload and on sign-in.
-   * The insertion key is kept so turning the toggle off can remove exactly what was added
-   * rather than reloading the page and losing the user's place.
-   */
-  useEffect(() => {
-    const view = ref.current
-    if (!view || locked || collapsed) return
-
-    let key = ''
-    let cancelled = false
-
-    async function apply(): Promise<void> {
-      if (cancelled || !themed) return
-      try {
-        key = await view!.insertCSS(mastodonThemeCss())
-      } catch {
-        // insertCSS is unavailable until the guest page is attached; the dom-ready
-        // listener below covers that case.
-      }
-    }
-
-    void apply()
-    view.addEventListener('dom-ready', apply)
-    return () => {
-      cancelled = true
-      view.removeEventListener('dom-ready', apply)
-      if (key) void view.removeInsertedCSS(key).catch(() => {})
-    }
-  }, [themed, locked, collapsed, host])
-
-  return (
-    <div style={{ ...panel, padding: 12, marginBottom: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: collapsed ? 0 : 10 }}>
-        <span style={{ font: "700 13px 'Kalam'", color: 'var(--ink)', marginRight: 4 }}>{host}</span>
-        {EMBED_LINKS.map((link) => (
-          <div
-            key={link.path}
-            style={actionButton(path === link.path, locked)}
-            onClick={locked ? undefined : () => onPath(link.path)}
-          >
-            {link.label}
-          </div>
-        ))}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <div
-            style={actionButton(false, locked)}
-            onClick={
-              locked
-                ? undefined
-                : () => {
-                    try {
-                      ref.current?.reload()
-                    } catch {
-                      // The webview is not attached yet — nothing to reload.
-                    }
-                  }
-            }
-          >
-            ↻
-          </div>
-          <div
-            style={actionButton(themed, false)}
-            title={
-              themed
-                ? "Showing this server in the app's colours. Turn off for Mastodon's own theme."
-                : "Showing Mastodon's own theme."
-            }
-            onClick={() => {
-              const next = !themed
-              setThemed(next)
-              localStorage.setItem('mraim.mastodonThemed', next ? 'on' : 'off')
-            }}
-          >
-            Theme
-          </div>
-          <div style={actionButton(false, false)} onClick={() => void window.api.openExternal(url)}>
-            Open in browser ↗
-          </div>
-          <div style={actionButton(false, false)} onClick={() => setCollapsed((v) => !v)}>
-            {collapsed ? 'Show' : 'Hide'}
-          </div>
-        </div>
-      </div>
-
-      {!collapsed &&
-        (locked ? (
-          <div
-            style={{
-              border: '2px dashed var(--border)',
-              borderRadius: 16,
-              padding: 40,
-              textAlign: 'center'
-            }}
-          >
-            <div style={{ font: "700 15px 'Kalam'", color: 'var(--ink-fainter-2)' }}>
-              {pending ? `Checking where you stand with ${host}…` : `${host} opens here once you have read its rules above.`}
-            </div>
-            {!pending && (
-              <div style={{ ...muted, marginTop: 6 }}>
-                They are the server&apos;s own words, not ours, and they are the whole reason this asks
-                first.
-              </div>
-            )}
-          </div>
-        ) : (
-          <>
-            <WebView
-              ref={ref}
-              src={url}
-              // Its own cookie jar, kept across restarts, so logging in once is enough
-              // and nothing here shares a session with the rest of the app.
-              partition="persist:mastodon"
-              allowpopups="true"
-              style={{
-                width: '100%',
-                height: 560,
-                border: '2px solid var(--border)',
-                borderRadius: 14,
-                background: 'var(--surface)',
-                display: 'inline-flex'
-              }}
-            />
-            <div style={{ font: "600 11.5px 'Quicksand'", color: 'var(--ink-fainter)', marginTop: 7 }}>
-              This is {host} itself, signed in separately from the app. Links to other servers open in
-              your browser.
-            </div>
-          </>
-        ))}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // Composer
 // ---------------------------------------------------------------------------
 
@@ -816,7 +632,7 @@ function StatusCard({
   onReply,
   onThread,
   onDelete,
-  onOpenInEmbed,
+  onOpenAccount,
   onHashtag
 }: {
   post: MastodonFeedPost
@@ -828,7 +644,7 @@ function StatusCard({
   /** Load the whole conversation this post sits in. */
   onThread: (post: MastodonFeedPost) => void
   onDelete: (post: MastodonFeedPost) => void
-  onOpenInEmbed: (post: MastodonFeedPost) => void
+  onOpenAccount: (post: MastodonFeedPost) => void
   onHashtag: (tag: string) => void
 }): React.JSX.Element {
   // A content warning is a request, so it starts honoured rather than expanded.
@@ -885,8 +701,8 @@ function StatusCard({
           </span>
           <span
             style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-faint)', cursor: 'pointer' }}
-            onClick={() => onOpenInEmbed(post)}
-            title="Open this account in the embed"
+            onClick={() => onOpenAccount(post)}
+            title="Open this account on the server, in your browser"
           >
             @{post.account.acct}
           </span>
@@ -1037,8 +853,8 @@ function StatusCard({
             </div>
           )}
           {isStatus && (
-            <div style={actionButton(false, false)} onClick={() => onOpenInEmbed(post)}>
-              View in embed
+            <div style={actionButton(false, false)} onClick={() => onOpenAccount(post)}>
+              Open on server ↗
             </div>
           )}
           {post.url && (
@@ -1078,7 +894,6 @@ export default function MastodonEngage(): React.JSX.Element {
   // Set while the feed list is showing one conversation instead of a timeline.
   const [threadOf, setThreadOf] = useState('')
   const [replyTo, setReplyTo] = useState<MastodonFeedPost | null>(null)
-  const [embedPath, setEmbedPath] = useState('/home')
 
   const [loading, setLoading] = useState(false)
   const [posting, setPosting] = useState(false)
@@ -1357,11 +1172,12 @@ export default function MastodonEngage(): React.JSX.Element {
     void loadFeed('tag', { reset: true, hashtag: clean })
   }
 
-  function openInEmbed(post: MastodonFeedPost): void {
-    // Always the local permalink form (/@acct/id): those are the ids this instance
-    // issued, so a remote post still resolves — and the embed stays on the server
-    // whose rules were accepted rather than wandering onto someone else's.
-    setEmbedPath(post.id ? `/@${post.account.acct}/${post.id}` : `/@${post.account.acct}`)
+  function openAccount(post: MastodonFeedPost): void {
+    // The local permalink form (/@acct): that handle was resolved by this instance, so a
+    // remote account still resolves through it, and the link stays on the server whose
+    // rules were accepted rather than wandering onto someone else's.
+    const host = session?.instance ?? ''
+    if (host) void window.api.openExternal(`https://${host}/@${post.account.acct}`)
   }
 
   // --- gates before the screen can do anything ------------------------------
@@ -1433,22 +1249,11 @@ export default function MastodonEngage(): React.JSX.Element {
         </div>
       )}
 
-      {/* 2. The instance itself. */}
-      {session?.instance && (
-        <InstanceEmbed
-          host={session.instance}
-          path={embedPath}
-          locked={locked}
-          pending={termsLoading && !terms}
-          onPath={setEmbedPath}
-        />
-      )}
-
-      {/* 3. Doing things from here. */}
+      {/* 2. Doing things from here. */}
       {session && !session.hasToken && (
         <Notice
           title="Add an access token to act from here"
-          body="Reading and posting through this panel needs a token from your instance: Preferences → Development → New application, with read, write and follow scopes. The embed above works without one — you just log into it directly."
+          body="Reading and posting from here needs a token from your instance: Preferences → Development → New application, with read, write and follow scopes. The public timelines work without one; your home feed, notifications and posting do not."
           actionLabel="Open Settings"
           onAction={goSettings}
         />
@@ -1588,8 +1393,11 @@ export default function MastodonEngage(): React.JSX.Element {
                           <span
                             key={a.id}
                             style={{ ...chip(false), padding: '5px 11px', font: "700 11.5px 'Quicksand'" }}
-                            onClick={() => setEmbedPath(`/@${a.acct}`)}
-                            title="Open in the embed"
+                            onClick={() => {
+                              const host = session?.instance ?? ''
+                              if (host) void window.api.openExternal(`https://${host}/@${a.acct}`)
+                            }}
+                            title="Open this account on the server, in your browser"
                           >
                             @{a.acct}
                           </span>
@@ -1683,7 +1491,7 @@ export default function MastodonEngage(): React.JSX.Element {
                       onReply={(post) => setReplyTo(post)}
                       onThread={(post) => void openThread(post)}
                       onDelete={(post) => void handleDelete(post)}
-                      onOpenInEmbed={openInEmbed}
+                      onOpenAccount={openAccount}
                       onHashtag={openHashtag}
                     />
                   ))}
