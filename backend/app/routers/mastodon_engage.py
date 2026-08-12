@@ -31,6 +31,7 @@ Three things shape this file:
 from __future__ import annotations
 
 import hashlib
+import re
 import logging
 import time
 import uuid
@@ -141,6 +142,8 @@ class MarkReadRequest(EngageRequest):
 
 class SuggestedFollowsRequest(EngageRequest):
     niche: str = ""
+    # A subject typed in rather than a saved niche. Takes over completely when present.
+    query: str = ""
     limit: int = 20
 
 
@@ -892,8 +895,18 @@ def suggested_follows(body: SuggestedFollowsRequest) -> SuggestedFollowsOut:
     acceptance the timeline and the composer do.
     """
     policy = _gated(body)
-    host = policy.info.host
     token = _token(body)
+
+    if body.query.strip():
+        # Split on commas and newlines only, never spaces: "rust gamedev" is one subject,
+        # and searching "rust" and "gamedev" separately returns metallurgy and Unity.
+        name = ""
+        keywords = [t.strip() for t in re.split(r"[,\n]", body.query) if t.strip()][:5]
+        if not keywords:
+            return SuggestedFollowsOut(
+                niche="", keywords=[], accounts=[], note="Type a subject to search for."
+            )
+        return _suggest(policy, token, name, keywords, body.limit)
 
     from vendor.socialpost.src import db as spg_db
 
@@ -912,8 +925,20 @@ def suggested_follows(body: SuggestedFollowsRequest) -> SuggestedFollowsOut:
             niche=name,
             keywords=[],
             accounts=[],
-            note="No niche keywords yet. Add a niche in the Mastodon Post Creator first.",
+            note=(
+                "No niche keywords yet. Add a niche in the Mastodon Post Creator, or type "
+                "a subject above."
+            ),
         )
+
+    return _suggest(policy, token, name, keywords, body.limit)
+
+
+def _suggest(
+    policy: masto.InstancePolicy, token: str, name: str, keywords: list[str], limit: int
+) -> SuggestedFollowsOut:
+    """The search itself, shared by the saved-niche and typed-subject paths."""
+    host = policy.info.host
 
     me = _me(host, token)
     me_id = str(me.get("id") or "")
@@ -1022,7 +1047,7 @@ def suggested_follows(body: SuggestedFollowsRequest) -> SuggestedFollowsOut:
         reverse=True,
     )
     return SuggestedFollowsOut(
-        niche=name, keywords=probe, accounts=out[: max(1, min(body.limit, 50))]
+        niche=name, keywords=probe, accounts=out[: max(1, min(limit, 50))]
     )
 
 

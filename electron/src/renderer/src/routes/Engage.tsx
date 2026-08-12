@@ -359,10 +359,10 @@ export default function Engage(): React.JSX.Element {
   const [postText, setPostText] = useState('')
   const [loading, setLoading] = useState(false)
   const [posting, setPosting] = useState(false)
-  async function loadSuggestions(): Promise<void> {
+  async function loadSuggestions(query = ''): Promise<void> {
     setSuggestLoading(true)
     try {
-      setSuggestions(await getSuggestedFollows())
+      setSuggestions(await getSuggestedFollows('', query))
     } catch {
       // A suggestion list is an extra. Failing it should not put an error banner over a
       // timeline that loaded perfectly well.
@@ -654,7 +654,7 @@ export default function Engage(): React.JSX.Element {
               keywords={suggestions.keywords}
               note={suggestions.note}
               loading={suggestLoading}
-              onRefresh={() => void loadSuggestions()}
+              onSearch={(q) => void loadSuggestions(q)}
               onFollow={async (did) => {
                 await followEngageActor(did)
               }}

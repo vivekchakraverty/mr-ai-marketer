@@ -8,6 +8,7 @@ second time. Same account, same login, same cached client.
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 from atproto import AtUri, models
@@ -424,6 +425,18 @@ def _record_rkey(record_uri: str) -> tuple[str, str]:
     return parsed.hostname, parsed.rkey
 
 
+def _custom_terms(query: str) -> list[str]:
+    """A typed niche, split into search terms.
+
+    Split on commas and newlines only, never spaces: "rust gamedev" is one subject and
+    searching for "rust" and "gamedev" separately returns metallurgy and Unity. Someone
+    who wants two subjects separates them with a comma, which is also how the niche
+    keyword box has always worked.
+    """
+    parts = [t.strip() for t in re.split(r"[,\n]", query)]
+    return [t for t in parts if t][:6]
+
+
 def _niche_keywords(niche: str) -> tuple[str, list[str]]:
     """The keywords behind a niche, or every niche's if none is named."""
     from vendor.socialpost.src import db as spg_db
@@ -441,8 +454,13 @@ def _niche_keywords(niche: str) -> tuple[str, list[str]]:
 
 
 @router.get("/suggested-follows", response_model=SuggestedFollowsResponse)
-def suggested_follows(niche: str = "", limit: int = 20) -> SuggestedFollowsResponse:
-    """People worth following, found from the niche keywords already configured.
+def suggested_follows(niche: str = "", query: str = "", limit: int = 20) -> SuggestedFollowsResponse:
+    """People worth following, found from niche keywords or from a subject typed in.
+
+    `query` is a niche the user typed rather than one they saved: it takes over completely
+    when present, so the results are about that subject and nothing else. A saved niche is
+    a standing interest, and a typed one is a question being asked right now — mixing them
+    would answer neither.
 
     Two passes, because they answer different questions. Searching posts finds who is
     actually writing about the subject right now; searching actors finds who says they are
@@ -458,14 +476,24 @@ def suggested_follows(niche: str = "", limit: int = 20) -> SuggestedFollowsRespo
     suggestion list whose top entry is someone you followed last week teaches you to stop
     reading it.
     """
-    name, keywords = _niche_keywords(niche)
-    if not keywords:
-        return SuggestedFollowsResponse(
-            niche=name,
-            keywords=[],
-            accounts=[],
-            note="No niche keywords yet. Add a niche in the Social Post Generator first.",
-        )
+    if query.strip():
+        name, keywords = "", _custom_terms(query)
+        if not keywords:
+            return SuggestedFollowsResponse(
+                niche="", keywords=[], accounts=[], note="Type a subject to search for."
+            )
+    else:
+        name, keywords = _niche_keywords(niche)
+        if not keywords:
+            return SuggestedFollowsResponse(
+                niche=name,
+                keywords=[],
+                accounts=[],
+                note=(
+                    "No niche keywords yet. Add a niche in the Social Post Generator, or "
+                    "type a subject above."
+                ),
+            )
 
     client = _client()
     me = _me_did(client)

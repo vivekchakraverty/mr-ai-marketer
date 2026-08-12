@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { primaryButtonSmall, secondaryButtonSmall } from '../styles/styleKit'
+import { primaryButtonSmall, secondaryButtonSmall, textInput } from '../styles/styleKit'
 
 /**
  * Accounts worth following, found from the niche keywords the user already configured.
@@ -33,7 +33,8 @@ interface Props {
   loading: boolean
   /** Absent while the tool has no way to act — the button is hidden rather than dead. */
   onFollow?: (key: string) => Promise<void>
-  onRefresh: () => void
+  /** Empty string means "use my saved niches"; anything else is a subject typed here. */
+  onSearch: (query: string) => void
   /** Where the accounts came from, in the user's words: "on toot.garden", "on Bluesky". */
   scope: string
 }
@@ -49,10 +50,11 @@ export default function SuggestedFollows({
   note,
   loading,
   onFollow,
-  onRefresh,
+  onSearch,
   scope
 }: Props): React.JSX.Element {
   const [followed, setFollowed] = useState<Record<string, 'busy' | 'done'>>({})
+  const [query, setQuery] = useState('')
 
   async function follow(key: string): Promise<void> {
     if (!onFollow || followed[key]) return
@@ -86,10 +88,37 @@ export default function SuggestedFollows({
         <div style={{ font: "700 15px 'Kalam'", color: 'var(--ink)' }}>Suggested follows</div>
         <div
           style={{ ...secondaryButtonSmall, marginLeft: 'auto', opacity: loading ? 0.6 : 1 }}
-          onClick={loading ? undefined : onRefresh}
+          onClick={loading ? undefined : () => onSearch(query)}
         >
-          {loading ? 'Looking…' : 'Refresh'}
+          {loading ? 'Looking…' : query.trim() ? 'Search' : 'Refresh'}
         </div>
+      </div>
+
+      {/* A subject typed here replaces the saved niches for this search rather than adding
+          to them — "who is writing about X" is a question being asked now, and blending it
+          with a standing interest answers neither. Enter submits, because a search box that
+          needs a button hunt is a search box people stop using. */}
+      <div style={{ display: 'flex', gap: 8, margin: '10px 0 4px' }}>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !loading) onSearch(query)
+          }}
+          placeholder="Search a different subject — e.g. rust gamedev, bevy engine"
+          style={{ ...textInput, flex: 1 }}
+        />
+        {query.trim() && (
+          <div
+            style={secondaryButtonSmall}
+            onClick={() => {
+              setQuery('')
+              onSearch('')
+            }}
+          >
+            Clear
+          </div>
+        )}
       </div>
 
       <div style={{ font: "600 12px/1.6 'Quicksand'", color: 'var(--ink-muted)', marginBottom: 12 }}>

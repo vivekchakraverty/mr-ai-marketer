@@ -913,11 +913,13 @@ export interface MastodonSuggestedFollows {
 export async function getMastodonSuggestedFollows(
   instance: string,
   niche = '',
+  query = '',
   limit = 20
 ): Promise<MastodonSuggestedFollows> {
   return postJson('/mastodon-engage/suggested-follows', {
     instance,
     niche,
+    query,
     limit,
     accessToken: await mastodonToken()
   })
@@ -1358,8 +1360,13 @@ export interface SuggestedFollowsResponse {
   note: string
 }
 
-export function getSuggestedFollows(niche = '', limit = 20): Promise<SuggestedFollowsResponse> {
-  const q = new URLSearchParams({ niche, limit: String(limit) })
+/** `query` is a subject typed by the user; when set it replaces the saved niche entirely. */
+export function getSuggestedFollows(
+  niche = '',
+  query = '',
+  limit = 20
+): Promise<SuggestedFollowsResponse> {
+  const q = new URLSearchParams({ niche, query, limit: String(limit) })
   return getJson(`/engage/suggested-follows?${q}`)
 }
 
