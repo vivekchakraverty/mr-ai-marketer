@@ -17,6 +17,15 @@ import { reportError } from '../state/errors'
  */
 interface Props {
   children: ReactNode
+  /**
+   * What to show instead of the full-screen message.
+   *
+   * For the small persistent widgets — the shelf, the queue indicator, the update banner —
+   * the honest fallback is nothing at all. They are not why the user opened the app, and a
+   * crash in one of them should cost that widget rather than the screen it sits on. The
+   * failure is still reported, so it is copyable from the popup either way.
+   */
+  fallback?: ReactNode
 }
 
 interface State {
@@ -40,6 +49,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   render(): ReactNode {
     if (!this.state.message) return this.props.children
+    if (this.props.fallback !== undefined) return this.props.fallback
     return (
       <div
         style={{

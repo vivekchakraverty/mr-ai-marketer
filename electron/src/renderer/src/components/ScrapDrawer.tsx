@@ -36,7 +36,17 @@ interface Scrap {
 function load(): Scrap[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as Scrap[]) : []
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    // Shape-checked, not just parsed. `JSON.parse` succeeds on "null" and on any object,
+    // and either would sail past a try/catch here and then throw at `items.map` during
+    // render — in a component mounted outside the route's error boundary, which takes the
+    // whole window blank rather than showing a message.
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(
+      (s): s is Scrap =>
+        Boolean(s) && typeof s === 'object' && typeof (s as Scrap).content === 'string'
+    )
   } catch {
     return []
   }

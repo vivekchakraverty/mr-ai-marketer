@@ -172,7 +172,12 @@ function App(): React.JSX.Element {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-      <UpdateBanner />
+      {/* Each of these is optional furniture. A crash in one must cost that widget and
+          nothing else — they live outside the route boundary below, so without their own
+          they would take the nav bar and the whole screen down with them. */}
+      <ErrorBoundary fallback={null}>
+        <UpdateBanner />
+      </ErrorBoundary>
       <NavBar />
       <main style={{ flex: 1, overflowY: 'auto' }}>
         {/* Keyed on the route so recovering from a crash on one screen doesn't leave the
@@ -183,9 +188,13 @@ function App(): React.JSX.Element {
       </main>
       {/* Outside <main> so it stays put while the route changes, and above it so a
           scroll on the page never moves the shelf. */}
-      <ScrapDrawer />
+      <ErrorBoundary fallback={null}>
+        <ScrapDrawer />
+      </ErrorBoundary>
       {/* Renders nothing unless something is queued behind something else. */}
-      <QueueIndicator />
+      <ErrorBoundary fallback={null}>
+        <QueueIndicator />
+      </ErrorBoundary>
       {hfGateOpen && <HfGateModal />}
       {distributionGateOpen && <DistributionGateModal />}
       {leadgenGateOpen && <LeadgenGateModal />}
