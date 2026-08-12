@@ -24,6 +24,28 @@ def _spg() -> tuple[Any, Any]:
     return spg_bluesky, spg_config
 
 
+class SuggestedAccount(BaseModel):
+    did: str
+    handle: str
+    displayName: str
+    description: str
+    avatar: str | None = None
+    followers: int
+    # Why this account is being suggested, in the user's words rather than a score.
+    reason: str
+    # Keywords that matched, so the reason can be checked rather than trusted.
+    matched: list[str]
+    posts: int
+    bioMatch: bool
+
+
+class SuggestedFollowsResponse(BaseModel):
+    niche: str
+    keywords: list[str]
+    accounts: list[SuggestedAccount]
+    note: str = ""
+
+
 class EngageStatus(BaseModel):
     configured: bool
     handle: str | None = None
@@ -400,6 +422,182 @@ def _record_rkey(record_uri: str) -> tuple[str, str]:
     if not parsed.hostname or not parsed.rkey:
         raise HTTPException(status_code=400, detail="Invalid Bluesky record URI.")
     return parsed.hostname, parsed.rkey
+
+
+def _niche_keywords(niche: str) -> tuple[str, list[str]]:
+    """The keywords behind a niche, or every niche's if none is named."""
+    from vendor.socialpost.src import db as spg_db
+
+    rows = spg_db.list_niches()
+    if niche.strip():
+        row = next((r for r in rows if r["name"] == niche.strip()), None)
+        if row is None:
+            raise HTTPException(status_code=400, detail=f"No niche called {niche!r}.")
+        return row["name"], [str(k) for k in (row["keywords"] or [])]
+    words: list[str] = []
+    for r in rows:
+        words.extend(str(k) for k in (r["keywords"] or []))
+    return "", words
+
+
+@router.get("/suggested-follows", response_model=SuggestedFollowsResponse)
+def suggested_follows(niche: str = "", limit: int = 20) -> SuggestedFollowsResponse:
+    """People worth following, found from the niche keywords already configured.
+
+    Two passes, because they answer different questions. Searching posts finds who is
+    actually writing about the subject right now; searching actors finds who says they are
+    about it in their bio. An account that shows up in both is the strongest signal there
+    is, and the ranking says so.
+
+    A bio match is a ranking signal rather than a filter. Plenty of people post constantly
+    about a subject and have a bio that is a joke and a city name, and dropping them would
+    leave a list of accounts that describe themselves well rather than accounts worth
+    reading.
+
+    Anyone already followed, muted, blocked, or the user themselves, is left out — a
+    suggestion list whose top entry is someone you followed last week teaches you to stop
+    reading it.
+    """
+    name, keywords = _niche_keywords(niche)
+    if not keywords:
+        return SuggestedFollowsResponse(
+            niche=name,
+            keywords=[],
+            accounts=[],
+            note="No niche keywords yet. Add a niche in the Social Post Generator first.",
+        )
+
+    client = _client()
+    me = _me_did(client)
+    # Bounded: each keyword is two network calls, and a niche with fifteen keywords would
+    # otherwise turn one screen into thirty round trips.
+    probe = keywords[:6]
+
+    found: dict[str, dict] = {}
+
+    def note(profile: Any, keyword: str, *, from_post: bool) -> None:
+        did = getattr(profile, "did", "") or ""
+        if not did or did == me:
+            return
+        viewer = getattr(profile, "viewer", None)
+        if getattr(viewer, "following", None) or getattr(viewer, "muted", False) or getattr(
+            viewer, "blocking", None
+        ):
+            return
+        entry = found.setdefault(
+            did,
+            {
+                "profile": profile,
+                "matched": set(),
+                "posts": 0,
+                "bio": False,
+            },
+        )
+        entry["matched"].add(keyword)
+        if from_post:
+            entry["posts"] += 1
+        # Prefer whichever view carries a bio; the enrichment pass below replaces both
+        # with a detailed profile anyway, but this keeps the fallback sensible if it fails.
+        if getattr(profile, "description", None) and not getattr(entry["profile"], "description", None):
+            entry["profile"] = profile
+
+    for keyword in probe:
+        try:
+            posts = client.app.bsky.feed.search_posts({"q": keyword, "limit": 25})
+            for post in getattr(posts, "posts", None) or []:
+                note(getattr(post, "author", None), keyword, from_post=True)
+        except Exception:  # noqa: BLE001 — one keyword failing must not empty the list
+            pass
+        try:
+            actors = client.app.bsky.actor.search_actors({"q": keyword, "limit": 15})
+            for actor in getattr(actors, "actors", None) or []:
+                note(actor, keyword, from_post=False)
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Fill in bios and follower counts before scoring.
+    #
+    # Neither search surface carries both: an author on a search_posts result has did,
+    # handle, display_name and avatar and nothing else, while search_actors returns a
+    # ProfileView with a description but no follower count. So without this step an
+    # account found by its posts could never match on its bio — the whole second half of
+    # the idea — and every follower number would read zero.
+    #
+    # Enriched in two phases because the budget is limited and the ranking is not known
+    # until the bios are in. A provisional pass ranks on what is already available, and
+    # only the accounts that could plausibly be shown are fetched in full. get_profiles
+    # takes 25 actors per call, so this is two requests rather than one per candidate.
+    lowered = [k.lower() for k in probe]
+
+    def bio_of(entry: dict) -> str:
+        return (getattr(entry["profile"], "description", "") or "").lower()
+
+    def provisional(did: str) -> tuple:
+        entry = found[did]
+        blurb = bio_of(entry)
+        return (
+            any(low in blurb for low in lowered),
+            entry["posts"],
+            len(entry["matched"]),
+        )
+
+    shortlist = sorted(found, key=provisional, reverse=True)[: max(limit * 3, 25)]
+    for i in range(0, len(shortlist), 25):
+        chunk = shortlist[i : i + 25]
+        try:
+            detailed = client.app.bsky.actor.get_profiles({"actors": chunk})
+            for full in getattr(detailed, "profiles", None) or []:
+                did = getattr(full, "did", "") or ""
+                if did in found:
+                    found[did]["profile"] = full
+        except Exception:  # noqa: BLE001 — a failed enrich costs detail, not the list
+            pass
+
+    # Anything outside the shortlist was never going to be shown, and carries no bio to
+    # judge it on, so it is dropped rather than ranked on missing data.
+    found = {did: found[did] for did in shortlist}
+
+    out: list[SuggestedAccount] = []
+    for did, entry in found.items():
+        profile = entry["profile"]
+        description = (getattr(profile, "description", "") or "").strip()
+        blurb = description.lower()
+        bio_hits = [k for k, low in zip(probe, lowered) if low in blurb]
+        matched = sorted(entry["matched"])
+        posts = entry["posts"]
+
+        if bio_hits and posts:
+            reason = f"Posts about {matched[0]}, and says so in their bio"
+        elif bio_hits:
+            reason = f"Bio mentions {bio_hits[0]}"
+        elif posts > 1:
+            reason = f"Posted about {matched[0]} {posts} times recently"
+        else:
+            reason = f"Posted about {matched[0]}"
+
+        out.append(
+            SuggestedAccount(
+                did=did,
+                handle=getattr(profile, "handle", "") or "",
+                displayName=(getattr(profile, "display_name", "") or "") or (getattr(profile, "handle", "") or ""),
+                description=description,
+                avatar=getattr(profile, "avatar", None),
+                followers=int(getattr(profile, "followers_count", 0) or 0),
+                reason=reason,
+                matched=matched,
+                posts=posts,
+                bioMatch=bool(bio_hits),
+            )
+        )
+
+    # Bio match first, then how much they actually post about it, then how many distinct
+    # keywords they hit. Follower count is deliberately last and never a filter: a small
+    # account writing about your subject every day is a better follow than a large one
+    # that mentioned it once.
+    out.sort(key=lambda a: (a.bioMatch, a.posts, len(a.matched), a.followers), reverse=True)
+    return SuggestedFollowsResponse(
+        niche=name, keywords=probe, accounts=out[: max(1, min(limit, 50))]
+    )
 
 
 @router.get("/timeline", response_model=FeedResponse)

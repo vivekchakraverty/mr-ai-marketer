@@ -895,6 +895,34 @@ export async function collectMastodonNiche(
   })
 }
 
+export interface MastodonSuggestedAccount {
+  account: MastodonAccount
+  reason: string
+  matched: string[]
+  posts: number
+  bioMatch: boolean
+}
+
+export interface MastodonSuggestedFollows {
+  niche: string
+  keywords: string[]
+  accounts: MastodonSuggestedAccount[]
+  note: string
+}
+
+export async function getMastodonSuggestedFollows(
+  instance: string,
+  niche = '',
+  limit = 20
+): Promise<MastodonSuggestedFollows> {
+  return postJson('/mastodon-engage/suggested-follows', {
+    instance,
+    niche,
+    limit,
+    accessToken: await mastodonToken()
+  })
+}
+
 export async function generateMastodonPost(
   instance: string,
   niche: string,
@@ -1310,6 +1338,31 @@ export interface EngageActionResponse {
   createdCid: string | null
 }
 
+export interface SuggestedAccount {
+  did: string
+  handle: string
+  displayName: string
+  description: string
+  avatar: string | null
+  followers: number
+  reason: string
+  matched: string[]
+  posts: number
+  bioMatch: boolean
+}
+
+export interface SuggestedFollowsResponse {
+  niche: string
+  keywords: string[]
+  accounts: SuggestedAccount[]
+  note: string
+}
+
+export function getSuggestedFollows(niche = '', limit = 20): Promise<SuggestedFollowsResponse> {
+  const q = new URLSearchParams({ niche, limit: String(limit) })
+  return getJson(`/engage/suggested-follows?${q}`)
+}
+
 export function getEngageStatus(): Promise<EngageStatus> {
   return getJson('/engage/status')
 }
@@ -1353,6 +1406,11 @@ export function toggleEngageBookmark(post: FeedPost): Promise<EngageActionRespon
 
 export function toggleEngageThreadMute(post: FeedPost): Promise<EngageActionResponse> {
   return postJson('/engage/thread-mute', { uri: post.uri, cid: post.cid, enabled: !post.viewerThreadMuted })
+}
+
+/** Follow by DID, for suggestions — the toggle below needs a whole post to act on. */
+export function followEngageActor(did: string): Promise<EngageActionResponse> {
+  return postJson('/engage/follow', { did, enabled: true })
 }
 
 export function toggleEngageFollow(post: FeedPost): Promise<EngageActionResponse> {

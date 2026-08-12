@@ -5,6 +5,7 @@ import {
   deleteMastodonStatus,
   getMastodonFeed,
   getMastodonSession,
+  getMastodonSuggestedFollows,
   getMastodonTerms,
   getMastodonThread,
   markMastodonNotificationsRead,
@@ -21,10 +22,12 @@ import {
   type MastodonSession,
   type MastodonMedia,
   type MastodonStatusAction,
+  type MastodonSuggestedFollows,
   type MastodonTerms,
   type PostMediaItem
 } from '../api/client'
 import PostMedia from './PostMedia'
+import SuggestedFollows, { type SuggestionRow } from './SuggestedFollows'
 import { useAppStore } from '../state/store'
 import { chip, label, primaryButtonSmall, secondaryButtonSmall, segGroup, segItem, select, textarea, textInput } from '../styles/styleKit'
 
@@ -891,6 +894,8 @@ export default function MastodonEngage(): React.JSX.Element {
   const [tagFollowing, setTagFollowing] = useState<boolean | null>(null)
   const [searchDraft, setSearchDraft] = useState('')
   const [searchResult, setSearchResult] = useState<MastodonSearchResult | null>(null)
+  const [suggestions, setSuggestions] = useState<MastodonSuggestedFollows | null>(null)
+  const [suggestLoading, setSuggestLoading] = useState(false)
   // Set while the feed list is showing one conversation instead of a timeline.
   const [threadOf, setThreadOf] = useState('')
   const [replyTo, setReplyTo] = useState<MastodonFeedPost | null>(null)
@@ -937,8 +942,24 @@ export default function MastodonEngage(): React.JSX.Element {
   useEffect(() => {
     if (!session?.hasToken || locked) return
     void loadFeed(feed, { reset: true })
+    void loadSuggestions()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.hasToken, locked])
+
+  async function loadSuggestions(): Promise<void> {
+    const host = session?.instance ?? ''
+    if (!host || locked) return
+    setSuggestLoading(true)
+    try {
+      setSuggestions(await getMastodonSuggestedFollows(host))
+    } catch {
+      // An extra. It must not put an error over a timeline that loaded fine — and the
+      // most likely failure is simply no token, which the panel below already explains.
+      setSuggestions(null)
+    } finally {
+      setSuggestLoading(false)
+    }
+  }
 
   async function loadFeed(
     which: MastodonFeedName,
@@ -1247,6 +1268,31 @@ export default function MastodonEngage(): React.JSX.Element {
             </div>
           )}
         </div>
+      )}
+
+      {!locked && suggestions !== null && (
+        <SuggestedFollows
+          scope={`on ${session?.instance ?? 'this server'}`}
+          keywords={suggestions.keywords}
+          note={suggestions.note}
+          loading={suggestLoading}
+          onRefresh={() => void loadSuggestions()}
+          onFollow={async (accountId) => {
+            await mastodonAccountAction(accountId, 'follow')
+          }}
+          rows={suggestions.accounts.map(
+            (a): SuggestionRow => ({
+              key: a.account.id,
+              handle: a.account.acct,
+              displayName: a.account.displayName,
+              bio: a.account.note,
+              avatar: a.account.avatar || null,
+              followers: a.account.followers,
+              reason: a.reason,
+              bioMatch: a.bioMatch
+            })
+          )}
+        />
       )}
 
       {/* 2. Doing things from here. */}

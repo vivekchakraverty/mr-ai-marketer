@@ -139,6 +139,11 @@ class MarkReadRequest(EngageRequest):
     lastReadId: str
 
 
+class SuggestedFollowsRequest(EngageRequest):
+    niche: str = ""
+    limit: int = 20
+
+
 class SearchRequest(EngageRequest):
     query: str
     limit: int = 10
@@ -157,6 +162,21 @@ class AccountOut(BaseModel):
     avatar: str = ""
     bot: bool = False
     followers: int = 0
+    note: str = ""
+
+
+class SuggestedAccountOut(BaseModel):
+    account: AccountOut
+    reason: str
+    matched: list[str]
+    posts: int
+    bioMatch: bool
+
+
+class SuggestedFollowsOut(BaseModel):
+    niche: str
+    keywords: list[str]
+    accounts: list[SuggestedAccountOut]
     note: str = ""
 
 
@@ -851,6 +871,158 @@ def thread(body: ThreadRequest) -> ThreadOut:
         ancestors=flat[: len(ancestors)],
         status=flat[len(ancestors)],
         descendants=flat[len(ancestors) + 1 :],
+    )
+
+
+@router.post("/suggested-follows", response_model=SuggestedFollowsOut)
+def suggested_follows(body: SuggestedFollowsRequest) -> SuggestedFollowsOut:
+    """People worth following on this instance, from the niche keywords already configured.
+
+    Two passes, answering different questions. A hashtag timeline shows who is writing
+    about the subject on the fediverse right now; account search shows who says they are
+    about it in their profile. Appearing in both is the strongest signal available.
+
+    A bio match ranks an account up rather than filtering others out. Plenty of people post
+    about a subject daily and keep a bio that is a pronoun and a city, and excluding them
+    would leave a list of accounts that describe themselves well rather than ones worth
+    reading.
+
+    Gated like everything else here. Reading other people's posts to decide who to follow
+    is exactly the activity an instance's rules speak to, so it waits behind the same
+    acceptance the timeline and the composer do.
+    """
+    policy = _gated(body)
+    host = policy.info.host
+    token = _token(body)
+
+    from vendor.socialpost.src import db as spg_db
+
+    rows = spg_db.list_niches()
+    if body.niche.strip():
+        row = next((r for r in rows if r["name"] == body.niche.strip()), None)
+        if row is None:
+            raise HTTPException(status_code=400, detail=f"No niche called {body.niche!r}.")
+        name, keywords = row["name"], [str(k) for k in (row["keywords"] or [])]
+    else:
+        name = ""
+        keywords = [str(k) for r in rows for k in (r["keywords"] or [])]
+
+    if not keywords:
+        return SuggestedFollowsOut(
+            niche=name,
+            keywords=[],
+            accounts=[],
+            note="No niche keywords yet. Add a niche in the Mastodon Post Creator first.",
+        )
+
+    me = _me(host, token)
+    me_id = str(me.get("id") or "")
+    # Bounded: each keyword costs a timeline read and a search, and these are someone
+    # else's servers being asked on a screen the user opened once.
+    probe = keywords[:5]
+
+    found: dict[str, dict] = {}
+
+    def note(raw: dict, keyword: str, *, from_post: bool) -> None:
+        acct_id = str(raw.get("id") or "")
+        if not acct_id or acct_id == me_id:
+            return
+        entry = found.setdefault(acct_id, {"raw": raw, "matched": set(), "posts": 0})
+        entry["matched"].add(keyword)
+        if from_post:
+            entry["posts"] += 1
+
+    def as_raw(account: masto.Account) -> dict:
+        """The Account dataclass back into the API's own shape.
+
+        tag_timeline returns parsed Status objects while search returns raw JSON, and
+        _account_out speaks JSON. Normalising here keeps one mapper rather than two that
+        can disagree. There is no avatar on the dataclass — the corpus never needed one —
+        so suggestions sourced from a timeline show the fallback initial.
+        """
+        return {
+            "id": account.id,
+            "acct": account.acct,
+            "display_name": account.display_name,
+            "url": account.url,
+            "avatar": "",
+            "bot": account.bot,
+            "followers_count": account.followers,
+            "note": account.note,
+        }
+
+    for keyword in probe:
+        try:
+            for status in masto.tag_timeline(host, keyword, limit=20, token=token):
+                if status.account and status.account.id:
+                    note(as_raw(status.account), keyword, from_post=True)
+        except MastodonError:
+            pass
+        try:
+            data = masto.api_get(
+                host, "/api/v2/search", token,
+                {"q": keyword, "type": "accounts", "limit": 10, "resolve": "false"},
+            ) or {}
+            for raw in data.get("accounts") or []:
+                note(raw, keyword, from_post=False)
+        except MastodonError:
+            pass
+
+    # One relationships call for every candidate rather than one each: Mastodon takes
+    # repeated id[] parameters, and a per-account round trip would be dozens of requests
+    # to someone else's server for a list the user may not even scroll.
+    following: set[str] = set()
+    ids = list(found)
+    for i in range(0, len(ids), 40):
+        chunk = ids[i : i + 40]
+        try:
+            for rel in masto.api_get(
+                host, "/api/v1/accounts/relationships", token, {"id[]": chunk}
+            ) or []:
+                if rel.get("following") or rel.get("blocking") or rel.get("muting"):
+                    following.add(str(rel.get("id") or ""))
+        except MastodonError:
+            pass
+
+    lowered = [k.lower() for k in probe]
+    out: list[SuggestedAccountOut] = []
+    for acct_id, entry in found.items():
+        if acct_id in following:
+            continue
+        account = _account_out(entry["raw"])
+        blurb = f"{account.note} {account.displayName}".lower()
+        bio_hits = [k for k, low in zip(probe, lowered) if low in blurb]
+        matched = sorted(entry["matched"])
+        posts = entry["posts"]
+
+        if bio_hits and posts:
+            reason = f"Posts about {matched[0]}, and says so in their bio"
+        elif bio_hits:
+            reason = f"Bio mentions {bio_hits[0]}"
+        elif posts > 1:
+            reason = f"Posted about {matched[0]} {posts} times recently"
+        else:
+            reason = f"Posted about {matched[0]}"
+
+        out.append(
+            SuggestedAccountOut(
+                account=account,
+                reason=reason,
+                matched=matched,
+                posts=posts,
+                bioMatch=bool(bio_hits),
+            )
+        )
+
+    # Bots last, then bio match, then how much they post about it. A bot that relays a
+    # keyword all day is not a person worth following, but it is not spam either, so it
+    # sinks rather than disappears.
+    out.sort(
+        key=lambda a: (not a.account.bot, a.bioMatch, a.posts, len(a.matched), a.account.followers),
+        reverse=True,
+    )
+    return SuggestedFollowsOut(
+        niche=name, keywords=probe, accounts=out[: max(1, min(body.limit, 50))]
     )
 
 

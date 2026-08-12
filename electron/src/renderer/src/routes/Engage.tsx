@@ -5,6 +5,9 @@ import {
   getEngageNotifications,
   getEngageStatus,
   getEngageTimeline,
+  getSuggestedFollows,
+  followEngageActor,
+  type SuggestedFollowsResponse,
   markEngageNotificationsRead,
   quoteEngagePost,
   replyEngagePost,
@@ -22,6 +25,7 @@ import {
 } from '../api/client'
 import MastodonEngage from '../components/MastodonEngage'
 import PostMedia from '../components/PostMedia'
+import SuggestedFollows, { type SuggestionRow } from '../components/SuggestedFollows'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import { useAppStore } from '../state/store'
 import { primaryButtonSmall, secondaryButtonSmall, segGroup, segItem, sectionEyebrow, textarea } from '../styles/styleKit'
@@ -349,10 +353,25 @@ export default function Engage(): React.JSX.Element {
   const [network, setNetwork] = useState<Network>('bluesky')
   const [status, setStatus] = useState<EngageStatus | null>(null)
   const [feed, setFeed] = useState<Feed>('notifications')
+  const [suggestions, setSuggestions] = useState<SuggestedFollowsResponse | null>(null)
+  const [suggestLoading, setSuggestLoading] = useState(false)
   const [posts, setPosts] = useState<FeedPost[]>([])
   const [postText, setPostText] = useState('')
   const [loading, setLoading] = useState(false)
   const [posting, setPosting] = useState(false)
+  async function loadSuggestions(): Promise<void> {
+    setSuggestLoading(true)
+    try {
+      setSuggestions(await getSuggestedFollows())
+    } catch {
+      // A suggestion list is an extra. Failing it should not put an error banner over a
+      // timeline that loaded perfectly well.
+      setSuggestions(null)
+    } finally {
+      setSuggestLoading(false)
+    }
+  }
+
   const [busyKey, setBusyKey] = useState('')
   const [error, setError] = useState('')
 
@@ -403,7 +422,10 @@ export default function Engage(): React.JSX.Element {
   }
 
   useEffect(() => {
-    if (status?.configured) void loadFeed('notifications')
+    if (status?.configured) {
+      void loadFeed('notifications')
+      void loadSuggestions()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status?.configured])
 
@@ -624,6 +646,31 @@ export default function Engage(): React.JSX.Element {
             >
               {feed === 'notifications' ? "Nothing new - you're all caught up." : 'Nothing in your timeline yet.'}
             </div>
+          )}
+
+          {suggestions !== null && (
+            <SuggestedFollows
+              scope="on Bluesky"
+              keywords={suggestions.keywords}
+              note={suggestions.note}
+              loading={suggestLoading}
+              onRefresh={() => void loadSuggestions()}
+              onFollow={async (did) => {
+                await followEngageActor(did)
+              }}
+              rows={suggestions.accounts.map(
+                (a): SuggestionRow => ({
+                  key: a.did,
+                  handle: a.handle,
+                  displayName: a.displayName,
+                  bio: a.description,
+                  avatar: a.avatar,
+                  followers: a.followers,
+                  reason: a.reason,
+                  bioMatch: a.bioMatch
+                })
+              )}
+            />
           )}
 
           {!loading && posts.length > 0 && (
