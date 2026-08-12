@@ -17,6 +17,7 @@ import { useAppStore } from '../state/store'
 import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, textInput } from '../styles/styleKit'
 import BackendImage from '../components/BackendImage'
 import BrandVoiceSelect from '../components/BrandVoiceSelect'
+import NichePanel from '../components/NichePanel'
 import HashtagSuggester from '../components/HashtagSuggester'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import SaveButton from '../components/SaveButton'
@@ -53,10 +54,7 @@ export default function SocialPost(): React.JSX.Element {
   const [linked, setLinked] = useState('')
 
   const [showNiches, setShowNiches] = useState(false)
-  const [newNiche, setNewNiche] = useState('')
-  const [newKeywords, setNewKeywords] = useState('')
   const [brandVoiceId, setBrandVoiceId] = useState('')
-  const [busyNiche, setBusyNiche] = useState<string | null>(null)
 
   async function refresh(): Promise<void> {
     try {
@@ -126,35 +124,6 @@ export default function SocialPost(): React.JSX.Element {
       setImageError(err instanceof Error ? err.message : String(err))
     } finally {
       setImageLoading(false)
-    }
-  }
-
-  async function handleAddNiche(): Promise<void> {
-    const keywords = newKeywords
-      .split(/[\n,]/)
-      .map((k) => k.trim())
-      .filter(Boolean)
-    if (!newNiche.trim() || !keywords.length) return
-    try {
-      await saveSocialNiche(newNiche, keywords)
-      setNewNiche('')
-      setNewKeywords('')
-      await refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  async function handleCollect(name: string): Promise<void> {
-    setBusyNiche(name)
-    setError('')
-    try {
-      await collectSocialNiche(name)
-      await refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusyNiche(null)
     }
   }
 
@@ -343,76 +312,17 @@ export default function SocialPost(): React.JSX.Element {
 
       {/* --- niches ------------------------------------------------------- */}
       {showNiches && (
-        <div
-          style={{
-            marginTop: 16,
-            background: 'var(--surface-paper)',
-            border: '2.5px solid var(--border-paper)',
-            borderRadius: 20,
-            padding: 18,
-            boxShadow: 'var(--shadow-paper)'
+        <NichePanel
+          niches={niches}
+          onCollect={async (name) => {
+            await collectSocialNiche(name)
+            await refresh()
           }}
-        >
-          <div style={{ font: "700 18px 'Kalam'", color: 'var(--ink)', marginBottom: 2 }}>Niches</div>
-          <div style={{ font: "600 12.5px/1.5 'Quicksand'", color: 'var(--ink-muted)', marginBottom: 14 }}>
-            A niche is a name plus the search terms that find it. Be specific — “ai” drags in the whole internet.
-          </div>
-
-          {niches.map((n) => (
-            <div
-              key={n.name}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '10px 0',
-                borderTop: '2px dashed var(--border-soft)'
-              }}
-            >
-              <div style={{ flex: 1 }}>
-                <div style={{ font: "700 14px 'Quicksand'", color: 'var(--ink)' }}>{n.name}</div>
-                <div style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-faint)', marginTop: 2 }}>
-                  {n.keywords.join(' · ')}
-                </div>
-              </div>
-              <div style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-muted)', whiteSpace: 'nowrap' }}>
-                {n.posts} posts · {n.exemplars} exemplars
-              </div>
-              <div
-                style={{ ...secondaryButtonSmall, opacity: busyNiche === n.name ? 0.6 : 1 }}
-                onClick={busyNiche ? undefined : () => handleCollect(n.name)}
-              >
-                {busyNiche === n.name ? 'Collecting…' : 'Collect now'}
-              </div>
-            </div>
-          ))}
-
-          <div style={{ borderTop: '2px dashed var(--border-soft)', paddingTop: 14, marginTop: 6 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr auto', gap: 10, alignItems: 'end' }}>
-              <div>
-                <label style={label}>New niche</label>
-                <input
-                  value={newNiche}
-                  onChange={(e) => setNewNiche(e.target.value)}
-                  placeholder="rust gamedev"
-                  style={textInput}
-                />
-              </div>
-              <div>
-                <label style={label}>Keywords (comma or newline)</label>
-                <input
-                  value={newKeywords}
-                  onChange={(e) => setNewKeywords(e.target.value)}
-                  placeholder="bevy engine, wgpu, rust gamedev"
-                  style={textInput}
-                />
-              </div>
-              <div style={primaryButtonSmall} onClick={handleAddNiche}>
-                Add
-              </div>
-            </div>
-          </div>
-        </div>
+          onAdd={async (name, keywords) => {
+            await saveSocialNiche(name, keywords)
+            await refresh()
+          }}
+        />
       )}
 
       {/* --- draft -------------------------------------------------------- */}

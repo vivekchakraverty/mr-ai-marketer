@@ -6,6 +6,7 @@ import {
   getMastodonPolicy,
   getMastodonStatus,
   listMastodonNiches,
+  saveSocialNiche,
   markMastodonPublished,
   revokeMastodonPolicy,
   type MastodonCollectResponse,
@@ -19,6 +20,7 @@ import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, textInput } from '../styles/styleKit'
 import BrandVoiceSelect from '../components/BrandVoiceSelect'
+import NichePanel from '../components/NichePanel'
 import HashtagSuggester from '../components/HashtagSuggester'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import SaveButton from '../components/SaveButton'
@@ -56,6 +58,7 @@ export default function MastodonPost(): React.JSX.Element {
   // to repeat. Capped at three — enough to break it out of its favourite opening without
   // spending the prompt budget on old drafts.
   const [previousTexts, setPreviousTexts] = useState<string[]>([])
+  const [showNiches, setShowNiches] = useState(false)
   const [copied, setCopied] = useState(false)
 
   const [postedUrl, setPostedUrl] = useState('')
@@ -323,7 +326,7 @@ export default function MastodonPost(): React.JSX.Element {
                 <div>
                   <label style={label}>Niche</label>
                   <select value={fields.niche} onChange={(e) => setField('niche', e.target.value)} style={select}>
-                    {!niches.length && <option value="">No niches yet — add one in the Social Post Generator</option>}
+                    {!niches.length && <option value="">No niches yet — add one below</option>}
                     {niches.map((n) => (
                       <option key={n.name} value={n.name}>
                         {n.name} ({n.exemplars} exemplars)
@@ -363,6 +366,13 @@ export default function MastodonPost(): React.JSX.Element {
                   Nothing collected for this niche yet — drafts will lean on Mastodon norms alone until you collect.
                 </div>
               )}
+
+              <div
+                style={{ ...secondaryButtonSmall, alignSelf: 'flex-start' }}
+                onClick={() => setShowNiches((v) => !v)}
+              >
+                {showNiches ? 'Hide niches' : 'Manage niches'}
+              </div>
 
               <div>
                 <label style={label}>What's the post about?</label>
@@ -424,6 +434,23 @@ export default function MastodonPost(): React.JSX.Element {
               </div>
             </Card>
           </div>
+
+          {showNiches && (
+            <NichePanel
+              niches={niches}
+              countsHint={`Counts are for ${policy.instance} — each server builds its own pool, so a niche can be full here and empty elsewhere.`}
+              onCollect={async (name) => {
+                setCollected(await collectMastodonNiche(fields.instance, name))
+                await refreshAll()
+              }}
+              onAdd={async (name, keywords) => {
+                // Niches are shared with the Bluesky tool — one list, two ways of filling
+                // it — so this is deliberately the Social Post endpoint and not a copy.
+                await saveSocialNiche(name, keywords)
+                await refreshAll()
+              }}
+            />
+          )}
 
           {result && (
             <Draft
