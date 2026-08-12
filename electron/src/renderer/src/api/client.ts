@@ -825,6 +825,37 @@ async function mastodonToken(): Promise<string> {
   return settings.mastodonAccessToken ?? ''
 }
 
+export interface MastodonPostAnalytics {
+  postUri: string
+  webUrl: string
+  instance: string
+  text: string
+  publishedAt: string
+  likes: number
+  reposts: number
+  replies: number
+  engagementRate: number
+  fromApp: boolean
+}
+
+export interface MastodonAnalyticsResponse {
+  posts: MastodonPostAnalytics[]
+  totals: Record<string, number>
+  account: string
+}
+
+/** POST, not GET: the access token belongs in a body rather than a URL. */
+export async function getMastodonAnalytics(
+  instance: string,
+  limit = 40
+): Promise<MastodonAnalyticsResponse> {
+  return postJson('/mastodon-post/analytics', {
+    instance,
+    limit,
+    accessToken: await mastodonToken()
+  })
+}
+
 export function getMastodonStatus(instance: string): Promise<MastodonStatus> {
   return getJson(`/mastodon-post/status?instance=${encodeURIComponent(instance)}`)
 }

@@ -233,6 +233,33 @@ class GenerateRequest(BaseModel):
     discloseAi: bool = True
 
 
+class AnalyticsRequest(BaseModel):
+    instance: str
+    accessToken: str = ""
+    limit: int = 40
+
+
+class PostAnalyticsOut(BaseModel):
+    postUri: str
+    webUrl: str
+    instance: str
+    text: str
+    publishedAt: str
+    likes: int
+    reposts: int
+    replies: int
+    engagementRate: float
+    # True when this post is linked to a draft written here, via the composer's
+    # "close the loop" step. False means "not linked", not "not written here".
+    fromApp: bool = False
+
+
+class AnalyticsResponse(BaseModel):
+    posts: list[PostAnalyticsOut]
+    totals: dict[str, float]
+    account: str = ""
+
+
 class ExemplarOut(BaseModel):
     id: int
     text: str
@@ -1005,6 +1032,85 @@ def generate(body: GenerateRequest) -> GenerateResponse:
         compliance=compliance,
         libraryId=item["id"],
     )
+
+
+@router.post("/analytics", response_model=AnalyticsResponse)
+def analytics(body: AnalyticsRequest) -> AnalyticsResponse:
+    """How the posts on your Mastodon account have actually done.
+
+    Read live from the instance rather than from anything this app recorded, because the
+    app only knows about a post if the user came back and pasted its link — a step almost
+    nobody performs, which would leave this screen permanently empty. Your account already
+    knows every post you made and carries the counts on each one.
+
+    POST rather than GET so the access token travels in a body instead of a URL, where it
+    would end up in logs and history.
+
+    Deliberately not the Bluesky screen's cohort comparison. That works because Bluesky has
+    a searchable firehose to draw a comparable cohort from; Mastodon has no equivalent, and
+    a "versus similar accounts" figure assembled from whatever a hashtag timeline happened
+    to return would look authoritative and mean very little.
+    """
+    policy = _require_accepted(body.instance)
+    host = policy.info.host
+    token = body.accessToken.strip()
+    if not token:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Add your {host} access token in Settings to see how your posts did.",
+        )
+
+    try:
+        account, statuses = masto.account_statuses(host, token, limit=max(1, min(body.limit, 80)))
+    except MastodonError as err:
+        raise HTTPException(status_code=502, detail=str(err)) from None
+    if account is None:
+        raise HTTPException(status_code=502, detail=f"{host} did not recognise that token.")
+
+    # Which of these this app wrote. Matched on the linked URI only — the loop the composer
+    # closes when a draft is marked published. Guessing from text would mislabel edits and
+    # anything written by hand, and a wrong attribution here is worse than none.
+    from_app: set[str] = set()
+    try:
+        spg_db, _, _ = _spg()
+        for g in (
+            spg_db.get_client().table("generations").select("posted_uri").execute().data or []
+        ):
+            uri = g.get("posted_uri") or ""
+            if uri.startswith("mastodon://"):
+                from_app.add(uri)
+    except Exception:  # noqa: BLE001 — an unconfigured store just means nothing is flagged
+        pass
+
+    posts = [
+        PostAnalyticsOut(
+            postUri=masto.corpus_uri(host, st.id),
+            webUrl=st.url,
+            instance=host,
+            text=st.text,
+            publishedAt=st.created_at.isoformat() if st.created_at else "",
+            likes=st.favourites,
+            reposts=st.reblogs,
+            replies=st.replies,
+            engagementRate=masto.engagement_rate(
+                st.favourites, st.reblogs, st.replies, account.followers
+            ),
+            fromApp=masto.corpus_uri(host, st.id) in from_app,
+        )
+        for st in statuses
+    ]
+
+    n = len(posts)
+    totals = {
+        "posts": float(n),
+        "followers": float(account.followers),
+        "likes": float(sum(p.likes for p in posts)),
+        "reposts": float(sum(p.reposts for p in posts)),
+        "replies": float(sum(p.replies for p in posts)),
+        "avgEngagementRate": (sum(p.engagementRate for p in posts) / n) if n else 0.0,
+        "fromApp": float(sum(1 for p in posts if p.fromApp)),
+    }
+    return AnalyticsResponse(posts=posts, totals=totals, account=account.acct)
 
 
 @router.post("/published")

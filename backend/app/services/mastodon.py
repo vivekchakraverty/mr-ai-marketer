@@ -880,6 +880,57 @@ def verify_credentials(host: str, token: str) -> dict:
     }
 
 
+def account_statuses(
+    host: str,
+    token: str,
+    limit: int = 40,
+    exclude_replies: bool = True,
+    exclude_reblogs: bool = True,
+) -> tuple[Account | None, list[Status]]:
+    """The token holder's own posts, newest first, with their engagement counts.
+
+    Returns the account too, because engagement_rate is follower-normalised and the caller
+    would otherwise need a second round trip for the follower count.
+
+    Replies and boosts are excluded by default: this exists to answer "how did the things I
+    wrote do", and a boost carries someone else's numbers while a reply into a thread is not
+    a post in the sense being measured.
+    """
+    host = normalise_host(host)
+    raw_account = _request(host, "/api/v1/accounts/verify_credentials", token)
+    if not raw_account:
+        return None, []
+    account = _parse_account(raw_account)
+    account_id = str(raw_account.get("id") or "")
+    if not account_id:
+        return account, []
+
+    out: list[Status] = []
+    max_id: str | None = None
+    while len(out) < limit:
+        params: dict[str, Any] = {
+            "limit": min(PAGE_LIMIT, limit - len(out)),
+            "exclude_replies": exclude_replies,
+            "exclude_reblogs": exclude_reblogs,
+        }
+        if max_id:
+            params["max_id"] = max_id
+        page = _request(host, f"/api/v1/accounts/{account_id}/statuses", token, params) or []
+        if not page:
+            break
+        for raw in page:
+            status = _parse_status(raw)
+            if status:
+                out.append(status)
+        max_id = str(page[-1].get("id") or "")
+        if not max_id:
+            break
+        time.sleep(POLITE_DELAY_SECONDS)
+
+    log.info("mastodon own statuses -> %d", len(out))
+    return account, out[:limit]
+
+
 def engagement_rate(favourites: int, reblogs: int, replies: int, followers: int) -> float:
     """Follower-normalised engagement, matching the Bluesky tool's definition.
 
