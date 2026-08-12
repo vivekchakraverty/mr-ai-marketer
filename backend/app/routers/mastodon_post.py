@@ -906,6 +906,9 @@ def generate(body: GenerateRequest) -> GenerateResponse:
         raise HTTPException(status_code=400, detail="Tell it what to post about first.")
 
     policy = _require_accepted(body.instance)
+    # The corpus is keyed on the instance, so take the host from the policy rather than
+    # from body.instance: the policy's is normalised and is the one collection wrote under.
+    host = policy.info.host
     spg_db, _, spg_llm = _spg()
 
     from vendor.socialpost.src import sources as spg_sources
