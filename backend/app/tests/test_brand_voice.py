@@ -76,7 +76,11 @@ def test_apply_voice_puts_the_authors_words_last():
     assert out == "Announce the sale"  # no voice id -> untouched
 
 
-def test_missing_or_unknown_voice_is_a_no_op_not_an_error():
+# Takes app_db because looking up an unknown id is a real Library query. Without it
+# the test reads whatever config.DB_PATH happens to point at: a developer's own
+# library (passing by accident, having just searched their real data) or, on a clean
+# checkout, no schema at all — which is how this failed in CI.
+def test_missing_or_unknown_voice_is_a_no_op_not_an_error(app_db):
     assert brand_voice.load_voice("") == ""
     assert brand_voice.load_voice("not-a-real-id") == ""
     assert brand_voice.apply_voice("plain", "not-a-real-id") == "plain"

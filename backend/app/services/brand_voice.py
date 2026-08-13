@@ -16,6 +16,7 @@ without editing three Spaces and a vendored package.
 """
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Optional
 
@@ -69,7 +70,13 @@ def load_voice(voice_id: str, *, compact: bool = False) -> str:
     voice_id = (voice_id or "").strip()
     if not voice_id:
         return ""
-    item = db.get_item(voice_id)
+    try:
+        item = db.get_item(voice_id)
+    except sqlite3.Error:
+        # The lookup itself failing is the same situation as the voice being missing,
+        # and the promise above is about the *caller*: a locked, corrupt or not-yet-
+        # initialised library should cost the post its brand voice, not the post.
+        return ""
     if not item or item.get("tool") != "Brand":
         return ""
     card = _card_path(item)
