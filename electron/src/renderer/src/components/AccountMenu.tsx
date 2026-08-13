@@ -89,7 +89,7 @@ export default function AccountMenu(): React.JSX.Element {
           name: 'Bluesky',
           connected: Boolean(bsky?.configured),
           detail: bsky?.handle ? `@${bsky.handle.replace(/^@/, '')}` : 'Not connected',
-          where: 'Settings → Social Post'
+          where: 'Settings → Bluesky Post'
         },
         {
           name: 'Mastodon',

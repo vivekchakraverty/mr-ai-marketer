@@ -74,7 +74,7 @@ export default function CreateHub(): React.JSX.Element {
           size="hub"
           index="05"
           icon="social"
-          title="Social Post Generator"
+          title="Bluesky Post Creator"
           description="Studies what actually got engagement in your niche, then writes posts that rhyme with it."
           onClick={() => openTool('social')}
         />

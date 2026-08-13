@@ -613,7 +613,7 @@ export default function Settings(): React.JSX.Element {
               <Section
                 key={group}
                 title={group.replace(/\s*\(.*\)\s*$/, '')}
-                blurb={group.match(/\((.*)\)/)?.[1] ?? 'Used by the Social Post Generator.'}
+                blurb={group.match(/\((.*)\)/)?.[1] ?? 'Used by the Bluesky Post Creator.'}
                 accent="var(--tool-social)"
               >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

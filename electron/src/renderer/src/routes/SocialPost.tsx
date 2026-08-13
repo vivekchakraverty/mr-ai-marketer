@@ -156,7 +156,7 @@ export default function SocialPost(): React.JSX.Element {
 
       <div style={{ marginBottom: 20, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1 }}>
-          <div style={{ font: "700 30px 'Kalam'", color: 'var(--ink)' }}>Social Post Generator</div>
+          <div style={{ font: "700 30px 'Kalam'", color: 'var(--ink)' }}>Bluesky Post Creator</div>
           <div style={{ font: "600 14px 'Quicksand'", color: 'var(--ink-muted)', marginTop: 4 }}>
             Learns from posts that actually did numbers in your corner of the internet, then writes like they do —
             without stealing their homework.

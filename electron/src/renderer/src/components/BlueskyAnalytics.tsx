@@ -167,7 +167,7 @@ export default function BlueskyAnalytics(): React.JSX.Element {
     return (
       <div style={{ ...card, textAlign: 'center', padding: 48 }}>
         <div style={{ font: "700 18px 'Kalam'", color: 'var(--ink)' }}>Connect Bluesky first</div>
-        <div style={{ ...sub, margin: '6px auto 16px', maxWidth: 430 }}>Use the same handle and app password from Social Post Generator settings.</div>
+        <div style={{ ...sub, margin: '6px auto 16px', maxWidth: 430 }}>Use the same handle and app password from Bluesky Post Creator settings.</div>
         <div style={secondaryButtonSmall} onClick={goSettings}>Open Settings</div>
       </div>
     )
