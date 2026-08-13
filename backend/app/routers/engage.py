@@ -490,7 +490,7 @@ def suggested_follows(niche: str = "", query: str = "", limit: int = 20) -> Sugg
                 keywords=[],
                 accounts=[],
                 note=(
-                    "No niche keywords yet. Add a niche in the Social Post Generator, or "
+                    "No niche keywords yet. Add a niche in the Bluesky Post Creator, or "
                     "type a subject above."
                 ),
             )
@@ -569,7 +569,10 @@ def suggested_follows(niche: str = "", query: str = "", limit: int = 20) -> Sugg
             len(entry["matched"]),
         )
 
-    shortlist = sorted(found, key=provisional, reverse=True)[: max(limit * 3, 25)]
+    # Capped as well as scaled. The multiplier gives the ranking room to reorder once real
+    # bios arrive, but each 25 costs a round trip, and a caller asking for a deep pool to
+    # page through locally should not turn one screen into eight requests.
+    shortlist = sorted(found, key=provisional, reverse=True)[: min(max(limit * 2, 25), 75)]
     for i in range(0, len(shortlist), 25):
         chunk = shortlist[i : i + 25]
         try:

@@ -896,6 +896,7 @@ export default function MastodonEngage(): React.JSX.Element {
   const [searchResult, setSearchResult] = useState<MastodonSearchResult | null>(null)
   const [suggestions, setSuggestions] = useState<MastodonSuggestedFollows | null>(null)
   const [suggestLoading, setSuggestLoading] = useState(false)
+  const [showFollows, setShowFollows] = useState(false)
   // Set while the feed list is showing one conversation instead of a timeline.
   const [threadOf, setThreadOf] = useState('')
   const [replyTo, setReplyTo] = useState<MastodonFeedPost | null>(null)
@@ -951,7 +952,8 @@ export default function MastodonEngage(): React.JSX.Element {
     if (!host || locked) return
     setSuggestLoading(true)
     try {
-      setSuggestions(await getMastodonSuggestedFollows(host, '', query))
+      // Deep enough for several pages; the panel reveals fifteen at a time.
+      setSuggestions(await getMastodonSuggestedFollows(host, '', query, 60))
     } catch {
       // An extra. It must not put an error over a timeline that loaded fine — and the
       // most likely failure is simply no token, which the panel below already explains.
@@ -1270,31 +1272,6 @@ export default function MastodonEngage(): React.JSX.Element {
         </div>
       )}
 
-      {!locked && suggestions !== null && (
-        <SuggestedFollows
-          scope={`on ${session?.instance ?? 'this server'}`}
-          keywords={suggestions.keywords}
-          note={suggestions.note}
-          loading={suggestLoading}
-          onSearch={(q) => void loadSuggestions(q)}
-          onFollow={async (accountId) => {
-            await mastodonAccountAction(accountId, 'follow')
-          }}
-          rows={suggestions.accounts.map(
-            (a): SuggestionRow => ({
-              key: a.account.id,
-              handle: a.account.acct,
-              displayName: a.account.displayName,
-              bio: a.account.note,
-              avatar: a.account.avatar || null,
-              followers: a.account.followers,
-              reason: a.reason,
-              bioMatch: a.bioMatch
-            })
-          )}
-        />
-      )}
-
       {/* 2. Doing things from here. */}
       {session && !session.hasToken && (
         <Notice
@@ -1343,6 +1320,62 @@ export default function MastodonEngage(): React.JSX.Element {
             </div>
           ) : (
             <>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+                <div style={{ ...segGroup, flex: '1 1 380px' }}>
+                  {FEEDS.map((f) => (
+                    <div
+                      key={f.key}
+                      style={segItem(feed === f.key && !showFollows && !searchResult && !threadOf)}
+                      onClick={() => {
+                        setSearchResult(null)
+                        setShowFollows(false)
+                        void loadFeed(f.key, { reset: true })
+                      }}
+                    >
+                      {f.label}
+                    </div>
+                  ))}
+                  <div
+                    style={segItem(showFollows)}
+                    onClick={() => {
+                      // Both clear the reading pane. A thread or a search left open would
+                      // otherwise render underneath the suggestions.
+                      setSearchResult(null)
+                      setThreadOf('')
+                      setShowFollows(true)
+                      if (!suggestions) void loadSuggestions()
+                    }}
+                  >
+                    People to follow
+                  </div>
+                </div>
+              </div>
+
+              {showFollows && (
+        <SuggestedFollows
+          scope={`on ${session?.instance ?? 'this server'}`}
+          keywords={suggestions?.keywords ?? []}
+          note={suggestions?.note}
+          loading={suggestLoading}
+          onSearch={(q) => void loadSuggestions(q)}
+          onFollow={async (accountId) => {
+            await mastodonAccountAction(accountId, 'follow')
+          }}
+          rows={(suggestions?.accounts ?? []).map(
+            (a): SuggestionRow => ({
+              key: a.account.id,
+              handle: a.account.acct,
+              displayName: a.account.displayName,
+              bio: a.account.note,
+              avatar: a.account.avatar || null,
+              followers: a.account.followers,
+              reason: a.reason,
+              bioMatch: a.bioMatch
+            })
+          )}
+        />
+      )}
+
               <Composer
                 maxCharacters={maxCharacters}
                 visibilities={session.visibilities}
@@ -1353,24 +1386,7 @@ export default function MastodonEngage(): React.JSX.Element {
                 onSubmit={handleCompose}
               />
 
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
-                <div style={{ ...segGroup, flex: '1 1 380px' }}>
-                  {FEEDS.map((f) => (
-                    <div
-                      key={f.key}
-                      style={segItem(feed === f.key && !searchResult && !threadOf)}
-                      onClick={() => {
-                        setSearchResult(null)
-                        void loadFeed(f.key, { reset: true })
-                      }}
-                    >
-                      {f.label}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {feed === 'tag' && (
+              {!showFollows && feed === 'tag' && (
                 <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
                   <input
                     value={tagDraft}
@@ -1501,11 +1517,11 @@ export default function MastodonEngage(): React.JSX.Element {
                 </div>
               )}
 
-              {loading && posts.length === 0 && (
+              {!showFollows && loading && posts.length === 0 && (
                 <div style={{ ...muted, padding: '26px 0', textAlign: 'center' }}>Loading…</div>
               )}
 
-              {!loading && posts.length === 0 && (
+              {!showFollows && !loading && posts.length === 0 && (
                 <div
                   style={{
                     border: '2px dashed var(--border)',
@@ -1524,7 +1540,7 @@ export default function MastodonEngage(): React.JSX.Element {
                 </div>
               )}
 
-              {posts.length > 0 && (
+              {!showFollows && posts.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {posts.map((p, i) => (
                     <StatusCard

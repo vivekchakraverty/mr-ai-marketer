@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { primaryButtonSmall, secondaryButtonSmall, textInput } from '../styles/styleKit'
 
 /**
@@ -44,6 +44,9 @@ function initials(name: string): string {
   return (trimmed[0] || '?').toUpperCase()
 }
 
+/** How many suggestions appear at once, and how many each "Load more" adds. */
+const PAGE_SIZE = 15
+
 export default function SuggestedFollows({
   rows,
   keywords,
@@ -55,6 +58,17 @@ export default function SuggestedFollows({
 }: Props): React.JSX.Element {
   const [followed, setFollowed] = useState<Record<string, 'busy' | 'done'>>({})
   const [query, setQuery] = useState('')
+  // Paged locally rather than by refetching a larger page. The caller already asks for a
+  // deep pool, and every refetch would re-run several searches against Bluesky or someone
+  // else's Mastodon server — slow for the reader and rude to the server, for a list that
+  // was already computed and ranked.
+  const [visible, setVisible] = useState(PAGE_SIZE)
+
+  // A new search is a new list; keeping the old page depth would drop the reader partway
+  // down results they have not seen.
+  useEffect(() => {
+    setVisible(PAGE_SIZE)
+  }, [rows])
 
   async function follow(key: string): Promise<void> {
     if (!onFollow || followed[key]) return
@@ -140,7 +154,7 @@ export default function SuggestedFollows({
         </div>
       )}
 
-      {rows.map((r) => {
+      {rows.slice(0, visible).map((r) => {
         const state = followed[r.key]
         return (
           <div
@@ -225,6 +239,24 @@ export default function SuggestedFollows({
           </div>
         )
       })}
+
+      {visible < rows.length && (
+        <div
+          style={{
+            ...secondaryButtonSmall,
+            display: 'block',
+            textAlign: 'center',
+            marginTop: 12
+          }}
+          onClick={() => setVisible((v) => v + PAGE_SIZE)}
+        >
+          Load {Math.min(PAGE_SIZE, rows.length - visible)} more
+          <span style={{ color: 'var(--ink-faint)', fontWeight: 600 }}>
+            {' '}
+            · {rows.length - visible} left
+          </span>
+        </div>
+      )}
     </div>
   )
 }

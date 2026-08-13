@@ -32,7 +32,7 @@ import { primaryButtonSmall, secondaryButtonSmall, segGroup, segItem, sectionEye
 import SaveButton from '../components/SaveButton'
 
 type Network = 'bluesky' | 'mastodon'
-type Feed = 'notifications' | 'timeline'
+type Feed = 'notifications' | 'timeline' | 'follows'
 
 const NETWORKS: { key: Network; label: string }[] = [
   { key: 'bluesky', label: 'Bluesky' },
@@ -44,7 +44,10 @@ type TextAction = 'reply' | 'quote'
 
 const FEEDS: { key: Feed; label: string }[] = [
   { key: 'notifications', label: 'Notifications' },
-  { key: 'timeline', label: 'Timeline' }
+  { key: 'timeline', label: 'Timeline' },
+  // Not a feed of posts, but it belongs beside them: it answers "whose posts should be
+  // here" and shares the account this screen is already signed in as.
+  { key: 'follows', label: 'People to follow' }
 ]
 
 const REASON_VERB: Record<string, string> = {
@@ -362,7 +365,8 @@ export default function Engage(): React.JSX.Element {
   async function loadSuggestions(query = ''): Promise<void> {
     setSuggestLoading(true)
     try {
-      setSuggestions(await getSuggestedFollows('', query))
+      // Deep enough for several pages; the panel reveals fifteen at a time.
+      setSuggestions(await getSuggestedFollows('', query, 60))
     } catch {
       // A suggestion list is an extra. Failing it should not put an error banner over a
       // timeline that loaded perfectly well.
@@ -409,6 +413,12 @@ export default function Engage(): React.JSX.Element {
 
   async function loadFeed(which: Feed = feed): Promise<void> {
     setFeed(which)
+    // The follows tab has its own loader and no post list — switching to it should not
+    // fire a timeline request, nor leave the previous tab's posts behind it.
+    if (which === 'follows') {
+      if (!suggestions) void loadSuggestions()
+      return
+    }
     setLoading(true)
     setError('')
     try {
@@ -422,10 +432,7 @@ export default function Engage(): React.JSX.Element {
   }
 
   useEffect(() => {
-    if (status?.configured) {
-      void loadFeed('notifications')
-      void loadSuggestions()
-    }
+    if (status?.configured) void loadFeed('notifications')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status?.configured])
 
@@ -564,7 +571,7 @@ export default function Engage(): React.JSX.Element {
           <div style={{ flex: 1 }}>
             <div style={{ font: "700 13.5px 'Quicksand'", color: 'var(--ink)' }}>Connect Bluesky first</div>
             <div style={{ font: "600 12.5px/1.5 'Quicksand'", color: 'var(--ink-muted)', marginTop: 2 }}>
-              Use the same handle and app password from the Social Post Generator settings.
+              Use the same handle and app password from the Bluesky Post Creator settings.
             </div>
           </div>
           <div style={secondaryButtonSmall} onClick={goSettings}>
@@ -619,46 +626,27 @@ export default function Engage(): React.JSX.Element {
                   Mark read
                 </div>
               )}
-              <div style={actionButton(false, loading)} onClick={loading ? undefined : () => void loadFeed(feed)}>
-                Refresh
-              </div>
+              {feed !== 'follows' && (
+                <div style={actionButton(false, loading)} onClick={loading ? undefined : () => void loadFeed(feed)}>
+                  Refresh
+                </div>
+              )}
             </div>
           </div>
 
           {error && <div style={{ font: "700 13px 'Quicksand'", color: 'var(--danger-ink)', marginBottom: 14 }}>{error}</div>}
 
-          {loading && (
-            <div style={{ font: "600 14px 'Quicksand'", color: 'var(--ink-muted)', padding: '30px 0', textAlign: 'center' }}>
-              Loading...
-            </div>
-          )}
-
-          {!loading && posts.length === 0 && !error && (
-            <div
-              style={{
-                border: '2px dashed var(--border)',
-                borderRadius: 20,
-                padding: 40,
-                textAlign: 'center',
-                font: "700 15px 'Kalam'",
-                color: 'var(--ink-fainter-2)'
-              }}
-            >
-              {feed === 'notifications' ? "Nothing new - you're all caught up." : 'Nothing in your timeline yet.'}
-            </div>
-          )}
-
-          {suggestions !== null && (
+          {feed === 'follows' && (
             <SuggestedFollows
               scope="on Bluesky"
-              keywords={suggestions.keywords}
-              note={suggestions.note}
+              keywords={suggestions?.keywords ?? []}
+              note={suggestions?.note}
               loading={suggestLoading}
               onSearch={(q) => void loadSuggestions(q)}
               onFollow={async (did) => {
                 await followEngageActor(did)
               }}
-              rows={suggestions.accounts.map(
+              rows={(suggestions?.accounts ?? []).map(
                 (a): SuggestionRow => ({
                   key: a.did,
                   handle: a.handle,
@@ -673,7 +661,28 @@ export default function Engage(): React.JSX.Element {
             />
           )}
 
-          {!loading && posts.length > 0 && (
+          {feed !== 'follows' && loading && (
+            <div style={{ font: "600 14px 'Quicksand'", color: 'var(--ink-muted)', padding: '30px 0', textAlign: 'center' }}>
+              Loading...
+            </div>
+          )}
+
+          {feed !== 'follows' && !loading && posts.length === 0 && !error && (
+            <div
+              style={{
+                border: '2px dashed var(--border)',
+                borderRadius: 20,
+                padding: 40,
+                textAlign: 'center',
+                font: "700 15px 'Kalam'",
+                color: 'var(--ink-fainter-2)'
+              }}
+            >
+              {feed === 'notifications' ? "Nothing new - you're all caught up." : 'Nothing in your timeline yet.'}
+            </div>
+          )}
+
+          {feed !== 'follows' && !loading && posts.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {posts.map((p, i) => (
                 <FeedCard
