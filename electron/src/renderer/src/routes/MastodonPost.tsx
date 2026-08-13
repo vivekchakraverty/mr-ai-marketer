@@ -22,6 +22,7 @@ import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, text
 import BrandVoiceSelect from '../components/BrandVoiceSelect'
 import NichePanel from '../components/NichePanel'
 import HashtagSuggester from '../components/HashtagSuggester'
+import PostingTimePanel from '../components/PostingTimePanel'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import SaveButton from '../components/SaveButton'
 
@@ -470,6 +471,11 @@ export default function MastodonPost(): React.JSX.Element {
               instance={policy.instance}
             />
           )}
+
+          {/* Read-only timing guidance — it never schedules or sends anything.
+              The instance is the user's own choice from the server box above, and
+              the curve is measured on that server alone. */}
+          <PostingTimePanel platform="mastodon" instance={policy.instance} />
 
           {(fields.niche || fields.userInput.trim()) && (
             <HashtagSuggester

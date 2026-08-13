@@ -49,6 +49,7 @@ hiddenimports = [
     # Engage's Mastodon panel — same service + gate, different verbs.
     "app.routers.mastodon_engage",
     "app.routers.hashtags",
+    "app.routers.posting_time",
     "app.services.hashtags",
     "app.routers.topic_scout",
     # vendor/topicscout is imported lazily inside the router, so static analysis
@@ -82,6 +83,8 @@ hiddenimports = [
     "app.services.email_writer",
     "app.services.mail_tracking",
     "app.services.mail_bounce",
+    "app.services.posting_time_corpus",
+    "app.services.posting_time_cli",
     # vendor/leadgen (the Lead Gen Agent) is imported lazily inside router/startup functions
     # to keep it off the fast path, which hides it from PyInstaller's static analysis. List its
     # entry points + the modules reached only through the lazily-imported scheduler chain.

@@ -29,6 +29,7 @@ from .routers import (
     marketing_plan,
     mastodon_engage,
     mastodon_post,
+    posting_time,
     settings,
     social_post,
     topic_scout,
@@ -201,6 +202,7 @@ app.include_router(distribution.router)
 app.include_router(social_post.router)
 app.include_router(mastodon_post.router)
 app.include_router(hashtags.router)
+app.include_router(posting_time.router)
 app.include_router(topic_scout.router)
 app.include_router(influencer_db.router)
 app.include_router(engage.router)

@@ -19,6 +19,7 @@ import BackendImage from '../components/BackendImage'
 import BrandVoiceSelect from '../components/BrandVoiceSelect'
 import NichePanel from '../components/NichePanel'
 import HashtagSuggester from '../components/HashtagSuggester'
+import PostingTimePanel from '../components/PostingTimePanel'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import SaveButton from '../components/SaveButton'
 
@@ -536,6 +537,9 @@ export default function SocialPost(): React.JSX.Element {
           </div>
         </div>
       )}
+
+      {/* --- when to post -------------------------------------------------- */}
+      <PostingTimePanel platform={fields.platform} />
 
       {/* --- hashtag suggester ------------------------------------------- */}
       {(fields.niche || fields.userInput.trim()) && (

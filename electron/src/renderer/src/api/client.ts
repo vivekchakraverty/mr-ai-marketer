@@ -768,6 +768,97 @@ export async function suggestHashtags(
 }
 
 // ---------------------------------------------------------------------------
+// Posting time (app/routers/posting_time.py)
+//
+// The backend returns the measured curve in UTC and does no timezone conversion
+// at all — the mapping into the reader's own clock happens in the renderer, where
+// `Date` resolves the system zone exactly. That matters for the half-hour zones
+// (India, Nepal, Chatham), which a whole-hour offset cannot express, and across a
+// DST boundary, which a single offset captured at request time gets wrong for
+// half the week it is applied to.
+// ---------------------------------------------------------------------------
+
+export interface PostingHour {
+  hourUtc: number
+  score: number
+  lift: number
+  volume: number
+  volumeShare: number
+}
+
+export interface PostingDay {
+  /** UTC weekday, Monday == 0 — that is how the statistic was measured. */
+  weekday: number
+  name: string
+  score: number
+  lift: number
+}
+
+export interface PostingTimeRecommendation {
+  platform: string
+  /** False when this platform has no curve that reproduces on its own data. */
+  available: boolean
+  unavailableReason: string | null
+  hours: PostingHour[]
+  days: PostingDay[]
+  baseline: number
+  windowHours: number
+  effect: Partial<{
+    bestScore: number
+    worstScore: number
+    swingPercentilePoints: number
+    volumeEngagementCorrelation: number
+    summary: string
+  }>
+  sample: Partial<{
+    scoredPosts: number
+    scoredAuthors: number
+    corpusPosts: number
+    corpusAuthors: number
+    windowStart: string
+    windowEnd: string
+    collectedAt: string
+    reliability: number
+    source: string
+    platform: string
+  }>
+  caveats: string[]
+}
+
+export interface InstanceMeasurement {
+  instance: string
+  enough: boolean
+  scoredPosts: number
+  scoredAuthors: number
+  reliability: number
+  detail: string
+}
+
+/**
+ * Each platform answers only from its own data — there is no cross-platform
+ * fallback. Mastodon additionally answers per instance: there is no "Mastodon"
+ * to average, and the user posts to one specific server, so the host has to be
+ * part of the question.
+ */
+export function fetchPostingTime(
+  platform: string,
+  instance = ''
+): Promise<PostingTimeRecommendation> {
+  const params = new URLSearchParams({ platform })
+  if (instance) params.set('instance', instance)
+  return getJson(`/posting-time/recommendation?${params}`)
+}
+
+/**
+ * Read one instance's last month and decide whether it can support a curve.
+ * Slow (tens of seconds) — it is paging that server's public timeline — so
+ * callers must show progress. Only ever run when the user asks for it.
+ */
+export function measureInstance(instance: string): Promise<InstanceMeasurement> {
+  return postJson(`/posting-time/measure?instance=${encodeURIComponent(instance)}`, {})
+}
+
+// ---------------------------------------------------------------------------
 // Mastodon Post Creator (app/routers/mastodon_post.py)
 //
 // Every call carries the instance, because on the fediverse there is no single
