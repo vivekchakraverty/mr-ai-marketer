@@ -1,7 +1,36 @@
-import { useState } from 'react'
-import { connectChannel, disconnectChannel, fetchDistributionConsoleUrl } from '../api/client'
+import { useEffect, useState } from 'react'
+import {
+  SETTINGS_PLACEHOLDER,
+  connectChannel,
+  disconnectChannel,
+  fetchChannelPrefill,
+  fetchDistributionConsoleUrl,
+  verifyChannelSettings
+} from '../api/client'
 import { PLATFORM_SETUP_GUIDES, type PlatformSetupGuide } from '../state/platformSetupGuides'
 import { label, primaryButton, secondaryButtonSmall, textInput } from '../styles/styleKit'
+
+/**
+ * Credentials this app already holds for a channel, pulled in so the user is not
+ * asked to type the same app password a second time.
+ *
+ * Two stores feed this and they are not interchangeable. The backend owns
+ * Bluesky's handle/app-password (in vendor/socialpost's env) and the SMTP
+ * settings, and exposes them via the prefill endpoint — secrets as a placeholder
+ * that only the backend can resolve. Mastodon's instance and token live in
+ * Electron's encrypted store, which the backend never sees, so they are read here
+ * directly. `window.api.settings` is already the source for the Mastodon composer,
+ * so this exposes nothing that screen doesn't.
+ */
+async function mastodonPrefill(): Promise<Record<string, string>> {
+  const settings = await window.api.settings.getAll()
+  const out: Record<string, string> = {}
+  const instance = (settings.mastodonInstance ?? '').trim()
+  const token = (settings.mastodonAccessToken ?? '').trim()
+  if (instance) out.base_url = /^https?:\/\//.test(instance) ? instance : `https://${instance}`
+  if (token) out.access_token = token
+  return out
+}
 
 interface Props {
   channel: string
@@ -31,12 +60,96 @@ export default function ChannelConnectModal({
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(guide.fields.map((f) => [f.key, f.kind === 'checkbox' ? 'true' : (f.defaultValue ?? '')]))
   )
+  // Keys that arrived from Settings rather than being typed here. Drives the
+  // "from Settings" markers, and is cleared per-field the moment the user edits
+  // one so the marker never outlives the value it describes.
+  const [prefilled, setPrefilled] = useState<Set<string>>(new Set())
+  const [prefillSource, setPrefillSource] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [verifying, setVerifying] = useState(false)
+  const [verified, setVerified] = useState<{ ok: boolean; detail: string } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function seed(): Promise<void> {
+      try {
+        const [backend, electron] = await Promise.all([
+          fetchChannelPrefill(channel).catch(() => null),
+          channel === 'mastodon' ? mastodonPrefill() : Promise.resolve({} as Record<string, string>)
+        ])
+        if (cancelled) return
+
+        const found: Record<string, string> = {}
+        for (const f of backend?.fields ?? []) found[f.key] = f.value
+        for (const [k, v] of Object.entries(electron)) found[k] = v
+
+        // Only touch fields this form actually has, so a stored value for a prop
+        // the guide doesn't show can't leak into the payload.
+        const applicable = guide.fields.filter((f) => found[f.key] !== undefined && found[f.key] !== '')
+        if (applicable.length === 0) return
+
+        setValues((cur) => {
+          const next = { ...cur }
+          for (const f of applicable) next[f.key] = found[f.key]
+          return next
+        })
+        setPrefilled(new Set(applicable.map((f) => f.key)))
+        setPrefillSource(
+          backend?.source && backend.available
+            ? backend.source
+            : channel === 'mastodon'
+              ? 'your Mastodon settings'
+              : 'Settings'
+        )
+      } catch {
+        // Prefill is a convenience — a failure just leaves the form blank, which
+        // is exactly how it behaved before.
+      }
+    }
+    void seed()
+    return () => {
+      cancelled = true
+    }
+  }, [channel, guide])
 
   function setField(key: string, v: string): void {
     setValues((cur) => ({ ...cur, [key]: v }))
+    setPrefilled((cur) => {
+      if (!cur.has(key)) return cur
+      const next = new Set(cur)
+      next.delete(key)
+      return next
+    })
+    setVerified(null)
   }
+
+  /** Drop a saved secret so the user can type a different one. */
+  function replaceSecret(key: string): void {
+    setValues((cur) => ({ ...cur, [key]: '' }))
+    setPrefilled((cur) => {
+      const next = new Set(cur)
+      next.delete(key)
+      return next
+    })
+    setVerified(null)
+  }
+
+  async function handleVerify(): Promise<void> {
+    setVerifying(true)
+    setVerified(null)
+    try {
+      setVerified(await verifyChannelSettings(channel))
+    } catch (err) {
+      setVerified({ ok: false, detail: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setVerifying(false)
+    }
+  }
+
+  // Only the two channels whose credentials the backend holds can be checked
+  // without first creating a connection.
+  const canVerify = channel === 'bluesky' || channel === 'email'
 
   async function handleConnect(): Promise<void> {
     const missing = guide.fields.find((f) => !f.optional && f.kind !== 'checkbox' && !(values[f.key] ?? '').trim())
@@ -163,11 +276,91 @@ export default function ChannelConnectModal({
           </div>
         )}
 
+        {prefillSource && (
+          <div
+            style={{
+              border: '2px solid var(--border)',
+              background: 'var(--accent-soft-bg)',
+              borderRadius: 14,
+              padding: '10px 13px',
+              marginBottom: 14,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              flexWrap: 'wrap'
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 190, font: "600 12.5px/1.55 'Quicksand'", color: 'var(--ink-body)' }}>
+              Filled in from {prefillSource}. Check it looks right, then connect.
+            </div>
+            {canVerify && (
+              <div
+                style={{ ...secondaryButtonSmall, opacity: verifying ? 0.6 : 1 }}
+                onClick={verifying ? undefined : handleVerify}
+              >
+                {verifying ? 'Checking…' : 'Check they work'}
+              </div>
+            )}
+          </div>
+        )}
+
+        {verified && (
+          <div
+            style={{
+              font: "700 12.5px/1.55 'Quicksand'",
+              color: verified.ok ? 'var(--accent-deep)' : '#a34a3a',
+              marginBottom: 12
+            }}
+          >
+            {verified.ok ? '✓ ' : ''}
+            {verified.detail}
+          </div>
+        )}
+
         {guide.authKind !== 'OAUTH2' &&
           guide.fields.map((f) => (
             <div key={f.key} style={{ marginBottom: 14 }}>
-              <label style={label}>{f.label}</label>
-              {f.kind === 'select' ? (
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <label style={label}>{f.label}</label>
+                {prefilled.has(f.key) && (
+                  <span
+                    style={{
+                      font: "700 10px 'Quicksand'",
+                      letterSpacing: '.08em',
+                      textTransform: 'uppercase',
+                      color: 'var(--accent-deep)'
+                    }}
+                  >
+                    from settings
+                  </span>
+                )}
+              </div>
+              {/* A saved secret is never shown, not even masked — the renderer was
+                  handed a placeholder, not the credential. It stays a placeholder
+                  all the way back to the backend, which swaps in the real value. */}
+              {f.secret && prefilled.has(f.key) && values[f.key] === SETTINGS_PLACEHOLDER ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    border: '2px solid var(--border)',
+                    borderRadius: 12,
+                    padding: '9px 12px',
+                    background: 'var(--surface-tint)'
+                  }}
+                >
+                  <span style={{ flex: 1, font: "600 12.5px 'Quicksand'", color: 'var(--ink-muted)' }}>
+                    Using the one saved in Settings
+                  </span>
+                  <span
+                    style={{ font: "700 12px 'Quicksand'", color: 'var(--accent)', cursor: 'pointer' }}
+                    onClick={() => replaceSecret(f.key)}
+                  >
+                    Use a different one
+                  </span>
+                </div>
+              ) : f.kind === 'select' ? (
                 <select style={textInput} value={values[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)}>
                   <option value="" disabled>
                     Choose…

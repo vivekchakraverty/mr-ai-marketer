@@ -1,4 +1,5 @@
 import json
+import logging
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -12,6 +13,8 @@ from ..services import activepieces_client
 from ..services.activepieces_client import ActivepiecesError
 
 router = APIRouter(prefix="/distribution", tags=["distribution"])
+
+log = logging.getLogger(__name__)
 
 # Broadcast tail — fires immediately (or on schedule), no human gate.
 _CHANNELS = ["bluesky", "mastodon", "discord", "linkedin", "facebook", "instagram", "email", "twitter"]
@@ -78,6 +81,167 @@ class ConnectionRequest(BaseModel):
     value: dict
 
 
+# ---------------------------------------------------------------------------
+# Credential prefill
+#
+# Several channels need exactly the credentials the user has already entered
+# somewhere in Settings, and before this they had to type them a second time into
+# the connect dialog. The two stores this reads are the ones the backend owns:
+#
+#   bluesky -> BLUESKY_HANDLE / BLUESKY_APP_PASSWORD, held in the process
+#              environment by vendor/socialpost's config layer
+#   email   -> DATA_DIR/mail_settings.json, via services.mail
+#
+# Mastodon's credentials live in Electron's encrypted store instead, which the
+# backend never sees, so the renderer fills those in itself.
+#
+# Secrets are NEVER returned. A field the backend can supply comes back as the
+# placeholder below, and `connect_channel` swaps the real value in server-side, so
+# a saved app password is not round-tripped through the renderer just to be handed
+# straight back. Non-secret fields (a handle, an SMTP host) are returned in the
+# clear because the point is for the user to see and confirm them.
+# ---------------------------------------------------------------------------
+
+SETTINGS_PLACEHOLDER = "__from_settings__"
+
+
+def _bluesky_prefill() -> dict[str, tuple[str, bool]]:
+    """{field: (value, is_secret)} for the fields Settings can supply."""
+    import os
+
+    # Importing the vendored config pulls in its db module, which loads the per-user
+    # .env into the process. Without this the prefill would disagree with the rest of
+    # the app (is_set(), the Settings screen) whenever nothing had touched the
+    # Bluesky tooling yet in this process.
+    from vendor.socialpost.src import config as spg_config  # noqa: F401
+
+    handle = (os.environ.get("BLUESKY_HANDLE") or "").strip()
+    password = (os.environ.get("BLUESKY_APP_PASSWORD") or "").strip()
+    out: dict[str, tuple[str, bool]] = {}
+    if handle:
+        out["identifier"] = (handle, False)
+    if password:
+        out["password"] = (password, True)
+    return out
+
+
+def _email_prefill() -> dict[str, tuple[str, bool]]:
+    from ..services import mail
+
+    cfg = mail.load()
+    out: dict[str, tuple[str, bool]] = {}
+    if cfg.host:
+        out["host"] = (cfg.host, False)
+    # The piece's "email" prop is the SMTP login, which is `username` here;
+    # from_email is the fallback for providers where the two are the same.
+    login = cfg.username or cfg.from_email
+    if login:
+        out["email"] = (login, False)
+    if cfg.password:
+        out["password"] = (cfg.password, True)
+    if cfg.port:
+        out["port"] = (str(cfg.port), False)
+    out["TLS"] = ("true" if cfg.use_tls else "false", False)
+    return out
+
+
+_PREFILL_SOURCES = {
+    "bluesky": ("Bluesky Post Creator settings", _bluesky_prefill),
+    "email": ("your mail settings", _email_prefill),
+}
+
+
+class PrefillField(BaseModel):
+    key: str
+    # The real value for non-secret fields, SETTINGS_PLACEHOLDER for secrets.
+    value: str
+    secret: bool
+
+
+class PrefillResponse(BaseModel):
+    channel: str
+    # False when this channel has no backend-held credentials at all — the dialog
+    # then behaves exactly as it did before.
+    available: bool
+    source: str | None
+    fields: list[PrefillField]
+
+
+@router.get("/connections/{channel}/prefill", response_model=PrefillResponse)
+def connection_prefill(channel: str) -> PrefillResponse:
+    entry = _PREFILL_SOURCES.get(channel)
+    if not entry:
+        return PrefillResponse(channel=channel, available=False, source=None, fields=[])
+    source, loader = entry
+    try:
+        found = loader()
+    except Exception as err:  # noqa: BLE001 — a missing/corrupt store is "nothing to prefill"
+        log.warning("[distribution] prefill for %s failed: %s", channel, err)
+        return PrefillResponse(channel=channel, available=False, source=None, fields=[])
+
+    # A lone non-secret default (email's TLS flag) is not worth announcing as
+    # "we filled this in from Settings" — it carries no credential.
+    meaningful = [k for k, (_, secret) in found.items() if secret or k != "TLS"]
+    return PrefillResponse(
+        channel=channel,
+        available=bool(meaningful),
+        source=source if meaningful else None,
+        fields=[
+            PrefillField(key=key, value=SETTINGS_PLACEHOLDER if secret else value, secret=secret)
+            for key, (value, secret) in found.items()
+        ],
+    )
+
+
+class VerifyConnectionResponse(BaseModel):
+    ok: bool
+    detail: str
+
+
+@router.post("/connections/{channel}/verify-settings", response_model=VerifyConnectionResponse)
+def verify_connection_settings(channel: str) -> VerifyConnectionResponse:
+    """Check the stored credentials actually work, before they become a connection.
+
+    This is a live login/handshake, so it is only ever run when the user asks for
+    it — never on opening the dialog.
+    """
+    if channel == "bluesky":
+        from vendor.socialpost.src import config as spg_config
+
+        ok, detail = spg_config.verify_bluesky()
+        return VerifyConnectionResponse(ok=ok, detail=detail)
+    if channel == "email":
+        from ..services import mail
+
+        ok, detail = mail.verify()
+        return VerifyConnectionResponse(ok=ok, detail=detail)
+    raise HTTPException(status_code=404, detail=f"No stored credentials to verify for '{channel}'")
+
+
+def _resolve_placeholders(channel: str, value: dict) -> dict:
+    """Swap SETTINGS_PLACEHOLDER for the real secret the backend holds."""
+    entry = _PREFILL_SOURCES.get(channel)
+    if not entry:
+        return value
+    _, loader = entry
+    try:
+        found = loader()
+    except Exception:  # noqa: BLE001
+        return value
+
+    resolved = dict(value)
+    for key, raw in value.items():
+        if raw != SETTINGS_PLACEHOLDER:
+            continue
+        if key in found:
+            resolved[key] = found[key][0]
+        else:
+            # Nothing stored to substitute — drop it rather than sending the
+            # literal placeholder to Activepieces as if it were a password.
+            resolved.pop(key, None)
+    return resolved
+
+
 @router.post("/connections/{channel}")
 def connect_channel(channel: str, body: ConnectionRequest) -> dict:
     piece = None
@@ -89,7 +253,8 @@ def connect_channel(channel: str, body: ConnectionRequest) -> dict:
             raise HTTPException(status_code=404, detail=f"Unknown or OAuth-only channel '{channel}'")
         piece = (custom["piece_name"], custom["piece_version"])
     try:
-        activepieces_client.create_connection(channel, body.type, body.value, piece=piece)
+        value = _resolve_placeholders(channel, body.value)
+        activepieces_client.create_connection(channel, body.type, value, piece=piece)
     except ActivepiecesError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
     return {"connected": True}

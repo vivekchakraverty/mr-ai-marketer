@@ -502,6 +502,41 @@ export function disconnectChannel(channel: string): Promise<{ connected: boolean
   return deleteJson(`/distribution/connections/${channel}`)
 }
 
+/**
+ * Credentials the app can already supply for a channel, so the connect dialog
+ * doesn't ask for something the user has entered once already.
+ *
+ * Secrets come back as SETTINGS_PLACEHOLDER rather than the real value — sending
+ * it straight back on connect tells the backend to substitute what it holds. The
+ * renderer therefore never handles a saved app password at all.
+ *
+ * Mastodon is missing from this endpoint on purpose: its credentials live in
+ * Electron's own encrypted store, which the backend cannot read, so the modal
+ * fills those from `window.api.settings` instead.
+ */
+export const SETTINGS_PLACEHOLDER = '__from_settings__'
+
+export interface ChannelPrefillField {
+  key: string
+  value: string
+  secret: boolean
+}
+
+export interface ChannelPrefill {
+  channel: string
+  available: boolean
+  source: string | null
+  fields: ChannelPrefillField[]
+}
+
+export function fetchChannelPrefill(channel: string): Promise<ChannelPrefill> {
+  return getJson(`/distribution/connections/${channel}/prefill`)
+}
+
+export function verifyChannelSettings(channel: string): Promise<{ ok: boolean; detail: string }> {
+  return postJson(`/distribution/connections/${channel}/verify-settings`, {})
+}
+
 export function fetchDistributionConsoleUrl(): Promise<{ url: string }> {
   return getJson('/distribution/console-url')
 }
