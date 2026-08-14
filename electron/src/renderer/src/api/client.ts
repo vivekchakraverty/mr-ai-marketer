@@ -666,12 +666,31 @@ export function listSocialNiches(): Promise<SocialNiche[]> {
   return getJson('/social-post/niches')
 }
 
+/** One niche's first fill, queued automatically when the niche is created. */
+export interface NicheFirstFill {
+  niche: string
+  state: 'queued' | 'running' | 'done' | 'failed'
+  /** Absent until the Bluesky half has finished or been skipped. */
+  bluesky?: { posts?: number; exemplars?: number; skipped?: string; error?: string }
+  /** Absent until the Mastodon half has finished or been skipped. */
+  mastodon?: {
+    skipped?: string
+    instances?: Record<string, { stored?: number; exemplars?: number; error?: string }>
+  }
+  error?: string
+}
+
 export function saveSocialNiche(
   name: string,
   keywords: string[],
   active = true
-): Promise<{ name: string; weakKeywords: string[] }> {
+): Promise<{ name: string; weakKeywords: string[]; firstFill: { queued: boolean } | null }> {
   return postJson('/social-post/niches', { name, keywords, active })
+}
+
+/** Progress of the automatic fills. Poll while `pending`. */
+export function getNicheFirstFill(): Promise<{ pending: boolean; fills: NicheFirstFill[] }> {
+  return getJson('/social-post/niches/first-fill')
 }
 
 export function deleteSocialNiche(name: string, purge = false): Promise<{ removed: Record<string, number> }> {

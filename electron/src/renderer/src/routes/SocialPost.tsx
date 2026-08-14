@@ -323,6 +323,7 @@ export default function SocialPost(): React.JSX.Element {
             await saveSocialNiche(name, keywords)
             await refresh()
           }}
+          onRefresh={refresh}
         />
       )}
 

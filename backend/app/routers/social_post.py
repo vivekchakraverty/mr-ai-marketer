@@ -27,7 +27,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..services import brand_voice
+from ..services import brand_voice, niche_firstfill
 from ..services.genqueue import queue_slot
 from PIL import Image
 from pydantic import BaseModel
@@ -272,12 +272,41 @@ def list_niches() -> list[NicheOut]:
 
 @router.post("/niches")
 def save_niche(body: SaveNicheRequest) -> dict:
+    """Create or update a niche. A creation also queues its first fill.
+
+    Existence is checked *before* the save because save_niche upserts, so afterwards
+    there is no way to tell a new niche from an edited one. Only creations are filled:
+    editing an existing niche's keywords leaves a corpus already in place, and the
+    scheduled ingest picks the new terms up on its next pass, whereas a new niche has
+    nothing at all and is the case where waiting six hours reads as breakage.
+    """
     spg_db, _, _, _ = _spg()
+    existed = spg_db.get_niche(body.name) is not None
     try:
         saved = spg_db.save_niche(body.name, body.keywords, active=body.active)
     except spg_db.NicheError as err:
         raise HTTPException(status_code=400, detail=str(err)) from None
-    return {"name": saved["name"], "weakKeywords": spg_db.weak_keywords(saved["keywords"])}
+
+    first_fill = None
+    if not existed and saved["active"]:
+        first_fill = niche_firstfill.enqueue(saved["name"])
+
+    return {
+        "name": saved["name"],
+        "weakKeywords": spg_db.weak_keywords(saved["keywords"]),
+        "firstFill": first_fill,
+    }
+
+
+@router.get("/niches/first-fill")
+def first_fill_status() -> dict:
+    """Progress of the fills queued by niche creation.
+
+    Separate from /niches because those counts come from the database and only move
+    when a fill finishes; this says whether one is still running, which is the
+    difference between "this niche is empty" and "this niche is not filled yet".
+    """
+    return {"pending": niche_firstfill.pending(), "fills": niche_firstfill.status()}
 
 
 @router.post("/niches/{name}/rename")
@@ -299,6 +328,106 @@ def delete_niche(name: str, purge: bool = False) -> dict:
         raise HTTPException(status_code=400, detail=str(err)) from None
 
 
+def _backfill_48h_for_niche(name: str) -> int:
+    """Approximate 48h snapshots for one niche's posts. Returns how many were written.
+
+    The vendored snapshot.backfill_48h does the same thing globally: it selects posts
+    aged 50h-7d across every niche, capped at MAX_POSTS_PER_BUCKET (500) with no
+    ordering. That is right for the hourly job and wrong for a cold start. Measured on
+    this install, 2,825 posts sit in that window while a newly added niche contributes
+    four, so the cap crowds the new ones out and step 3 finds nothing to rank: the
+    niche came back "8 posts · 0 exemplars", which is the exact failure the bootstrap
+    recipe exists to prevent.
+
+    Scoping the query to the niche is the whole difference. Everything else — the age
+    window, the live re-fetch, the follower-normalised rate — is the vendored job's,
+    reused rather than reimplemented so the two cannot drift, and the vendored job
+    itself stays untouched and keeps running for every other niche.
+    """
+    from vendor.socialpost.src.bluesky import get_posts
+    from vendor.socialpost.src.db import JobRun, get_client, insert, iso, utcnow
+    from vendor.socialpost.src.jobs.snapshot import (
+        BACKFILL_MAX_AGE,
+        BACKFILL_MIN_AGE,
+        MAX_POSTS_PER_BUCKET,
+        _follower_counts,
+        engagement_rate,
+    )
+
+    now = utcnow()
+    with JobRun("snapshot_backfill") as job:
+        candidates = (
+            get_client()
+            .table("posts")
+            .select("uri, author_did, created_at")
+            .eq("niche", name)
+            .lte("created_at", iso(now - BACKFILL_MIN_AGE))
+            .gte("created_at", iso(now - BACKFILL_MAX_AGE))
+            .limit(MAX_POSTS_PER_BUCKET)
+            .execute()
+            .data
+            or []
+        )
+        if not candidates:
+            job.note(f"backfill: {name!r} has no posts aged 50h-7d")
+            return 0
+
+        # A post can already carry a real capture if the niche was collected before.
+        # A measurement must never be overwritten with an estimate.
+        uris = [c["uri"] for c in candidates]
+        done = {
+            row["post_uri"]
+            for i in range(0, len(uris), 100)
+            for row in (
+                get_client()
+                .table("engagement_snapshots")
+                .select("post_uri")
+                .eq("window_label", "48h")
+                .in_("post_uri", uris[i : i + 100])
+                .execute()
+                .data
+                or []
+            )
+        }
+        due = [c for c in candidates if c["uri"] not in done]
+        if not due:
+            job.note(f"backfill: {name!r} already has 48h snapshots")
+            return 0
+
+        live = get_posts([p["uri"] for p in due])
+        followers = _follower_counts({p["author_did"] for p in due if p["author_did"]})
+
+        rows = []
+        for candidate in due:
+            post = live.get(candidate["uri"])
+            if post is None:
+                # Deleted since ingest, or the author blocked us. Skipping leaves the
+                # row unmeasured, which is honest; a zero would read as "nobody cared".
+                job.count("backfill_unavailable")
+                continue
+            rows.append(
+                {
+                    "post_uri": post.uri,
+                    "captured_at": iso(now),
+                    "window_label": "48h",
+                    "likes": post.likes,
+                    "reposts": post.reposts,
+                    "replies": post.replies,
+                    "engagement_rate": engagement_rate(
+                        post.likes,
+                        post.reposts,
+                        post.replies,
+                        followers.get(candidate["author_did"], 0),
+                    ),
+                }
+            )
+
+        written = insert("engagement_snapshots", rows)
+        job.count("backfilled_48h", written)
+        job.note(f"backfill: {written} approximate 48h snapshots for {name!r}")
+        return written
+
+
 @router.post("/niches/{name}/collect")
 def collect_niche(name: str, limit: int = 25) -> dict:
     """Collect posts for a niche, and bootstrap its exemplar pool if it has none.
@@ -316,10 +445,10 @@ def collect_niche(name: str, limit: int = 25) -> dict:
 
       1. ingest with max_age=168h, reaching into the 50h-7d window that the normal
          44h ceiling excludes. Without this, step 2 matches nothing.
-      2. snapshot.backfill_48h(), which records those older posts' current counts
-         as an approximate 48h snapshot. Engagement has plateaued by 48h, so on a
-         post already days old the current count is close to what a real capture
-         would have recorded.
+      2. a 48h backfill, which records those older posts' current counts as an
+         approximate 48h snapshot. Engagement has plateaued by 48h, so on a post
+         already days old the current count is close to what a real capture would
+         have recorded. Scoped to this niche — see _backfill_48h_for_niche.
       3. refresh_exemplars for this niche, so the pool exists on return rather than
          at some point in the next 24 hours.
 
@@ -329,8 +458,7 @@ def collect_niche(name: str, limit: int = 25) -> dict:
     """
     from datetime import datetime, timedelta, timezone
 
-    from vendor.socialpost.src.db import JobRun
-    from vendor.socialpost.src.jobs import ingest, refresh_exemplars, snapshot
+    from vendor.socialpost.src.jobs import ingest, refresh_exemplars
 
     spg_db, _, _, _ = _spg()
     cold_start = spg_db.niche_data_counts(name).get("exemplars", 0) == 0
@@ -352,8 +480,7 @@ def collect_niche(name: str, limit: int = 25) -> dict:
             # Then a normal pass for recent posts, so the niche is not seeded exclusively
             # with days-old material. These age into their own real 48h snapshots later.
             ingest.run(only_niche=name, limit=limit)
-            with JobRun("snapshot_backfill") as job:
-                snapshot.backfill_48h(job, dry_run=False)
+            _backfill_48h_for_niche(name)
             refresh_exemplars.run(only_niche=name)
         else:
             ingest.run(only_niche=name, limit=limit)
