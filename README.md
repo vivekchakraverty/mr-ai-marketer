@@ -41,7 +41,7 @@ Ten screens, grouped by what you're trying to get done:
 | **Home** | The front door — recent work and shortcuts. |
 | **Research / Strategy** | Decide what to do: build a marketing plan, define your brand, find topics worth writing about, find sales leads, browse an influencer database. |
 | **Create** | Write it: blog posts, guest posts, tutorials, documentation, social posts, Mastodon posts, marketing emails. |
-| **Engage** | Your own Bluesky and Mastodon feeds — reply, post, keep up with your community. |
+| **Engage** | Your own Bluesky, Mastodon and Tumblr feeds — reply, post, keep up with your community. |
 | **Analytics** | What happened: your sales pipeline, email opens and clicks, how your posts performed against comparable accounts. |
 | **Manage** | A live planning workspace where you track campaigns and budgets. |
 | **Community** | Run a Telegram community: an open group anyone can be added to, and a paid channel people subscribe to. |
@@ -264,8 +264,12 @@ trending, and real usage numbers. When it can't get real data it says so rather 
 
 ### Engage, Analytics, Manage, Community, Distribute
 
-**Engage** puts your Bluesky timeline and notifications, and your Mastodon community, inside
-the app so you can reply without leaving.
+**Engage** puts your Bluesky timeline and notifications, your Mastodon community, and your
+Tumblr dashboard and activity, inside the app so you can reply without leaving. Each tab
+speaks its own network's language rather than a lowest common denominator: the Tumblr side
+reblogs (with or without a comment) instead of replying, because that is what Tumblr's API
+can do and how conversation there actually works, and it treats tags as a real field because
+on Tumblr they are the distribution.
 
 **Analytics** has three views: your **sales pipeline** as a board, **email** opens/clicks/
 bounces for everything the app has sent, and **Bluesky** performance compared against a
@@ -451,8 +455,14 @@ Set these in your environment, or in a `.env` file in `backend/`:
 | `BRANDFORGE_MODEL` | Brand Studio on Modal | Your merged model repo. |
 | `BRANDFORGE_IMAGE_BUCKET` | Brand visuals | Your Hugging Face Bucket holding the image model. |
 
-Everything else — Bluesky, Mastodon, mail, Modal tokens, YouTube — is entered in the
+Everything else — Bluesky, Mastodon, Tumblr, mail, Modal tokens, YouTube — is entered in the
 **Settings** screen and stored encrypted on your machine.
+
+Tumblr is the one that takes four values rather than one, because its API is OAuth 1.0a:
+register an application at [tumblr.com/oauth/apps](https://www.tumblr.com/oauth/apps) for the
+consumer key and secret, then open [api.tumblr.com/console](https://api.tumblr.com/console),
+pick that application, and copy the token and token secret it hands you. All four are secrets.
+The blog name is optional — leave it blank and the app acts as your primary blog.
 
 ### The reference index
 

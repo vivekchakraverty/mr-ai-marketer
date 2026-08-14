@@ -24,6 +24,7 @@ import {
   type FeedPost
 } from '../api/client'
 import MastodonEngage from '../components/MastodonEngage'
+import TumblrEngage from '../components/TumblrEngage'
 import PostMedia from '../components/PostMedia'
 import SuggestedFollows, { type SuggestionRow } from '../components/SuggestedFollows'
 import ScreenBackdrop from '../components/ScreenBackdrop'
@@ -31,12 +32,13 @@ import { useAppStore } from '../state/store'
 import { primaryButtonSmall, secondaryButtonSmall, segGroup, segItem, sectionEyebrow, textarea } from '../styles/styleKit'
 import SaveButton from '../components/SaveButton'
 
-type Network = 'bluesky' | 'mastodon'
+type Network = 'bluesky' | 'mastodon' | 'tumblr'
 type Feed = 'notifications' | 'timeline' | 'follows'
 
 const NETWORKS: { key: Network; label: string }[] = [
   { key: 'bluesky', label: 'Bluesky' },
-  { key: 'mastodon', label: 'Mastodon' }
+  { key: 'mastodon', label: 'Mastodon' },
+  { key: 'tumblr', label: 'Tumblr' }
 ]
 type PostAction = 'like' | 'repost' | 'bookmark' | 'threadMute'
 type ActorAction = 'follow' | 'mute' | 'block'
@@ -541,11 +543,13 @@ export default function Engage(): React.JSX.Element {
         <div style={{ font: "600 14px 'Quicksand'", color: 'var(--ink-muted)', marginTop: 4 }}>
           {network === 'bluesky'
             ? "Your own Bluesky account - who's talking to you, and what's moving through your feed."
-            : "Your own Mastodon community - its house rules, the server itself, and the everyday things you do there."}
+            : network === 'mastodon'
+              ? "Your own Mastodon community - its house rules, the server itself, and the everyday things you do there."
+              : 'Your own Tumblr blog - your activity, your dashboard, and the reblogging that passes for conversation there.'}
         </div>
       </div>
 
-      <div style={{ ...segGroup, maxWidth: 260, marginBottom: 18 }}>
+      <div style={{ ...segGroup, maxWidth: 380, marginBottom: 18 }}>
         {NETWORKS.map((n) => (
           <div key={n.key} style={segItem(network === n.key)} onClick={() => setNetwork(n.key)}>
             {n.label}
@@ -554,6 +558,8 @@ export default function Engage(): React.JSX.Element {
       </div>
 
       {network === 'mastodon' && <MastodonEngage />}
+
+      {network === 'tumblr' && <TumblrEngage />}
 
       {network === 'bluesky' && status && !status.configured && (
         <div

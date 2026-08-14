@@ -34,6 +34,7 @@ from .routers import (
     social_post,
     topic_scout,
     tracker,
+    tumblr_engage,
     tutorial_maker,
 )
 
@@ -207,6 +208,7 @@ app.include_router(topic_scout.router)
 app.include_router(influencer_db.router)
 app.include_router(engage.router)
 app.include_router(mastodon_engage.router)
+app.include_router(tumblr_engage.router)
 app.include_router(bluesky_analytics.router)
 app.include_router(mail.router)
 app.include_router(mail_tracking.router)

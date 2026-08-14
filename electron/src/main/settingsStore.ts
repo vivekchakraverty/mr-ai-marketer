@@ -71,6 +71,23 @@ export interface HfAssetSettings {
   ctrModelRepo: string
 }
 
+/**
+ * Tumblr's API is OAuth 1.0a, so a login is four secrets rather than one token:
+ * the consumer pair identifies the application (tumblr.com/oauth/apps) and the
+ * token pair identifies the user (api.tumblr.com/console). All four are needed to
+ * sign a single request.
+ *
+ * `blog` is which of the account's blogs to act as. Not a secret, and optional —
+ * blank means the account's primary blog, which the backend resolves.
+ */
+export interface TumblrSettings {
+  consumerKey: string
+  consumerSecret: string
+  oauthToken: string
+  oauthTokenSecret: string
+  blog: string
+}
+
 export interface AppSettings {
   hfToken: string
   youtubeApiKey: string
@@ -80,6 +97,8 @@ export interface AppSettings {
   // needed for full-text search and for linking a published post back to its draft.
   mastodonInstance: string
   mastodonAccessToken: string
+  // Engage, Tumblr side. Nothing else in the app reads these yet.
+  tumblr: TumblrSettings
   googleAds: GoogleAdsSettings
   brandForge: BrandForgeSettings
   topicScout: TopicScoutSettings
@@ -93,12 +112,15 @@ export interface AppSettings {
  * whole group when one is given, so saving a single Telegram field would mean restating the
  * other three. The nested groups merge key-by-key on write, so the type says so too.
  */
-export type SettingsPatch = Partial<Omit<AppSettings, 'googleAds' | 'brandForge' | 'topicScout' | 'telegram' | 'hfAssets'>> & {
+export type SettingsPatch = Partial<
+  Omit<AppSettings, 'googleAds' | 'brandForge' | 'topicScout' | 'telegram' | 'hfAssets' | 'tumblr'>
+> & {
   hfAssets?: Partial<HfAssetSettings>
   googleAds?: Partial<GoogleAdsSettings>
   brandForge?: Partial<BrandForgeSettings>
   topicScout?: Partial<TopicScoutSettings>
   telegram?: Partial<TelegramSettings>
+  tumblr?: Partial<TumblrSettings>
 }
 
 const EMPTY_SETTINGS: AppSettings = {
@@ -107,6 +129,7 @@ const EMPTY_SETTINGS: AppSettings = {
   hfAssets: { influencerRepo: '', guestPostRepo: '', ctrModelRepo: '' },
   mastodonInstance: '',
   mastodonAccessToken: '',
+  tumblr: { consumerKey: '', consumerSecret: '', oauthToken: '', oauthTokenSecret: '', blog: '' },
   googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
   brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '', modelRepo: '', imageBucket: '' },
   topicScout: {
@@ -142,7 +165,8 @@ function withDefaults(parsed: Partial<AppSettings>): AppSettings {
     googleAds: { ...EMPTY_SETTINGS.googleAds, ...(parsed.googleAds ?? {}) },
     brandForge: { ...EMPTY_SETTINGS.brandForge, ...(parsed.brandForge ?? {}) },
     topicScout: { ...EMPTY_SETTINGS.topicScout, ...(parsed.topicScout ?? {}) },
-    telegram: { ...EMPTY_SETTINGS.telegram, ...(parsed.telegram ?? {}) }
+    telegram: { ...EMPTY_SETTINGS.telegram, ...(parsed.telegram ?? {}) },
+    tumblr: { ...EMPTY_SETTINGS.tumblr, ...(parsed.tumblr ?? {}) }
   }
 }
 
@@ -200,7 +224,8 @@ export function setSettings(partial: SettingsPatch): AppSettings {
     googleAds: { ...current.googleAds, ...(partial.googleAds ?? {}) },
     brandForge: { ...current.brandForge, ...(partial.brandForge ?? {}) },
     topicScout: { ...current.topicScout, ...(partial.topicScout ?? {}) },
-    telegram: { ...current.telegram, ...(partial.telegram ?? {}) }
+    telegram: { ...current.telegram, ...(partial.telegram ?? {}) },
+    tumblr: { ...current.tumblr, ...(partial.tumblr ?? {}) }
   }
   writeSettings(next)
   return next

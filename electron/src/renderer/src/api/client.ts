@@ -1359,6 +1359,253 @@ export async function searchMastodon(query: string, limit = 10): Promise<Mastodo
   return postJson('/mastodon-engage/search', { ...(await mastodonAuth()), query, limit })
 }
 
+// ---------------------------------------------------------------------------
+// Engage, Tumblr side (app/routers/tumblr_engage.py)
+//
+// Every call is a POST, including the reads, for the same reason the Mastodon
+// block above gives: the credentials travel in the body, never in a URL. Tumblr's
+// are four OAuth 1.0a values rather than one token, and like the other two
+// networks they are read from Settings in here rather than threaded through the
+// components.
+// ---------------------------------------------------------------------------
+
+export type TumblrFeedName = 'dashboard' | 'notifications' | 'likes'
+
+/** What a post may be created as. "queue" and "draft" are load-bearing on Tumblr. */
+export type TumblrPostState = 'published' | 'queue' | 'draft' | 'private'
+
+export interface TumblrPost {
+  id: string
+  reblogKey: string
+  blogName: string
+  blogTitle: string
+  blogUrl: string
+  avatar: string
+  postUrl: string
+  createdAt: string
+  text: string
+  tags: string[]
+  noteCount: number
+  liked: boolean
+  isOwn: boolean
+  /** False for an activity row carrying no post that can be acted on. */
+  isPost: boolean
+  isReblog: boolean
+  rebloggedFrom: string
+  muted: boolean
+  state: string
+  following: boolean
+  blocked: boolean
+  media: PostMediaItem[]
+  reason: string | null
+  reasonText: string
+  isRead: boolean | null
+}
+
+export interface TumblrFeedResponse {
+  feed: TumblrFeedName
+  posts: TumblrPost[]
+  /** Dashboard and likes page by offset; the activity feed pages by timestamp. */
+  nextOffset: number
+  nextBefore: number
+  note: string
+}
+
+export interface TumblrBlogSummary {
+  name: string
+  title: string
+  url: string
+  primary: boolean
+  followers: number
+}
+
+export interface TumblrSession {
+  configured: boolean
+  reachable: boolean
+  detail: string
+  userName: string
+  blog: string
+  blogTitle: string
+  blogUrl: string
+  avatar: string
+  following: number
+  likes: number
+  blogs: TumblrBlogSummary[]
+}
+
+export interface TumblrBlogState {
+  blogName: string
+  following: boolean
+  blocked: boolean
+}
+
+export interface TumblrActionResult {
+  ok: boolean
+  post: TumblrPost | null
+  blog: TumblrBlogState | null
+  createdId: string
+}
+
+export interface TumblrNote {
+  type: string
+  blogName: string
+  blogUrl: string
+  avatar: string
+  createdAt: string
+  text: string
+  tags: string[]
+  postId: string
+}
+
+export interface TumblrNotes {
+  notes: TumblrNote[]
+  totalNotes: number
+  totalLikes: number
+  totalReblogs: number
+  note: string
+}
+
+export interface TumblrSuggestedBlog {
+  name: string
+  title: string
+  url: string
+  avatar: string
+  description: string
+  posts: number
+  reason: string
+  matched: string[]
+  bioMatch: boolean
+}
+
+export interface TumblrSuggestedFollows {
+  niche: string
+  keywords: string[]
+  blogs: TumblrSuggestedBlog[]
+  note: string
+}
+
+/** The four OAuth values plus the blog to act as — every Tumblr call needs them. */
+async function tumblrAuth(): Promise<{
+  consumerKey: string
+  consumerSecret: string
+  oauthToken: string
+  oauthTokenSecret: string
+  blog: string
+}> {
+  const { tumblr } = await window.api.settings.getAll()
+  return {
+    consumerKey: tumblr?.consumerKey ?? '',
+    consumerSecret: tumblr?.consumerSecret ?? '',
+    oauthToken: tumblr?.oauthToken ?? '',
+    oauthTokenSecret: tumblr?.oauthTokenSecret ?? '',
+    blog: tumblr?.blog ?? ''
+  }
+}
+
+export async function getTumblrSession(): Promise<TumblrSession> {
+  return postJson('/tumblr-engage/session', await tumblrAuth())
+}
+
+export async function getTumblrFeed(
+  feed: TumblrFeedName,
+  opts: { limit?: number; offset?: number; before?: number } = {}
+): Promise<TumblrFeedResponse> {
+  return postJson('/tumblr-engage/feed', {
+    ...(await tumblrAuth()),
+    feed,
+    limit: opts.limit ?? 20,
+    offset: opts.offset ?? 0,
+    before: opts.before ?? 0
+  })
+}
+
+export async function getTumblrNotes(
+  blogName: string,
+  postId: string,
+  mode = 'conversation'
+): Promise<TumblrNotes> {
+  return postJson('/tumblr-engage/notes', { ...(await tumblrAuth()), blogName, postId, mode })
+}
+
+export async function composeTumblrPost(opts: {
+  text: string
+  title?: string
+  tags?: string
+  state?: TumblrPostState
+}): Promise<TumblrActionResult> {
+  return postJson('/tumblr-engage/compose', {
+    ...(await tumblrAuth()),
+    text: opts.text,
+    title: opts.title ?? '',
+    tags: opts.tags ?? '',
+    state: opts.state ?? 'published'
+  })
+}
+
+/** Reblog a post, with or without commentary — Tumblr's repost and quote in one. */
+export async function reblogTumblrPost(
+  post: TumblrPost,
+  opts: { comment?: string; tags?: string; state?: TumblrPostState } = {}
+): Promise<TumblrActionResult> {
+  return postJson('/tumblr-engage/reblog', {
+    ...(await tumblrAuth()),
+    blogName: post.blogName,
+    postId: post.id,
+    reblogKey: post.reblogKey,
+    comment: opts.comment ?? '',
+    tags: opts.tags ?? '',
+    state: opts.state ?? 'published'
+  })
+}
+
+export async function toggleTumblrLike(post: TumblrPost): Promise<TumblrActionResult> {
+  return postJson('/tumblr-engage/like', {
+    ...(await tumblrAuth()),
+    blogName: post.blogName,
+    postId: post.id,
+    reblogKey: post.reblogKey,
+    enabled: !post.liked
+  })
+}
+
+export async function toggleTumblrFollow(blogName: string, enabled: boolean): Promise<TumblrActionResult> {
+  return postJson('/tumblr-engage/follow', { ...(await tumblrAuth()), blogName, enabled })
+}
+
+export async function toggleTumblrBlock(blogName: string, enabled: boolean): Promise<TumblrActionResult> {
+  return postJson('/tumblr-engage/block', { ...(await tumblrAuth()), blogName, enabled })
+}
+
+/** Mute or unmute activity about one of your own posts. */
+export async function toggleTumblrMute(post: TumblrPost): Promise<TumblrActionResult> {
+  return postJson('/tumblr-engage/mute', {
+    ...(await tumblrAuth()),
+    blogName: post.blogName,
+    postId: post.id,
+    enabled: !post.muted
+  })
+}
+
+export async function deleteTumblrPost(post: TumblrPost): Promise<TumblrActionResult> {
+  return postJson('/tumblr-engage/delete-post', {
+    ...(await tumblrAuth()),
+    blogName: post.blogName,
+    postId: post.id
+  })
+}
+
+export async function getTumblrSuggestedFollows(
+  query = '',
+  limit = 30
+): Promise<TumblrSuggestedFollows> {
+  return postJson('/tumblr-engage/suggested-follows', {
+    ...(await tumblrAuth()),
+    niche: '',
+    query,
+    limit
+  })
+}
+
 // --- settings ---------------------------------------------------------------
 
 export interface EnvSetting {
@@ -2577,3 +2824,4 @@ export interface QueueStatus {
 export function getQueueStatus(): Promise<QueueStatus> {
   return getJson('/queue')
 }
+

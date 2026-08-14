@@ -3,6 +3,7 @@ import {
   getLeadgenSchema,
   getModalStatus,
   getSocialPostSchema,
+  getTumblrSession,
   provisionModalBackend,
   pushLeadgenEnv,
   pushSocialPostEnv,
@@ -23,6 +24,7 @@ const EMPTY: AppSettings = {
   hfAssets: { influencerRepo: '', guestPostRepo: '', ctrModelRepo: '' },
   mastodonInstance: '',
   mastodonAccessToken: '',
+  tumblr: { consumerKey: '', consumerSecret: '', oauthToken: '', oauthTokenSecret: '', blog: '' },
   googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
   brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '', modelRepo: '', imageBucket: '' },
   topicScout: {
@@ -265,6 +267,35 @@ export default function Settings(): React.JSX.Element {
     }
   }
 
+  // Tumblr's credentials live in the encrypted store rather than the backend's
+  // environment, and the backend reads them off the request — so the test has to
+  // persist what is typed first, or it would check whatever was saved last time.
+  async function runTumblrCheck(): Promise<void> {
+    setChecks((c) => ({ ...c, tumblr: { state: 'checking' } }))
+    try {
+      await window.api.settings.setAll(settings)
+      const session = await getTumblrSession()
+      if (!session.configured) {
+        setChecks((c) => ({ ...c, tumblr: { state: 'error', detail: 'All four OAuth values are needed.' } }))
+      } else if (!session.reachable) {
+        setChecks((c) => ({ ...c, tumblr: { state: 'error', detail: session.detail } }))
+      } else {
+        setChecks((c) => ({
+          ...c,
+          tumblr: {
+            state: session.detail ? 'error' : 'ok',
+            detail: session.detail || `Signed in as ${session.userName}, posting as ${session.blog} ✓`
+          }
+        }))
+      }
+    } catch (err) {
+      setChecks((c) => ({
+        ...c,
+        tumblr: { state: 'error', detail: err instanceof Error ? err.message : String(err) }
+      }))
+    }
+  }
+
   async function handleCheckForUpdate(): Promise<void> {
     setCheckingUpdate(true)
     try {
@@ -443,6 +474,46 @@ export default function Settings(): React.JSX.Element {
               placeholder="Optional — Preferences → Development → New Application on your instance"
               style={textInput}
             />
+          </Section>
+
+          <Section
+            title="Tumblr"
+            optional
+            blurb="Powers the Tumblr tab in Engage. Tumblr signs every request with four values, not one token: register an application at tumblr.com/oauth/apps for the consumer key and secret, then open api.tumblr.com/console, pick that application, and copy the token and token secret it shows you. All four are secrets."
+            accent="var(--tool-tumblr)"
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {(
+                [
+                  ['consumerKey', 'Consumer key', 'From tumblr.com/oauth/apps — identifies the application'],
+                  ['consumerSecret', 'Consumer secret', 'The other half of the application credentials'],
+                  ['oauthToken', 'OAuth token', 'From api.tumblr.com/console — identifies you'],
+                  ['oauthTokenSecret', 'OAuth token secret', 'The other half of your own credentials']
+                ] as [keyof AppSettings['tumblr'], string, string][]
+              ).map(([key, labelText, hint]) => (
+                <div key={key}>
+                  <label style={label}>{labelText}</label>
+                  <input
+                    type="password"
+                    value={settings.tumblr[key]}
+                    onChange={(e) => setSettings((s) => ({ ...s, tumblr: { ...s.tumblr, [key]: e.target.value } }))}
+                    placeholder={hint}
+                    style={textInput}
+                  />
+                </div>
+              ))}
+              <div>
+                <label style={label}>Blog</label>
+                <input
+                  value={settings.tumblr.blog}
+                  onChange={(e) => setSettings((s) => ({ ...s, tumblr: { ...s.tumblr, blog: e.target.value } }))}
+                  placeholder="Optional — leave blank for your primary blog"
+                  style={textInput}
+                />
+                <Help text="One Tumblr account can own several blogs, and posting, reblogging and blocking all happen as one of them. Short name (myblog) or full address (myblog.tumblr.com)." />
+              </div>
+            </div>
+            <CheckRow check={checks.tumblr} onRun={runTumblrCheck} labelText="Test connection" />
           </Section>
 
           <Section

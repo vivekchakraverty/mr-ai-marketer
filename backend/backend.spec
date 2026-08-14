@@ -48,6 +48,12 @@ hiddenimports = [
     "app.services.mastodon_gate",
     # Engage's Mastodon panel — same service + gate, different verbs.
     "app.routers.mastodon_engage",
+    # Engage's Tumblr panel. requests_oauthlib is reached only from the service
+    # module, and oauthlib picks its signature method up by name at sign time.
+    "app.routers.tumblr_engage",
+    "app.services.tumblr",
+    "requests_oauthlib",
+    "oauthlib.oauth1",
     "app.routers.hashtags",
     "app.routers.posting_time",
     "app.services.hashtags",

@@ -83,6 +83,13 @@ imagehash==4.3.2
 atproto==0.0.69
 PyYAML==6.0.3
 
+# Engage, Tumblr side (app/services/tumblr.py)
+# Tumblr's API is OAuth 1.0a: every request is signed with four secrets, so `requests` alone
+# is not enough. Already present transitively (google-ads pulls it in) — pinned here because
+# it is now imported directly, and an indirect dependency can vanish when its parent's
+# resolution changes.
+requests-oauthlib==2.0.0
+
 # Community (Telegram)
 # The bot half needs nothing beyond `requests`, which is already required above. Telethon is
 # for the account half only: a bot cannot create a group or add anyone to one, so creating
