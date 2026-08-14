@@ -89,6 +89,14 @@ export default function CreateHub(): React.JSX.Element {
         <ToolCard
           size="hub"
           index="07"
+          icon="tumblr"
+          title="Tumblr Post Creator"
+          description="Learns from posts that actually earned their notes, tags included."
+          onClick={() => openTool('tumblr')}
+        />
+        <ToolCard
+          size="hub"
+          index="08"
           icon="email"
           title="Email Writer"
           description="Trained on real marketing emails, so it sounds like a copywriter, not a chatbot."

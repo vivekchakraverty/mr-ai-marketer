@@ -17,6 +17,7 @@ import Research from './routes/Research'
 import CreateHub from './routes/CreateHub'
 import SocialPost from './routes/SocialPost'
 import MastodonPost from './routes/MastodonPost'
+import TumblrPost from './routes/TumblrPost'
 import Engage from './routes/Engage'
 import Analytics from './routes/Analytics'
 import Manage from './routes/Manage'
@@ -37,7 +38,7 @@ function applyDebugRoute(): void {
   const route = window.api?.debugRoute
   if (!route) return
   const s = useAppStore.getState()
-  const toolRoutes = ['blog', 'guest', 'tutorial', 'docu', 'social', 'mastodon', 'email'] as const
+  const toolRoutes = ['blog', 'guest', 'tutorial', 'docu', 'social', 'mastodon', 'tumblr', 'email'] as const
   if ((toolRoutes as readonly string[]).includes(route)) {
     s.openTool(route as (typeof toolRoutes)[number])
   } else if (route === 'hf-gate') {
@@ -79,6 +80,7 @@ function MainContent(): React.JSX.Element {
     if (tool === 'docu') return <DocuMaker />
     if (tool === 'social') return <SocialPost />
     if (tool === 'mastodon') return <MastodonPost />
+    if (tool === 'tumblr') return <TumblrPost />
     if (tool === 'email') return <EmailWriter />
     return <CreateHub />
   }

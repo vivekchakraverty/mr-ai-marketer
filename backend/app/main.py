@@ -35,6 +35,7 @@ from .routers import (
     topic_scout,
     tracker,
     tumblr_engage,
+    tumblr_post,
     tutorial_maker,
 )
 
@@ -132,6 +133,10 @@ def on_startup() -> None:
     # published and tops its corpus up. Inert until an instance's rules have been
     # accepted, so an untouched install never talks to anyone's server.
     mastodon_post.start_scheduler()
+    # The Tumblr Post Creator re-reads the standalone collector's corpus daily, since that
+    # crawl is resumable and keeps growing. Inert when no corpus file is present, so it
+    # makes no noise on an install that does not have one.
+    tumblr_post.start_scheduler()
     # The Lead Gen Agent's daemon; inert until a campaign is active + credentials set. The
     # Email Writer (app service) is injected as the outreach draft writer, and the mail
     # tracking service is injected the same way for opens/clicks/bounces on its sends.
@@ -209,6 +214,7 @@ app.include_router(influencer_db.router)
 app.include_router(engage.router)
 app.include_router(mastodon_engage.router)
 app.include_router(tumblr_engage.router)
+app.include_router(tumblr_post.router)
 app.include_router(bluesky_analytics.router)
 app.include_router(mail.router)
 app.include_router(mail_tracking.router)

@@ -7,6 +7,7 @@ import {
   DEFAULT_SOCIAL_FIELDS,
   DEFAULT_GUEST_FIELDS,
   DEFAULT_MASTODON_FIELDS,
+  DEFAULT_TUMBLR_FIELDS,
   DEFAULT_PLAN_FIELDS,
   DEFAULT_TUTORIAL_FIELDS,
   type BlogFields,
@@ -15,6 +16,7 @@ import {
   type GuestFields,
   type LibraryItem,
   type MastodonFields,
+  type TumblrFields,
   type PlanFields,
   type SocialFields,
   type Route,
@@ -56,6 +58,7 @@ interface AppState {
     docu: DocuFields
     social: SocialFields
     mastodon: MastodonFields
+    tumblr: TumblrFields
     email: EmailFields
   }
 
@@ -81,6 +84,7 @@ interface AppState {
   setDocuField: <K extends keyof DocuFields>(field: K, value: DocuFields[K]) => void
   setSocialField: <K extends keyof SocialFields>(field: K, value: SocialFields[K]) => void
   setMastodonField: <K extends keyof MastodonFields>(field: K, value: MastodonFields[K]) => void
+  setTumblrField: <K extends keyof TumblrFields>(field: K, value: TumblrFields[K]) => void
   setEmailField: <K extends keyof EmailFields>(field: K, value: EmailFields[K]) => void
 
   setHfStatus: (connected: boolean, username: string | null) => void
@@ -149,6 +153,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     docu: DEFAULT_DOCU_FIELDS,
     social: DEFAULT_SOCIAL_FIELDS,
     mastodon: DEFAULT_MASTODON_FIELDS,
+    tumblr: DEFAULT_TUMBLR_FIELDS,
     email: DEFAULT_EMAIL_FIELDS
   },
 
@@ -181,6 +186,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSocialField: (field, value) =>
     set((s) => ({ fields: { ...s.fields, social: { ...s.fields.social, [field]: value } } })),
 
+  setTumblrField: (field, value) =>
+    set((s) => ({ fields: { ...s.fields, tumblr: { ...s.fields.tumblr, [field]: value } } })),
   setMastodonField: (field, value) =>
     set((s) => ({ fields: { ...s.fields, mastodon: { ...s.fields.mastodon, [field]: value } } })),
 

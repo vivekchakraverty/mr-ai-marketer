@@ -51,6 +51,8 @@ hiddenimports = [
     # Engage's Tumblr panel. requests_oauthlib is reached only from the service
     # module, and oauthlib picks its signature method up by name at sign time.
     "app.routers.tumblr_engage",
+    "app.routers.tumblr_post",
+    "app.services.tumblr_corpus",
     "app.services.tumblr",
     "requests_oauthlib",
     "oauthlib.oauth1",

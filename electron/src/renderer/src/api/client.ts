@@ -2844,3 +2844,132 @@ export function getQueueStatus(): Promise<QueueStatus> {
   return getJson('/queue')
 }
 
+// ---------------------------------------------------------------------------
+// Tumblr Post Creator (app/routers/tumblr_post.py)
+//
+// The corpus is imported from the standalone collector rather than crawled here,
+// so `importTumblrCorpus` is the primary way this tool gets data and
+// `collectTumblrNiche` is only a live top-up. Both reuse the same Tumblr login
+// the Engage tool stores, so there is nothing extra to connect.
+// ---------------------------------------------------------------------------
+
+export interface TumblrNiche {
+  name: string
+  keywords: string[]
+  posts: number
+  exemplars: number
+  /** True when this niche has too little Tumblr material and borrows the general pool. */
+  borrowing: boolean
+}
+
+export interface TumblrPostStatus {
+  corpusFound: boolean
+  corpusPath: string
+  posts: number
+  exemplars: number
+  generalPoolPosts: number
+  connected: boolean
+  niches: TumblrNiche[]
+  note: string
+}
+
+export interface TumblrImportResult {
+  corpus: string
+  imported: number
+  blogs: number
+  perNiche: Record<string, number>
+  skipped: Record<string, number>
+  pools: Record<string, number>
+}
+
+export interface TumblrExemplar {
+  text: string
+  blog: string
+  notes: number
+  postUrl: string
+  /** A post you published through this tool — it holds a reserved pool slot. */
+  isYours: boolean
+}
+
+export interface TumblrDraft {
+  /** Pass to markTumblrPublished to close the learning loop. */
+  generationId: number
+  text: string
+  tags: string[]
+  niche: string
+  exemplars: TumblrExemplar[]
+  /** Non-empty when the niche was too thin and another pool's register was used. */
+  borrowedFrom: string
+  provider: string
+  model: string
+}
+
+export async function getTumblrPostStatus(): Promise<TumblrPostStatus> {
+  const auth = await tumblrAuth()
+  const query = new URLSearchParams({
+    consumerKey: auth.consumerKey,
+    consumerSecret: auth.consumerSecret,
+    oauthToken: auth.oauthToken,
+    oauthTokenSecret: auth.oauthTokenSecret
+  })
+  return getJson(`/tumblr-post/status?${query}`)
+}
+
+export function importTumblrCorpus(corpusPath = ''): Promise<TumblrImportResult> {
+  return postJson('/tumblr-post/import', { corpusPath })
+}
+
+export async function collectTumblrNiche(
+  niche: string,
+  limit = 60
+): Promise<{ scanned: number; stored: number; skipped: Record<string, number>; exemplars: number }> {
+  return postJson('/tumblr-post/collect', { ...(await tumblrAuth()), niche, limit })
+}
+
+export function generateTumblrPost(
+  userInput: string,
+  niche: string,
+  brandVoiceId = '',
+  sourceUrl = '',
+  avoidTexts: string[] = []
+): Promise<TumblrDraft> {
+  return postJson('/tumblr-post/generate', {
+    userInput,
+    niche,
+    brandVoiceId,
+    sourceUrl,
+    avoidTexts
+  })
+}
+
+export async function markTumblrPublished(
+  generationId: number,
+  niche: string,
+  postUrl: string
+): Promise<{
+  postedUri: string
+  webUrl: string
+  notes: number
+  medianNotes: number
+  followers: number | null
+}> {
+  return postJson('/tumblr-post/published', {
+    ...(await tumblrAuth()),
+    generationId,
+    niche,
+    postUrl
+  })
+}
+
+/**
+ * Re-read note counts on posts published through this tool, then rebuild any pool that
+ * gained a measurement. Called on screen load rather than by a backend timer: Tumblr's
+ * read API signs every call and the credentials live in Electron, not the backend.
+ */
+export async function measureTumblrPosts(): Promise<{
+  measured: number
+  rebuilt: string[]
+  note: string
+}> {
+  return postJson('/tumblr-post/measure', await tumblrAuth())
+}

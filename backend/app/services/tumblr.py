@@ -431,6 +431,30 @@ def blog_info(creds: Credentials, identifier: str, *, refresh: bool = False) -> 
     return info
 
 
+def follower_count(creds: Credentials, identifier: str) -> int | None:
+    """Exact follower total for a blog the authenticated account owns, else None.
+
+    Tumblr answers this route with HTTP 403 for any blog you do not control, which is
+    the whole reason the corpus collector had to invent `audience_proxy_notes` (the
+    median note count of a blog's recent originals) as a stand-in. For the user's *own*
+    posts there is no need to estimate, so the Post Creator scores them against this.
+
+    `limit=1` because only the total is wanted; the page of followers is discarded.
+    None means "no honest number available", never zero — a zero would read as a blog
+    nobody follows and would send its engagement rate to infinity.
+    """
+    cleaned = normalise_blog(identifier)
+    if not cleaned:
+        return None
+    try:
+        payload = get(creds, f"/blog/{blog_path(cleaned)}/followers", limit=1) or {}
+    except TumblrError:
+        # 403 for a blog you don't own is the expected case, not an error worth raising.
+        return None
+    total = payload.get("total_users") if isinstance(payload, dict) else None
+    return int(total) if isinstance(total, (int, float)) else None
+
+
 def forget_blog(creds: Credentials, identifier: str) -> None:
     """Drop a cached relationship after acting on it.
 

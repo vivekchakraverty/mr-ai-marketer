@@ -9,7 +9,16 @@ export type Route =
   | 'distribute'
   | 'library'
   | 'settings'
-export type Tool = 'blog' | 'guest' | 'tutorial' | 'docu' | 'social' | 'mastodon' | 'email' | null
+export type Tool =
+  | 'blog'
+  | 'guest'
+  | 'tutorial'
+  | 'docu'
+  | 'social'
+  | 'mastodon'
+  | 'tumblr'
+  | 'email'
+  | null
 
 export interface LibraryItem {
   id: string
@@ -73,6 +82,12 @@ export interface MastodonFields {
   // rules and character limit, so nothing about a draft is decidable without it.
   instance: string
   discloseAi: boolean
+}
+
+export interface TumblrFields {
+  userInput: string
+  niche: string
+  sourceUrl: string
 }
 
 export interface EmailFields {
@@ -162,6 +177,12 @@ export const DEFAULT_MASTODON_FIELDS: MastodonFields = {
   // On by default: several instances require generative-AI use to be disclosed,
   // and the safe default is the one that keeps you inside their rules.
   discloseAi: true
+}
+
+export const DEFAULT_TUMBLR_FIELDS: TumblrFields = {
+  userInput: '',
+  niche: '',
+  sourceUrl: ''
 }
 
 export const DEFAULT_DOCU_FIELDS: DocuFields = {

@@ -18,6 +18,7 @@ const TOOL_LINK_COLOR: Record<ToolIconVariant, string> = {
   distribute: '#2fa366',
   social: '#c04f8d',
   mastodon: '#4a5db8',
+  tumblr: '#3a5a80',
   email: '#c9752f'
 }
 

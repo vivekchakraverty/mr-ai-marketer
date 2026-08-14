@@ -7,6 +7,7 @@ export type ToolIconVariant =
   | 'distribute'
   | 'social'
   | 'mastodon'
+  | 'tumblr'
   | 'email'
 
 interface Props {
@@ -23,6 +24,7 @@ const TOOL_COLOR: Record<ToolIconVariant, string> = {
   distribute: 'var(--tool-distribute)',
   social: 'var(--tool-social)',
   mastodon: 'var(--tool-mastodon)',
+  tumblr: 'var(--tool-tumblr)',
   email: 'var(--tool-email)'
 }
 
@@ -37,6 +39,7 @@ const TOOL_BLOB: Record<ToolIconVariant, string> = {
   distribute: '48% 52% 45% 55%',
   social: '53% 47% 47% 53%',
   mastodon: '49% 51% 53% 47%',
+  tumblr: '51% 49% 46% 54%',
   email: '47% 53% 52% 48%'
 }
 
@@ -284,6 +287,50 @@ export default function ToolIcon({ variant, size = 38 }: Props): React.JSX.Eleme
               height: 4 * scale,
               background: 'var(--surface)',
               borderRadius: `0 ${4 * scale}px ${4 * scale}px 0`
+            }}
+          />
+        </div>
+      )
+      break
+    case 'tumblr':
+      // A blocky "t": the vertical stem with its foot kicking right, and the crossbar.
+      // Same absolutely-positioned-blocks construction as its siblings.
+      inner = (
+        <div style={glyphStyle}>
+          {/* stem */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 3 * scale,
+              left: 9 * scale,
+              width: 6 * scale,
+              height: 15 * scale,
+              background: 'var(--paper)',
+              borderRadius: 2 * scale
+            }}
+          />
+          {/* crossbar */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 8 * scale,
+              left: 5 * scale,
+              width: 10 * scale,
+              height: 4 * scale,
+              background: 'var(--paper)',
+              borderRadius: 1.5 * scale
+            }}
+          />
+          {/* foot, kicking right */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 14 * scale,
+              left: 13 * scale,
+              width: 6 * scale,
+              height: 4 * scale,
+              background: 'var(--paper)',
+              borderRadius: 1.5 * scale
             }}
           />
         </div>
