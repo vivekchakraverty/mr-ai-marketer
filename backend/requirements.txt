@@ -23,38 +23,38 @@ pyasn1==0.6.4          # >=0.6.4 clears CVE-2026-59884/59885/59886 (DoS via craf
 # 78.1.1 is the lowest version clear of CVE-2024-6345 (RCE via package download) and
 # CVE-2025-47273 (path traversal); torch 2.12 declares setuptools<82, so the usable window is
 # 78.1.1–81.x. Installing the latest (83.x) resolves cleanly and then breaks torch at runtime.
-setuptools==81.0.0
+setuptools==84.0.0
 
-fastapi==0.139.0
-uvicorn[standard]==0.50.2
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
 python-multipart==0.0.32
-huggingface_hub==1.22.0
+huggingface_hub==1.27.0
 
 # Guest Post Suggester (vendor/guestpostsuggester)
-pandas==3.0.3
+pandas==3.0.5
 openpyxl==3.1.5
 scikit-learn==1.9.0
-tldextract==5.3.1
+tldextract==5.3.2
 httpx==0.28.1
 requests==2.34.2
-feedparser==6.0.12
+feedparser==6.0.14
 beautifulsoup4==4.15.0
 lxml==6.1.1
 
 # Marketing Plan Generator (vendor/dmstrategy)
-sentence-transformers==5.6.0
+sentence-transformers==5.7.0
 # 1.5.9 carries an unfixed CVE-2026-45829 (pre-auth RCE) that applies only to Chroma's HTTP
 # server mode. This app never runs one — every call site is chromadb.PersistentClient, which
 # is embedded and has no listener. Revisit when a fixed release exists.
 chromadb==1.5.9
-trafilatura==2.1.0
-google-ads==31.1.0
+trafilatura==2.2.0
+google-ads==31.2.0
 python-dotenv==1.2.2
-playwright==1.61.0
+playwright==1.62.0
 pytrends==4.9.2
 
 # Blog Writer (calls the Hugging Face Space you deploy — see BLOG_WRITER_SPACE)
-gradio_client==2.5.0
+gradio_client==2.6.0
 
 # Brand Studio's optional own-GPU path: deploys a small inference app into the
 # user's own Modal workspace and calls it by name. Only used when they add a
@@ -64,14 +64,14 @@ modal==1.5.3
 # Tutorial Maker (vendor/tutorialmaker)
 yt-dlp==2026.7.4
 youtube-transcript-api==1.2.4
-transformers==5.13.0
-numpy==2.4.6
+transformers==5.15.0
+numpy==2.5.2
 Pillow==12.3.0
 python-docx==1.2.0
 
 # DocuMaker (vendor/docmaker)
 faster-whisper==1.2.1
-scenedetect==0.7
+scenedetect==0.7.1
 opencv-python-headless==5.0.0.93
 imagehash==4.3.2
 
