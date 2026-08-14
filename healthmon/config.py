@@ -10,10 +10,24 @@ the token-gated checks as skipped rather than failed.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
+# Frozen by PyInstaller, `__file__` resolves inside the onefile extraction directory — a
+# temp folder that is deleted the moment the process exits. Writing history there would
+# throw away the whole point of keeping it ("the engine was down at 09:00 and up at 21:00"
+# can only be answered from history), and would silently do so, because each run would find
+# an empty file and carry on. So the frozen build keeps state beside the app's own data, and
+# looks for its .env next to the .exe where somebody can actually put one.
+FROZEN = getattr(sys, "frozen", False)
 ROOT = Path(__file__).resolve().parent
-STATE_DIR = Path(os.environ.get("HEALTHMON_STATE_DIR", ROOT / "state"))
+_EXE_DIR = Path(sys.executable).resolve().parent if FROZEN else ROOT
+_DEFAULT_STATE = (
+    Path(os.environ.get("APPDATA", Path.home())) / "mr-ai-marketer" / "healthmon"
+    if FROZEN else ROOT / "state"
+)
+
+STATE_DIR = Path(os.environ.get("HEALTHMON_STATE_DIR", _DEFAULT_STATE))
 HISTORY_PATH = STATE_DIR / "history.jsonl"
 REPORT_PATH = STATE_DIR / "report.html"
 
@@ -21,7 +35,7 @@ REPORT_PATH = STATE_DIR / "report.html"
 def _load_dotenv() -> None:
     """Reads healthmon/.env if present. Hand-rolled to keep this app dependency-light —
     it should be able to run on a bare Python with only `requests` available."""
-    env_file = ROOT / ".env"
+    env_file = _EXE_DIR / ".env"
     if not env_file.exists():
         return
     for line in env_file.read_text(encoding="utf-8").splitlines():

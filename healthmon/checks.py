@@ -315,45 +315,106 @@ def check_mail_tracker() -> tuple[str, str]:
 
 # --------------------------------------------------------------------------- modules
 
-# One cheap, parameterless GET per module. These prove the router is registered *and* its
-# dependencies answer — which is why they are preferred over reading the OpenAPI schema.
+# Every read surface the app has, one probe per capability rather than one per module.
+# These prove the router is registered *and* that its dependencies answer — which is why
+# they are preferred over reading the OpenAPI schema. All were confirmed to return 200 on an
+# unconfigured install and to cost single-digit milliseconds, so a daily run of the whole set
+# is cheap; the two that legitimately outrun the default budget carry their own timeout.
 MODULE_PROBES = [
-    # (label, path, timeout override). The Influencer DB computes facets across the whole
-    # bundled catalogue on a cold call, which legitimately outruns the default budget.
+    # (label, path, timeout override)
     ("Library", "/library"),
-    ("Marketing Plan", "/marketing-plan/industries"),
-    ("Brand Studio", "/brand-forge/meta"),
+    ("Queue", "/queue"),
+    ("Backup", "/backup"),
+
+    ("Marketing Plan · industries", "/marketing-plan/industries"),
+    ("Marketing Plan · models", "/marketing-plan/models"),
+
+    # meta is the Space's own descriptor; voices is the card list the other tools read;
+    # modal/status is the bring-your-own-GPU path, which fails independently of both.
+    ("Brand Studio · meta", "/brand-forge/meta"),
+    ("Brand Studio · voices", "/brand-forge/voices"),
+    ("Brand Studio · Modal", "/brand-forge/modal/status"),
+
     ("Topic Scout", "/topic-scout/options"),
+    # The Influencer DB computes facets across the whole bundled catalogue on a cold call.
     ("Influencer DB", "/influencer-db/facets", 90),
-    ("Social Post", "/social-post/status"),
-    ("Mastodon Post", "/mastodon-post/status"),
-    ("Distribution", "/distribution/channels"),
-    ("Mail", "/mail/status"),
-    ("Mail Tracking", "/mail-tracking/messages"),
-    ("Lead Gen", "/leadgen/status"),
+
+    ("Bluesky Post · status", "/social-post/status"),
+    ("Bluesky Post · niches", "/social-post/niches"),
+    ("Mastodon Post · status", "/mastodon-post/status"),
+    ("Mastodon Post · niches", "/mastodon-post/niches"),
+    # Both composers read this; it is served per platform and must answer for each.
+    ("Posting time · Bluesky", "/posting-time/recommendation?platform=bluesky"),
+    ("Posting time · Mastodon", "/posting-time/recommendation?platform=mastodon"),
+
+    ("Distribution · channels", "/distribution/channels"),
+
+    ("Mail · status", "/mail/status"),
+    ("Mail tracking · messages", "/mail-tracking/messages"),
+    ("Mail tracking · stats", "/mail-tracking/stats"),
+
+    ("Lead Gen · status", "/leadgen/status"),
+    ("Lead Gen · campaigns", "/leadgen/campaigns"),
+    ("Lead Gen · suppression", "/leadgen/suppression"),
+
     ("Engage", "/engage/status"),
-    ("Bluesky Analytics", "/bluesky-analytics/status"),
+    ("Bluesky Analytics · status", "/bluesky-analytics/status"),
+    ("Bluesky Analytics · cohort", "/bluesky-analytics/cohort"),
+    ("Bluesky Analytics · dashboard", "/bluesky-analytics/dashboard"),
+
     ("Tracker Studio", "/tracker/workbooks"),
-    ("Community", "/community/status"),
-    ("Settings", "/settings/social-post/schema"),
+
+    ("Community · status", "/community/status"),
+    ("Community · tiers", "/community/tiers"),
+    ("Community · members", "/community/members"),
+
+    ("Settings · social schema", "/settings/social-post/schema"),
+    ("Settings · leadgen schema", "/settings/leadgen/schema"),
     # Datasets and models are fetched from Hugging Face rather than bundled, so "is the
-    # catalogue actually here" is now a real thing to check.
+    # catalogue actually here" is a real thing to check.
     ("Hosted assets", "/settings/assets"),
 ]
 
-# Modules whose only routes are POST generation endpoints — there is nothing cheap to call
-# without doing real work. The health run proves they are *registered* (a router that fails
-# to import silently disappears from the app); the weekly end-to-end run exercises them.
-POST_ONLY_MODULES = [
-    ("Blog Writer", "/blog-writer/generate"),
-    ("Email Writer", "/email-writer/generate"),
-    ("Guest Post", "/guest-post/search"),
-    ("Tutorial Maker", "/tutorial-maker/generate"),
-    ("DocuMaker", "/docu-maker/generate"),
-    ("Hashtags", "/hashtags/suggest"),
-    # The account half of Community. Every route takes a Telegram session in the body, so
-    # there is nothing to call without signing in — registration is what can be checked.
-    ("Community account", "/community/account/status"),
+# Endpoints that only do work — generation, a crawl, a signed-in fediverse call. There is
+# nothing to GET, and calling them for real means paying for inference on every run.
+#
+# So they are probed by their CONTRACT instead: send a body the request model must reject
+# and require a 422 back. FastAPI validates before the handler is entered, so nothing is
+# generated, nothing is crawled and no token is spent — while still proving the router
+# loaded, its request model is intact, and the auth layer let the call through. That is
+# strictly more than the old "is the path in openapi.json" check established, and it costs
+# about a millisecond.
+#
+# `body` is chosen per endpoint: {} where the model has required fields, and a
+# deliberately mistyped payload where it does not (an empty body would be *valid* there,
+# and would run the very work this is avoiding). Verified against the live app: every one
+# of these returns 422 in under 0.1s.
+CONTRACT_PROBES = [
+    ("Blog Writer", "/blog-writer/generate", {}),
+    ("Email Writer", "/email-writer/generate", {}),
+    ("Tutorial Maker", "/tutorial-maker/generate", {}),
+    ("DocuMaker", "/docu-maker/generate", {}),
+    ("Guest Post", "/guest-post/search", {"site": 12345, "topic": []}),
+    ("Hashtag Suggester", "/hashtags/suggest", {"draft": 12345, "platform": []}),
+    # The account half of Community: every route needs a Telegram session in the body.
+    ("Community account", "/community/account/status", {}),
+    # Measuring an instance reads a server's public timeline, which is real traffic on
+    # somebody else's machine — not something to do to a stranger twice a day.
+    ("Posting time · measure", "/posting-time/measure", {}),
+]
+
+# Mastodon Engage is POST-only across all 13 of its routes and every one needs a live
+# session, so the whole module would otherwise go unchecked. These four are the ones the
+# panel cannot work without: reading a timeline, reading notifications, posting, and acting
+# on a status.
+CONTRACT_PROBES += [
+    (f"Mastodon Engage · {label}", path, {})
+    for label, path in [
+        ("timeline", "/mastodon-engage/timeline"),
+        ("notifications", "/mastodon-engage/notifications"),
+        ("compose", "/mastodon-engage/compose"),
+        ("status action", "/mastodon-engage/status-action"),
+    ]
 ]
 
 
@@ -368,12 +429,27 @@ def _module_probe(path: str, timeout: Optional[int] = None):
     return run
 
 
-def _registered_probe(path: str):
+def _contract_probe(path: str, body: dict):
+    """Assert an endpoint rejects an invalid request, without letting it do any work.
+
+    The 2xx branch is the important one. A success means the payload this probe sends as
+    *invalid* was accepted — so the request model has changed underneath it and the handler
+    just ran for real. On a generation endpoint that is a wasted inference call on every
+    scheduled run, and it would otherwise look like the healthiest result on the page.
+    """
     def run() -> tuple[str, str]:
-        schema = requests.get(f"{config.BACKEND_URL}/openapi.json", headers=config.api_headers(),
-                              timeout=config.DEFAULT_TIMEOUT).json()
-        return ("ok", "route registered") if path in schema.get("paths", {}) \
-            else ("fail", f"{path} missing from the API — router failed to load?")
+        resp = requests.post(f"{config.BACKEND_URL}{path}", json=body,
+                             headers=config.api_headers(), timeout=config.DEFAULT_TIMEOUT)
+        if resp.status_code == 422:
+            return "ok", "contract enforced (422)"
+        if resp.status_code == 404:
+            return "fail", "404 — router failed to load"
+        if resp.status_code in (401, 403):
+            return "fail", f"HTTP {resp.status_code} — monitor is not authenticated"
+        if resp.ok:
+            return "warn", (f"HTTP {resp.status_code} — invalid body was ACCEPTED; the probe "
+                            "ran the handler. Update its payload in CONTRACT_PROBES.")
+        return "fail", f"HTTP {resp.status_code}: {resp.text[:120]}"
 
     return run
 
@@ -382,7 +458,13 @@ def _registered_probe(path: str):
 
 
 def health_checks() -> list[Check]:
-    """The twice-daily set: everything, as cheaply as it can be established."""
+    """The daily set: every module and every capability, with no AI generation.
+
+    "Cheaply" here means no inference, no crawling and no writes — not shallow. Read
+    surfaces are called for real, and the work-only endpoints are held to their request
+    contract (see CONTRACT_PROBES), so a green run means every router in the app loaded,
+    answered, and enforced its own interface.
+    """
     checks = [
         Check("Backend API", "infra", check_backend),
         Check("WSL2 VM", "infra", check_wsl_running),
@@ -399,8 +481,8 @@ def health_checks() -> list[Check]:
                for label, space_id, critical in _watched_spaces()]
     checks += [Check(row[0], "module", _module_probe(row[1], row[2] if len(row) > 2 else None))
                for row in MODULE_PROBES]
-    checks += [Check(f"{label} (registered)", "module", _registered_probe(path))
-               for label, path in POST_ONLY_MODULES]
+    checks += [Check(f"{label} (contract)", "module", _contract_probe(path, body))
+               for label, path, body in CONTRACT_PROBES]
     return checks
 
 

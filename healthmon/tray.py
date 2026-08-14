@@ -70,6 +70,10 @@ TEMPLATE = {
     "notifyOnError": True,
     "spaces": {},
     "mailTrackerUrl": "",
+    # Once a day, also exercise every module the app exposes — see app_checks_due(). Kept to
+    # once a day because it is the app's whole API surface, and because nothing it finds
+    # changes faster than that. No generation is involved at any point.
+    "appChecksDaily": True,
 }
 
 
@@ -116,10 +120,17 @@ class State:
     results: list[Result] = field(default_factory=list)
     checked_at: str = ""
     checking: bool = False
+    # The calendar day the app-module sweep last ran, so it happens once a day regardless of
+    # how often the Space poll comes round. Its rows are held separately and re-shown on the
+    # Space polls in between, so the window never blanks the module verdict between sweeps.
+    app_checked_on: str = ""
+    app_checked_at: str = ""
+    app_rows: list[Result] = field(default_factory=list)
 
     @property
     def worst(self) -> str:
-        order = {"error": 3, "unreachable": 3, "asleep": 2, "starting": 1, "ok": 0}
+        order = {"error": 3, "unreachable": 3, "degraded": 2, "asleep": 1,
+                 "starting": 1, "ok": 0}
         return max((r.status for r in self.results), key=lambda s: order.get(s, 0), default="ok")
 
 
@@ -233,6 +244,75 @@ def run_checks(cfg: dict) -> list[Result]:
     return results
 
 
+# --------------------------------------------------------------- the app's own modules
+#
+# The tray used to watch only hosted Spaces, which is a fraction of what the app depends on.
+# Once a day it now also runs the full module sweep from checks.py: every router the backend
+# registers, every read surface called for real, and every work-only endpoint held to its
+# request contract. No generation, no crawling, no writes — see CONTRACT_PROBES for how the
+# generation endpoints are exercised without spending inference.
+
+# How a checks.py status reads on a tray built for Spaces. `skip` becomes "asleep" for the
+# same reason a sleeping Space is grey: a Lead Gen container that is idle because nobody has
+# opened Lead Gen is working as designed, and an icon that alarms at normal behaviour is one
+# you stop looking at.
+_APP_STATUS = {"ok": "ok", "warn": "degraded", "fail": "error", "skip": "asleep"}
+
+
+def app_checks_due(state: "State", cfg: dict) -> bool:
+    return bool(cfg.get("appChecksDaily", True)) and \
+        state.app_checked_on != datetime.now().strftime("%Y-%m-%d")
+
+
+def backend_is_up() -> bool:
+    """Whether the app is running at all.
+
+    Asked first, and separately, because this tray starts at login and the app usually is
+    not open. Without this the sweep would report every module as down every morning, which
+    is indistinguishable from a real outage and trains you to ignore the icon.
+    """
+    from . import config as hm_config
+
+    try:
+        return requests.get(f"{hm_config.BACKEND_URL}/health", timeout=4).ok
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def run_app_checks() -> list[Result]:
+    """The daily module sweep, folded down to one tray row per outcome.
+
+    Fifty-odd individual checks would bury the Spaces in the status window, so the detail
+    goes to the HTML report and history — which is where it is actually readable — and the
+    tray keeps a one-line verdict plus a named list of whatever is not ok.
+    """
+    from . import report, runner
+    from .checks import health_checks
+
+    if not backend_is_up():
+        return [Result("App modules", "asleep",
+                       "The app isn't running — its modules can only be checked while it is.")]
+
+    results = runner.run_all(health_checks())
+    entry = runner.record("health", results)
+    try:
+        report.write(entry, runner.load_history())
+    except Exception:  # noqa: BLE001 — a report that fails to render must not lose the run
+        log.exception("could not write the health report")
+
+    summary = entry.get("summary", {})
+    bad = [r for r in results if r.status in ("fail", "warn")]
+    worst = "error" if any(r.status == "fail" for r in results) else \
+        ("degraded" if bad else "ok")
+    detail = (f"{summary.get('ok', 0)} ok · {summary.get('warn', 0)} degraded · "
+              f"{summary.get('fail', 0)} down · {summary.get('skip', 0)} skipped")
+    rows = [Result("App modules", worst, detail)]
+    # Name what is wrong rather than making the report the only way to find out.
+    rows += [Result(f"  {r.name}"[:29], _APP_STATUS.get(r.status, "error"), r.detail[:110])
+             for r in sorted(bad, key=lambda r: (r.status != "fail", r.name))]
+    return rows
+
+
 # --------------------------------------------------------------------------- tray
 
 # Colour carries the whole status at a glance, so the meanings have to be worth trusting.
@@ -241,6 +321,7 @@ def run_checks(cfg: dict) -> list[Result]:
 _COLOURS = {
     "ok": (63, 125, 88),
     "starting": (201, 138, 43),
+    "degraded": (201, 138, 43),
     "asleep": (130, 130, 130),
     "error": (176, 58, 46),
     "unreachable": (176, 58, 46),
@@ -284,8 +365,10 @@ def _status_window(state: State) -> None:
         colour = "#%02x%02x%02x" % _COLOURS.get(r.status, _COLOURS["ok"])
         tk.Canvas(row, width=10, height=10, bg="#faf6ef", highlightthickness=0).pack(side="left")
         row.winfo_children()[-1].create_oval(1, 1, 9, 9, fill=colour, outline="")
+        # Wide enough for the indented module rows the daily sweep adds; a Space label is
+        # short, but "  Bluesky Analytics · cohort" is not, and tk clips rather than wraps.
         tk.Label(row, text=r.label, bg="#faf6ef", fg="#2f2a26",
-                 font=("Segoe UI", 10, "bold"), width=16, anchor="w").pack(side="left", padx=(8, 0))
+                 font=("Segoe UI", 10, "bold"), width=30, anchor="w").pack(side="left", padx=(8, 0))
         tk.Label(row, text=r.detail, bg="#faf6ef", fg="#5c554e",
                  font=("Segoe UI", 9), anchor="w").pack(side="left")
     if not state.results:
@@ -306,7 +389,14 @@ def _startup_command() -> str:
       working directory, so the module form dies with "No module named healthmon" — and
       with pythonw there is no console to see it in. The only symptom would be a tray icon
       that never appears. healthmon/cli.py hit exactly this with Task Scheduler.
+
+    Frozen, it is simply the .exe. The script path this would otherwise append lives in the
+    onefile extraction directory, which is deleted when the process exits — so the Run key
+    would point at a file that no longer exists by the time it is next read. Same silent
+    failure as above, one layer further in.
     """
+    if getattr(sys, "frozen", False):
+        return f'"{Path(sys.executable).resolve()}"'
     exe = Path(sys.executable)
     pyw = exe.with_name("pythonw.exe")
     launcher = Path(__file__).resolve().parent / "tray_run.py"
@@ -346,6 +436,7 @@ def main() -> int:
     state = State()
     stop = threading.Event()
     wake_now = threading.Event()
+    check_modules_now = threading.Event()
 
     if not (cfg.get("spaces") or {}):
         log.warning("no Spaces configured — edit %s", config_path())
@@ -357,7 +448,24 @@ def main() -> int:
         icon.title = "Space health — checking…"
         try:
             previous = {r.label: r.status for r in state.results}
-            state.results = run_checks(cfg)
+            results = run_checks(cfg)
+
+            # Once a day, and only after the Spaces are done, so the tray shows something
+            # useful while the longer sweep runs. `force` is the "Check modules now" menu
+            # item; otherwise it waits for the day to turn over.
+            if app_checks_due(state, cfg) or check_modules_now.is_set():
+                check_modules_now.clear()
+                icon.title = "Space health — checking the app's modules…"
+                app_rows = run_app_checks()
+                # Only a real sweep marks the day done; refusing to when the app was closed
+                # means the check still happens later, once it is open.
+                if not (len(app_rows) == 1 and app_rows[0].status == "asleep"):
+                    state.app_checked_on = datetime.now().strftime("%Y-%m-%d")
+                    state.app_checked_at = datetime.now().strftime("%H:%M")
+                state.app_rows = app_rows
+            results += state.app_rows
+
+            state.results = results
             state.checked_at = datetime.now().strftime("%H:%M")
             icon.icon = _icon_image(state.worst)
             summary = ", ".join(f"{r.label}: {r.status}" for r in state.results) or "nothing configured"
@@ -393,6 +501,18 @@ def main() -> int:
     def on_check(icon, _item) -> None:
         wake_now.set()
 
+    def on_check_modules(_icon, _item) -> None:
+        check_modules_now.set()
+        wake_now.set()
+
+    def on_report(_icon, _item) -> None:
+        from . import config as hm_config
+
+        if hm_config.REPORT_PATH.exists():
+            os.startfile(hm_config.REPORT_PATH)  # noqa: S606 — the user's own report
+        else:
+            _notify(_icon, "No report yet", "Run the module checks once and it will appear.")
+
     def on_wake_all(icon, _item) -> None:
         token = hf_token()
         for r in state.results:
@@ -422,8 +542,10 @@ def main() -> int:
 
     menu = pystray.Menu(
         pystray.MenuItem("Check now", on_check, default=True),
+        pystray.MenuItem("Check app modules now", on_check_modules),
         pystray.MenuItem("Wake / restart all", on_wake_all),
         pystray.MenuItem("Show status…", on_window),
+        pystray.MenuItem("Open the full report…", on_report),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Start at login", on_startup, checked=lambda _i: startup_enabled()),
         pystray.MenuItem("Edit configuration…", on_config),

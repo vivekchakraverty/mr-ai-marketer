@@ -1,8 +1,8 @@
 # healthmon
 
-A standalone monitor for Mr. AI Marketer. It checks the app's infrastructure, its Hugging
-Face Spaces and its in-app modules **twice a day**, and runs **end-to-end tests once a
-week**.
+A standalone monitor for Mr. AI Marketer. **Once a day** it exercises every module and every
+capability the app exposes — **without generating anything**. A separate on-demand mode runs
+real generation when you actually want to pay for it.
 
 It is deliberately separate from the app: nothing here imports the app's code. Every check
 probes the same surfaces a user's machine does — HTTP endpoints, the WSL/Docker runtime,
@@ -12,11 +12,11 @@ that the modules import cleanly.
 ## Running it
 
 ```bash
-python -m healthmon health     # the twice-daily set — everything, cheaply
+python -m healthmon health     # the daily set — every module, no generation
 ```
 
 ```bash
-python -m healthmon e2e        # the weekly set — real generation through real endpoints
+python -m healthmon e2e        # real generation through real endpoints, on demand
 ```
 
 Other modes: `report` re-renders the HTML from history without running anything,
@@ -36,11 +36,22 @@ name, the distribution engine, Lead Gen's SearXNG and Reacher, and both video-se
 **Hugging Face Spaces** — BrandForge, Blog Writer, Email Writer, the third-party YouTube
 search Space, and the mail-tracking Space.
 
-**In-app modules** — a cheap parameterless GET against each of the 15 modules that has one.
-The six that are POST-only generation endpoints (Blog Writer, Email Writer, Guest Post,
-Tutorial Maker, DocuMaker, Hashtags) are verified as *registered* in the health run — a
-router that fails to import silently disappears from the API — and exercised for real in
-the weekly run.
+**In-app modules** — one probe per *capability*, not per module, across every router the app
+registers. Read surfaces (statuses, lists, schemas, catalogues, the posting-time curve for
+both networks) are called for real.
+
+**Work-only endpoints** — generation, crawling and signed-in fediverse calls have nothing to
+GET, and calling them for real would spend inference on every run. They are held to their
+**request contract** instead: the probe sends a body the request model must reject and
+requires a `422` back. FastAPI validates before entering the handler, so nothing is
+generated, nothing is crawled and no token is spent — while still proving the router loaded,
+its request model is intact and auth let the call through. That is strictly more than the
+old "is this path in `openapi.json`" check proved, at about a millisecond each.
+
+If one of those probes ever returns a **2xx**, it is reported as degraded rather than
+passing: a success means the payload it sends as invalid was accepted, so the model changed
+underneath it and the handler just ran for real. Left as a pass, that would be a wasted
+inference call on every scheduled run wearing the greenest badge on the page.
 
 ## Configuration
 
@@ -63,20 +74,55 @@ decrypt. That is why the token is configured separately here.
 python -m healthmon install
 ```
 
-Registers two Windows scheduled tasks:
+Registers one Windows scheduled task:
 
-| Task | Cadence |
-| --- | --- |
-| `MrAIMarketer-HealthCheck` | daily at 09:00, repeating every 12h — i.e. 09:00 and 21:00 |
-| `MrAIMarketer-E2E` | weekly, Sunday 03:00 |
+| Task | Cadence | Generates? |
+| --- | --- | --- |
+| `MrAIMarketer-HealthCheck` | daily at 09:00 | no |
+| `MrAIMarketer-E2E` | weekly, Sunday 03:00 — only with `--with-e2e` | **yes, spends inference** |
+
+The daily run now covers every module and capability, so a second pass would re-establish
+the same facts. The generation run is the only thing here that costs money, which is why it
+is opt-in:
+
+```bash
+python -m healthmon install --with-e2e
+```
+
+Installing without that flag also *removes* an existing E2E task, so upgrading from the old
+two-task setup doesn't quietly leave a weekly generation job behind.
 
 Task Scheduler rather than a resident daemon, because a daemon would have to survive
-reboots, sleep and its own crashes to be trusted twice a day — and schtasks already does.
-The tasks run whether or not the app is open.
+reboots, sleep and its own crashes to be trusted daily — and schtasks already does. The task
+runs whether or not the app is open.
 
 Both are registered against the same interpreter that ran `install`, so the scheduled run
 can't drift onto a different Python. If creation fails on permissions, run it from an
 elevated prompt. `python -m healthmon uninstall` removes both.
+
+## Building the .exe
+
+```bash
+pyinstaller healthmon/healthmon.spec --noconfirm --distpath healthmon/dist --workpath healthmon/build
+```
+
+Produces `healthmon/dist/SpaceHealthMonitor.exe` (~45 MB, onefile, no console). It carries
+its own Python, so it runs on a machine with none — point a shortcut at it and nothing else
+is needed.
+
+Two things the spec has to get right, both of which fail quietly:
+
+- **The excludes.** It is built from `backend/.venv`, which holds torch, transformers and
+  chromadb for the app itself. Without cutting them explicitly, PyInstaller follows imports
+  transitively and bundles gigabytes of model stack into a tray icon that makes HTTP
+  requests. Nothing in `healthmon/` touches any of it.
+- **Where state goes.** Frozen, `__file__` resolves inside the onefile extraction directory,
+  which is deleted on exit — so `config.py` switches `STATE_DIR` to
+  `%APPDATA%\mr-ai-marketer\healthmon` when `sys.frozen` is set. Otherwise history would be
+  thrown away every run, silently, since each run would just find an empty file. The `.env`
+  is read from beside the `.exe` for the same reason.
+
+Running from source is unchanged: state stays in `healthmon/state/`.
 
 ## Output
 

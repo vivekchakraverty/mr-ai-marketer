@@ -1,14 +1,14 @@
 """Command line for the health monitor.
 
-    python -m healthmon health      # everything, cheaply — the twice-daily job
-    python -m healthmon e2e         # real generation through real endpoints — the weekly job
+    python -m healthmon health      # every module and capability, no generation — the daily job
+    python -m healthmon e2e         # real generation through real endpoints — on demand
     python -m healthmon report      # re-render the HTML from history, run nothing
-    python -m healthmon install     # register both Windows scheduled tasks
-    python -m healthmon uninstall   # remove them
+    python -m healthmon install     # register the daily task (add --with-e2e for the weekly one)
+    python -m healthmon uninstall   # remove both
 
 Scheduling uses Windows Task Scheduler rather than a resident daemon. A daemon would have
-to survive reboots, sleep and its own crashes to be trusted twice a day; schtasks already
-does all three, and it runs the check even if nothing else is open.
+to survive reboots, sleep and its own crashes to be trusted daily; schtasks already does all
+three, and it runs the check even if nothing else is open.
 """
 from __future__ import annotations
 
@@ -78,23 +78,32 @@ def _schtasks(args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(["schtasks", *args], capture_output=True, text=True)
 
 
-def install() -> int:
+def install(with_e2e: bool = False) -> int:
+    """Register the daily health task, and the generation task only if asked for.
+
+    One task, once a day. The health run now covers every module and every capability
+    without generating anything, so a second daily pass would re-establish the same facts,
+    and the weekly generation run is the only thing here that spends inference — which is
+    why it is opt-in rather than installed by default. `uninstall` still removes both, so a
+    previously scheduled E2E task is cleaned up whether or not this run created one.
+    """
     root = Path(__file__).resolve().parent.parent  # the directory containing healthmon/
-    print(f"working directory for both tasks: {root}\n")
+    print(f"working directory: {root}\n")
 
     specs = [
         (HEALTH_TASK, _task_command("health"),
-         ["/sc", "daily", "/st", "09:00", "/ri", "720", "/du", "24:00"],
-         "twice daily (09:00 and 21:00)"),
-        (E2E_TASK, _task_command("e2e"),
-         ["/sc", "weekly", "/d", "SUN", "/st", "03:00"],
-         "weekly (Sunday 03:00)"),
+         ["/sc", "daily", "/st", "09:00"],
+         "daily at 09:00 — all modules, no generation"),
     ]
+    if with_e2e:
+        specs.append(
+            (E2E_TASK, _task_command("e2e"),
+             ["/sc", "weekly", "/d", "SUN", "/st", "03:00"],
+             "weekly (Sunday 03:00) — real generation, spends inference")
+        )
 
     failed = False
     for name, command, when, human in specs:
-        # /ri with /du is how schtasks expresses "every N minutes within a window", which is
-        # the only way to get a second daily run out of one task definition.
         proc = _schtasks(["/create", "/tn", name, "/tr", command, *when, "/f"])
         if proc.returncode == 0:
             print(f"  installed  {name:32} {human}")
@@ -102,11 +111,17 @@ def install() -> int:
             failed = True
             print(f"  FAILED     {name:32} {(proc.stderr or proc.stdout).strip()[:160]}")
 
+    if not with_e2e:
+        # Removed rather than left behind: someone upgrading from the two-task setup would
+        # otherwise keep a weekly generation job they did not ask to keep.
+        proc = _schtasks(["/delete", "/tn", E2E_TASK, "/f"])
+        if proc.returncode == 0:
+            print(f"  removed    {E2E_TASK:32} pass --with-e2e to keep the weekly run")
+
     if failed:
         print("\nIf the failures mention access, run this from an elevated prompt.")
         return 1
-    print("\nBoth tasks are registered. Verify with:  schtasks /query /tn "
-          f"{HEALTH_TASK} /v /fo list")
+    print(f"\nRegistered. Verify with:  schtasks /query /tn {HEALTH_TASK} /v /fo list")
     return 0
 
 
@@ -125,11 +140,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("mode", choices=["health", "e2e", "report", "install", "uninstall"])
     parser.add_argument("--open", action="store_true", help="open the HTML report when done")
     parser.add_argument("--serial", action="store_true", help="run checks one at a time")
+    parser.add_argument("--with-e2e", action="store_true",
+                        help="install: also schedule the weekly generation run (spends inference)")
     args = parser.parse_args(argv)
     _force_utf8_stdout()
 
     if args.mode == "install":
-        return install()
+        return install(with_e2e=args.with_e2e)
     if args.mode == "uninstall":
         return uninstall()
     if args.mode == "report":

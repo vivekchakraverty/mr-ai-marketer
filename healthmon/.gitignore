@@ -1,2 +1,6 @@
 state/
 .env
+# PyInstaller output. The .exe is ~45MB and is a build artefact of healthmon.spec, which is
+# committed — a binary that large in a public repo is paid for on every clone, forever.
+build/
+dist/
