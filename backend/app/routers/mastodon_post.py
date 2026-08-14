@@ -46,6 +46,7 @@ each because Mastodon is different, not because this was written second.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -81,6 +82,48 @@ MIN_SETTLE_HOURS = 24
 # Same floor as the Bluesky tool's exemplar pool, for the same reason: below it,
 # engagement_rate is an artefact of dividing by a tiny number.
 MIN_FOLLOWERS = 50
+
+# How much engagement a settled post needs before it can be an exemplar.
+#
+# The pool takes the top TARGET_POOL_SIZE by score with no floor, which is fine while a
+# niche has more measured posts than slots and silently wrong once it has fewer: every
+# post gets in, including the ones nobody touched. Measured on the live corpus, 41 of 187
+# active Mastodon exemplars had *zero* interactions — 10 of the 15 in one niche — so the
+# generator was being shown posts that demonstrably did not work and told to write like
+# them. A thin pool of posts that earned something beats a full one padded with silence,
+# and an instance that drops below MIN_INSTANCE_EXEMPLARS already borrows from the wider
+# Mastodon pool rather than generating ungrounded, so shrinking is a handled outcome.
+#
+# Two rather than one: a single interaction is hard to tell from a self-boost or a passing
+# bot, and the median settled post in this corpus has exactly one.
+MIN_EXEMPLAR_INTERACTIONS = 2
+
+# Words a post must have left, once hashtags and URLs are removed, to be an exemplar.
+#
+# Exemplars are shown to the model as "write like this", so a hashtag wall teaches it to
+# emit hashtag walls. These clear the engagement floor easily — tag spam is engagement
+# bait and it works — so the floor alone does not catch them. Measured on the live corpus:
+# a threshold of 4 drops exactly the six tag-wall exemplars ("#paintings #art #artist
+# #painting #artistsoninstagram…") and nothing else, and touches 5% of stored posts.
+#
+# This also excludes genuinely short posts ("Shipped it!"). That is the right trade: a
+# three-word post is not a useful model for writing one either way.
+MIN_EXEMPLAR_PROSE_WORDS = 4
+
+# Follower count added to every denominator before ranking (NOT before storing).
+#
+# Raw interactions/followers is the right *measurement* and the wrong *ranking*: it is
+# dominated by whoever has fewest followers. Measured on the live mastodon.social corpus,
+# the five highest-rate posts had 5-23 interactions from 52-205 followers, while a post
+# with 158 interactions from 1,924 followers ranked below them — and the mean follower
+# count of chosen exemplars (487) sat *below* the corpus mean (729), which is the bias
+# stated plainly. Hashtag spam was winning slots on real niches.
+#
+# Adding a prior to the denominator scores every post as though its author had at least a
+# median-sized following, so a tiny account has to earn its place instead of being handed
+# it by division. 292 is that median, measured over the 601 Mastodon posts in the corpus.
+# It is deliberately not a magic number: recompute it if the corpus shifts substantially.
+RANKING_FOLLOWER_PRIOR = 292
 
 PLATFORM = "mastodon"
 
@@ -124,6 +167,22 @@ def _legacy_corpus_niche(niche: str) -> str:
     costs nothing and keeps existing installs grounded on the first post after updating.
     """
     return f"{niche} · mastodon"
+
+
+def _split_corpus_niche(key: str) -> tuple[str, str] | None:
+    """The inverse of `_corpus_niche`: (plain niche, host) from a namespaced key.
+
+    Returns None for the host-less keys `_legacy_corpus_niche` writes. Those rows
+    predate the split and carry no instance, so there is no pool to scope a rebuild
+    to — inventing one would be exactly the blending the namespacing exists to stop.
+
+    Matches the platform separator from the right rather than splitting on " · ",
+    because a niche name is user-supplied and may contain the separator itself.
+    """
+    head, sep, host = key.rpartition(f" · {PLATFORM} · ")
+    if sep and head and host:
+        return head, host
+    return None
 
 
 def _fallback_keys(niche: str, host: str) -> list[str]:
@@ -723,6 +782,50 @@ def _collect_niche(
     )
 
 
+_TAG_RE = re.compile(r"#\w+", re.UNICODE)
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def _prose_words(text: str) -> int:
+    """How many words remain once hashtags and links are taken out. See the constant."""
+    stripped = _URL_RE.sub(" ", _TAG_RE.sub(" ", text or ""))
+    return len(re.findall(r"\w+", stripped, re.UNICODE))
+
+
+def _smoothed_rate(interactions: int, followers: int) -> float:
+    """Engagement rate for *ranking*, with a follower prior in the denominator.
+
+    Deliberately not services.mastodon.engagement_rate, which stays exactly as it is.
+    That function is the stored measurement and matches the Bluesky tool's definition
+    so the two corpora remain comparable; this is only ever used to order candidates
+    within one instance's pool. Keeping them separate means the numbers the Analytics
+    screen shows are still the real ones. See RANKING_FOLLOWER_PRIOR.
+    """
+    return interactions / (max(followers, 0) + RANKING_FOLLOWER_PRIOR)
+
+
+def _follower_counts(dids: set[str]) -> dict[str, int]:
+    """Current follower count per author, from the corpus's own authors table."""
+    if not dids:
+        return {}
+    spg_db, _, _ = _spg()
+    client = spg_db.get_client()
+    out: dict[str, int] = {}
+    ordered = list(dids)
+    for i in range(0, len(ordered), 100):
+        rows = (
+            client.table("authors")
+            .select("did, follower_count")
+            .in_("did", ordered[i : i + 100])
+            .execute()
+            .data
+            or []
+        )
+        for row in rows:
+            out[row["did"]] = int(row["follower_count"] or 0)
+    return out
+
+
 def _rebuild_pool(niche: str, host: str) -> int:
     """Replace the niche's Mastodon exemplar pool from everything measured so far.
 
@@ -731,6 +834,13 @@ def _rebuild_pool(niche: str, host: str) -> int:
     by age, deactivate the old pool, insert the new one — minus the diversity
     de-duplication pass, which needs a much larger candidate set than a hashtag
     timeline produces to be worth its cost.
+
+    Two deliberate departures from the vendored job, both because a hashtag timeline
+    on a small instance yields far fewer measured posts than a Bluesky keyword search:
+    a post must clear MIN_EXEMPLAR_INTERACTIONS to be eligible at all, and ranking uses
+    _smoothed_rate rather than the stored engagement_rate. Without the first, a niche
+    with fewer measured posts than slots admits everything including posts with no
+    engagement; without the second, whoever has fewest followers wins.
     """
     spg_db, embeddings, _ = _spg()
     key = _corpus_niche(niche, host)
@@ -738,19 +848,23 @@ def _rebuild_pool(niche: str, host: str) -> int:
     now = spg_db.utcnow()
 
     posts = (
-        client.table("posts").select("uri, text, created_at").eq("niche", key).execute().data
+        client.table("posts")
+        .select("uri, text, created_at, author_did")
+        .eq("niche", key)
+        .execute()
+        .data
         or []
     )
     if not posts:
         return 0
 
     by_uri = {p["uri"]: p for p in posts}
-    rates: dict[str, float] = {}
+    counts: dict[str, int] = {}
     uris = list(by_uri)
     for i in range(0, len(uris), 100):
         rows = (
             client.table("engagement_snapshots")
-            .select("post_uri, engagement_rate")
+            .select("post_uri, likes, reposts, replies")
             .eq("window_label", "48h")
             .in_("post_uri", uris[i : i + 100])
             .execute()
@@ -758,14 +872,24 @@ def _rebuild_pool(niche: str, host: str) -> int:
             or []
         )
         for row in rows:
-            if row["engagement_rate"] is not None:
-                rates[row["post_uri"]] = float(row["engagement_rate"])
+            counts[row["post_uri"]] = (
+                (row["likes"] or 0) + (row["reposts"] or 0) + (row["replies"] or 0)
+            )
+
+    followers = _follower_counts({p["author_did"] for p in posts if p.get("author_did")})
 
     scored: list[tuple[float, dict]] = []
-    for uri, rate in rates.items():
+    for uri, interactions in counts.items():
         post = by_uri.get(uri)
         if not post or not (post.get("text") or "").strip():
             continue
+        # An exemplar has to be evidence the post worked, and nothing is not evidence.
+        if interactions < MIN_EXEMPLAR_INTERACTIONS:
+            continue
+        # ...and it has to be a piece of writing, not a wall of tags.
+        if _prose_words(post.get("text") or "") < MIN_EXEMPLAR_PROSE_WORDS:
+            continue
+        rate = _smoothed_rate(interactions, followers.get(post.get("author_did") or "", 0))
         scored.append((rate * _decay(_age_days(post.get("created_at"), now)), post))
 
     if not scored:
@@ -1368,13 +1492,18 @@ def _run_mastodon_snapshot() -> None:
 
     # A new 48h measurement can change which posts deserve a pool slot, so rebuild
     # the niches that just gained one. `key` is the namespaced name; _rebuild_pool
-    # takes the plain one.
+    # takes the plain niche and the instance, which both come back out of the key.
     for key in touched:
-        plain = key.rsplit(" · ", 1)[0]
+        split = _split_corpus_niche(key)
+        if split is None:
+            # A legacy, host-less key: fallback material only, with no pool of its own.
+            log.info("[mastodon-post] no instance in corpus key %r, nothing to rebuild", key)
+            continue
+        niche, host = split
         try:
-            _rebuild_pool(plain)
+            _rebuild_pool(niche, host)
         except Exception:  # noqa: BLE001 — one niche must not stop the rest
-            log.exception("[mastodon-post] could not rebuild the pool for %r", plain)
+            log.exception("[mastodon-post] could not rebuild the pool for %r", key)
 
 
 def _run_mastodon_collect() -> None:

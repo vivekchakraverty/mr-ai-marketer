@@ -447,9 +447,11 @@ export default function MastodonPost(): React.JSX.Element {
               onAdd={async (name, keywords) => {
                 // Niches are shared with the Bluesky tool — one list, two ways of filling
                 // it — so this is deliberately the Social Post endpoint and not a copy.
+                // Creating one also queues a first fill on both sides; the panel polls it.
                 await saveSocialNiche(name, keywords)
                 await refreshAll()
               }}
+              onRefresh={refreshAll}
             />
           )}
 
