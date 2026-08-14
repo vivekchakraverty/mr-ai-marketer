@@ -42,10 +42,14 @@ jobs:
       # reaches through app.routers.mastodon_post. It used to arrive transitively and
       # stopped, which is why this list is pinned to what the suite needs rather than
       # left to depend on somebody else's dependency graph.
+      # requests-oauthlib is imported by app/services/tumblr.py, which test_tumblr_post
+      # reaches through app.routers.tumblr_post. Tumblr's API is OAuth 1.0a, so the
+      # signing library is a hard import of the service module rather than something
+      # only the live path touches.
       - name: Install test dependencies
         run: >
           pip install pytest httpx fastapi "pydantic>=2" pillow
-          modal gradio_client python-docx requests
+          modal gradio_client python-docx requests requests-oauthlib
 
       - name: Run tests
         working-directory: backend
