@@ -5,7 +5,10 @@ so there is no sign-up screen for the user to see or click through. See the Dist
 Layer plan for the full architecture.
 """
 import json
+import logging
+import os
 import secrets
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -15,8 +18,55 @@ import requests
 
 from .. import config
 
+log = logging.getLogger(__name__)
+
 _CREDENTIALS_PATH = config.DATA_DIR / "activepieces_credentials.json"
-_FLOWS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "resources" / "activepieces" / "flows"
+
+
+def _resolve_flows_dir() -> Path:
+    """Where the channel flow templates live, in dev and once packaged.
+
+    This used to be a fixed four-levels-up walk from __file__, which is right in a source
+    checkout and wrong in the shipped app. PyInstaller rewrites __file__ to sit under
+    _MEIPASS — `resources/backend/_internal` in this build — so the walk landed on
+    `resources/backend/resources/activepieces/flows`, which does not exist, while the real
+    templates sit at `resources/activepieces/flows` alongside the backend rather than
+    inside it.
+
+    The failure was silent and looked like something else entirely: an empty directory
+    globs to nothing, ensure_flows_imported() returns {} rather than raising, and every
+    send then fails with "No flow imported for channel 'x'" — which reads as a missing or
+    unpublished flow even when Activepieces holds all ten, ENABLED. Hence candidates plus
+    a loud log rather than one clever path expression.
+    """
+    override = os.environ.get("ACTIVEPIECES_FLOWS_DIR", "").strip()
+    if override:
+        return Path(override)
+
+    here = Path(__file__).resolve()
+    # Source checkout: backend/app/services/x.py -> <repo>/resources/activepieces/flows
+    candidates = [here.parent.parent.parent.parent / "resources" / "activepieces" / "flows"]
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", here.parent))
+        candidates += [
+            # Packaged: <app>/resources/backend/_internal -> <app>/resources/activepieces/flows
+            base.parent.parent / "activepieces" / "flows",
+            # If a future spec ever bundles them inside the backend instead.
+            base / "resources" / "activepieces" / "flows",
+        ]
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+
+    log.error(
+        "[activepieces] no flow templates found; Distribute will refuse every channel. "
+        "Looked in: %s",
+        ", ".join(str(c) for c in candidates),
+    )
+    return candidates[0]
+
+
+_FLOWS_DIR = _resolve_flows_dir()
 
 _cached_token: Optional[str] = None
 _cached_project_id: Optional[str] = None
@@ -341,7 +391,21 @@ def trigger_webhook(channel: str, payload: dict) -> dict:
     get_flow_run/list_flow_runs_for with the run id to see the outcome)."""
     flow_id = get_flow_id(channel)
     if not flow_id:
-        raise ActivepiecesError(f"No flow imported for channel '{channel}'")
+        # Distinguish the two ways this happens. "No flow imported" is accurate when a
+        # template exists and its import failed, and actively misleading when the
+        # templates could not be found at all — which is a packaging fault, not a
+        # Distribute one, and sends you looking inside Activepieces where everything is
+        # fine. See _resolve_flows_dir.
+        if not _FLOWS_DIR.is_dir():
+            raise ActivepiecesError(
+                f"Flow templates are missing from this install — looked in {_FLOWS_DIR}. "
+                f"No channel can send until they are found."
+            )
+        known = sorted(p.stem for p in _FLOWS_DIR.glob("*.json"))
+        raise ActivepiecesError(
+            f"No flow imported for channel '{channel}'. Templates present: "
+            f"{', '.join(known) if known else 'none'}"
+        )
     try:
         resp = requests.post(f"{config.ACTIVEPIECES_URL}/api/v1/webhooks/{flow_id}", json=payload, timeout=20)
     except requests.RequestException as err:
