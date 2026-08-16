@@ -9,7 +9,9 @@
       "pieceName": "@activepieces/piece-webhook",
       "pieceVersion": "0.1.36",
       "triggerName": "catch_webhook",
-      "input": { "authType": "none" },
+      "input": {
+        "authType": "none"
+      },
       "propertySettings": {}
     },
     "nextAction": {
@@ -24,7 +26,8 @@
         "input": {
           "auth": "{{connections.linkedin}}",
           "text": "{{trigger.body.text}}",
-          "visibility": "PUBLIC"
+          "visibility": "PUBLIC",
+          "imageUrl": "{{trigger.body.imageUrl}}"
         },
         "propertySettings": {}
       }

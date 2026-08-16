@@ -1,4 +1,5 @@
 import json
+import os
 import logging
 import threading
 import time
@@ -506,9 +507,50 @@ class SendRequest(BaseModel):
         populate_by_name = True
 
 
+# How the engine addresses this backend. It runs in its own container, where 127.0.0.1 is
+# the container — `host.docker.internal` is mapped to the host in the compose file so an
+# attached image can actually be fetched. Overridable for a non-Docker deployment.
+ENGINE_HOST_BASE = os.environ.get(
+    "MRAIM_ENGINE_HOST_BASE", "http://host.docker.internal:8756"
+)
+
+# A scheduled send fetches its image when it runs, not when it is queued, so the link has
+# to outlive the wait. This margin is added on top of the delay.
+SHARE_LINK_MARGIN_SECONDS = 6 * 3600
+
+
+def _shareable_image_url(image_url: str, scheduled_at: Optional[str]) -> str:
+    """Turn the app's own /outputs URL into one the engine can fetch, if it is ours.
+
+    An image generated in a post creator lives on disk here and is served behind the
+    session token, which a container cannot send — so it is re-issued as a signed,
+    expiring link on a path that answers without the token (services/share_links.py).
+
+    Anything else is passed through untouched: a user pasting a public URL is naming a
+    picture that is already reachable, and rewriting that would be wrong.
+    """
+    from ..services import share_links
+
+    path = share_links.path_from_outputs_url(image_url)
+    if path is None:
+        return image_url
+
+    ttl = share_links.DEFAULT_TTL_SECONDS
+    if scheduled_at:
+        try:
+            when = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+            delay = (when - datetime.now(timezone.utc)).total_seconds()
+            ttl = max(ttl, int(delay) + SHARE_LINK_MARGIN_SECONDS)
+        except ValueError:
+            pass  # unparseable schedules already fall back to sending immediately
+    return share_links.url_for(path, ENGINE_HOST_BASE, ttl)
+
+
 def _payload_for(body: SendRequest) -> dict:
     payload = {"text": body.text}
-    for field in ("channelId", "pageId", "imageUrl", "to", "subject", "subreddit", "title"):
+    if body.imageUrl:
+        payload["imageUrl"] = _shareable_image_url(body.imageUrl, body.scheduledAt)
+    for field in ("channelId", "pageId", "to", "subject", "subreddit", "title"):
         value = getattr(body, field)
         if value is not None:
             payload[field] = value

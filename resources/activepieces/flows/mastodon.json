@@ -9,7 +9,9 @@
       "pieceName": "@activepieces/piece-webhook",
       "pieceVersion": "0.1.36",
       "triggerName": "catch_webhook",
-      "input": { "authType": "none" },
+      "input": {
+        "authType": "none"
+      },
       "propertySettings": {}
     },
     "nextAction": {
@@ -23,7 +25,8 @@
         "actionName": "post_status",
         "input": {
           "auth": "{{connections.mastodon}}",
-          "status": "{{trigger.body.text}}"
+          "status": "{{trigger.body.text}}",
+          "media": "{{trigger.body.imageUrl}}"
         },
         "propertySettings": {}
       }

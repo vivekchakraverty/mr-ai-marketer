@@ -9,7 +9,9 @@
       "pieceName": "@activepieces/piece-webhook",
       "pieceVersion": "0.1.36",
       "triggerName": "catch_webhook",
-      "input": { "authType": "none" },
+      "input": {
+        "authType": "none"
+      },
       "propertySettings": {}
     },
     "nextAction": {
@@ -19,11 +21,12 @@
       "type": "PIECE",
       "settings": {
         "pieceName": "@activepieces/piece-bluesky",
-        "pieceVersion": "0.1.5",
+        "pieceVersion": "0.1.7",
         "actionName": "createPost",
         "input": {
           "auth": "{{connections.bluesky}}",
-          "text": "{{trigger.body.text}}"
+          "text": "{{trigger.body.text}}",
+          "imageUrls": "{{trigger.body.imageUrl}}"
         },
         "propertySettings": {}
       }

@@ -13,6 +13,20 @@ services:
     image: activepieces/activepieces:0.86.2
     container_name: mr-ai-marketer-activepieces
     restart: unless-stopped
+    # The engine attaches images by fetching them, and the only copy lives on the Windows
+    # host under the backend's outputs directory. The link it fetches is signed and
+    # expires (backend services/share_links.py); this only makes the host addressable.
+    #
+    # NOT `host-gateway`, which is the obvious answer and the wrong one here. This stack
+    # runs on a bare Docker Engine inside WSL2, not Docker Desktop, so `host-gateway`
+    # resolves to the *Ubuntu VM's* bridge address — measured: 172.17.0.1, which answers
+    # nothing. The Windows host is a different machine to this container, reachable at the
+    # WSL adapter's address, which is assigned per boot and so has to be injected.
+    # electron/src/main/activepieces.ts writes it into the generated env file alongside
+    # the encryption keys; verified end to end by fetching a signed link from inside a
+    # container at that address.
+    extra_hosts:
+      - "host.docker.internal:${WSL_HOST_IP:-host-gateway}"
     ports:
       # Loopback only. Docker publishes on 0.0.0.0 by default, and WSL2 forwards that to the
       # Windows host's interfaces — which put this container's web UI on the local network.

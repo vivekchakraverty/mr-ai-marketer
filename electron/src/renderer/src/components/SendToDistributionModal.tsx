@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fetchDistributionChannels, sendToDistribution, type DistributionJob } from '../api/client'
+import { useAppStore } from '../state/store'
+import BackendImage from './BackendImage'
 import { PLATFORM_SETUP_GUIDES } from '../state/platformSetupGuides'
 import { label, primaryButton, secondaryButtonSmall, tag, textInput, textarea } from '../styles/styleKit'
 
@@ -59,9 +61,31 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
     setSelected((cur) => (cur.includes(channel) ? cur.filter((c) => c !== channel) : [...cur, channel]))
   }
 
+  // Images generated in the post creators file themselves in the Library with the PNG
+  // beside them, so the ones worth attaching are already on the shelf — no separate
+  // picker state, and no second place for them to live.
+  const library = useAppStore((st) => st.library)
+  const recentImages = library
+    .filter((i) => /\.(png|jpe?g|webp)$/i.test(i.output_path ?? ''))
+    .slice(0, 8)
+    .map((i) => {
+      const p = (i.output_path ?? '').split('\\').join('/')
+      return { title: i.title, url: '/outputs/' + p.split('/outputs/').slice(1).join('/outputs/') }
+    })
+
   const needsChannelId = selected.includes('discord') || selected.includes('discord-conversation')
   const needsPageId = selected.includes('facebook') || selected.includes('instagram')
   const needsImageUrl = selected.includes('instagram')
+  // Channels whose flow template actually binds an image prop. Verified against the
+  // Activepieces piece registry: bluesky imageUrls, mastodon media, linkedin imageUrl,
+  // discord files, instagram photo. Anything else silently ignores the attachment, so it
+  // is named here rather than implied.
+  // A /outputs URL names a file on this machine; the engine is in a container that
+  // cannot reach it yet. A pasted public URL is fine.
+  const isLocalImage = imageUrl.startsWith('/outputs/')
+  const imageChannels = selected.filter((c) =>
+    ['bluesky', 'mastodon', 'linkedin', 'discord', 'instagram'].includes(c)
+  )
   const needsEmail = selected.includes('email')
   const needsReddit = selected.includes('reddit')
 
@@ -71,6 +95,8 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
     if (needsChannelId && !channelId.trim()) return 'Discord channel ID is required.'
     if (needsPageId && !pageId.trim()) return 'Page ID is required.'
     if (needsImageUrl && !imageUrl.trim()) return 'Instagram needs an image URL.'
+    if (isLocalImage)
+      return 'That image lives on this machine and the posting engine cannot fetch it yet. Paste a public image URL, or clear the image.'
     if (needsEmail && (!to.trim() || !from.trim())) return 'Email needs both To and From addresses.'
     if (needsReddit && (!subreddit.trim() || !redditTitle.trim())) return 'Reddit needs a subreddit and a post title.'
     if (schedule) {
@@ -95,7 +121,7 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
         text,
         channelId: needsChannelId ? channelId : undefined,
         pageId: needsPageId ? pageId : undefined,
-        imageUrl: needsImageUrl ? imageUrl : undefined,
+        imageUrl: imageUrl.trim() || undefined,
         to: needsEmail ? to : undefined,
         from: needsEmail ? from : undefined,
         subject: needsEmail ? subject : undefined,
@@ -201,10 +227,62 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
                 <input value={pageId} onChange={(e) => setPageId(e.target.value)} style={textInput} />
               </div>
             )}
-            {needsImageUrl && (
+            {(imageChannels.length > 0 || needsImageUrl) && (
               <div style={{ marginBottom: 14 }}>
-                <label style={label}>Image URL</label>
-                <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} style={textInput} placeholder="https://…" />
+                <label style={label}>
+                  Image {needsImageUrl ? '(required by Instagram)' : '(optional)'}
+                </label>
+                {recentImages.length > 0 && (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '6px 0 8px' }}>
+                    {recentImages.map((img) => (
+                      <div
+                        key={img.url}
+                        title={img.title}
+                        onClick={() => setImageUrl(imageUrl === img.url ? '' : img.url)}
+                        style={{
+                          width: 74,
+                          height: 74,
+                          borderRadius: 10,
+                          overflow: 'hidden',
+                          cursor: 'pointer',
+                          border:
+                            imageUrl === img.url
+                              ? '3px solid var(--accent)'
+                              : '2px solid var(--border)'
+                        }}
+                      >
+                        <BackendImage
+                          url={img.url}
+                          alt={img.title}
+                          saveable={false}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <input
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                  style={textInput}
+                  placeholder="Pick one above, or paste a public image URL"
+                />
+                <div
+                  style={{
+                    font: "600 11.5px/1.5 'Quicksand'",
+                    color: isLocalImage ? 'var(--danger-ink)' : 'var(--ink-faint)',
+                    marginTop: 5
+                  }}
+                >
+                  {/* An image from this machine cannot be fetched by the engine yet — it
+                      runs in its own container and the backend only listens on loopback.
+                      Saying so beats a flow that fails with a download error. */}
+                  {isLocalImage
+                    ? 'Images generated here cannot be attached yet — the posting engine cannot reach this machine. Paste a public image URL instead, or send as text.'
+                    : imageUrl
+                      ? `Will be attached on ${imageChannels.join(', ') || 'no selected channel'}.`
+                      : 'Posts go out as text only unless you add one.'}
+                </div>
               </div>
             )}
             {needsEmail && (
