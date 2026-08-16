@@ -51,6 +51,27 @@ def get_library_item(item_id: str) -> dict:
     return item
 
 
+class UpdateRequest(BaseModel):
+    #: Omitted fields are left alone, so an autosaving editor can send content by itself.
+    content: str | None = None
+    title: str | None = None
+
+
+@router.patch("/{item_id}")
+def update_library_item(item_id: str, body: UpdateRequest) -> dict:
+    """Edit a saved item. This is what the Library's editor autosaves into.
+
+    Content is stored exactly as typed, including trailing whitespace and empty strings:
+    the save path strips and rejects blank input because it is deciding whether there is
+    anything worth keeping, but by the time an item exists that judgement has been made,
+    and clearing a box the user deliberately emptied is not this endpoint's call.
+    """
+    updated = db.update_item(item_id, content=body.content, title=body.title)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"item": updated}
+
+
 @router.delete("/{item_id}")
 def delete_library_item(item_id: str) -> dict:
     if not db.get_item(item_id):

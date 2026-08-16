@@ -172,6 +172,19 @@ export function deleteLibraryItem(id: string): Promise<{ deleted: string }> {
   return deleteJson(`/library/${id}`)
 }
 
+/**
+ * Edit a saved item in place. What the Library's editor autosaves into.
+ *
+ * Fields left undefined are not touched, so a content autosave cannot blank a title
+ * it never had an opinion about.
+ */
+export function updateLibraryItem(
+  id: string,
+  changes: { content?: string; title?: string }
+): Promise<{ item: LibraryItem }> {
+  return patchJson(`/library/${id}`, changes)
+}
+
 // --- Backups ---------------------------------------------------------------
 
 export interface BackupEntry {

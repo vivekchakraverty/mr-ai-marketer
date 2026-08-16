@@ -94,6 +94,8 @@ interface AppState {
   openSettings: () => void
   closeSettings: () => void
   setLibrary: (items: LibraryItem[]) => void
+  /** Apply an edit locally, so the shelf and the open reader agree without a refetch. */
+  patchLibraryItem: (id: string, changes: Partial<LibraryItem>) => void
   setLibraryLoading: (loading: boolean) => void
 
   requireHf: () => boolean
@@ -201,6 +203,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
   setLibrary: (items) => set({ library: items }),
+  patchLibraryItem: (id, changes) =>
+    set((state) => ({
+      library: state.library.map((i) => (i.id === id ? { ...i, ...changes } : i)),
+      // The reader holds its own snapshot; without this the card updates and the
+      // open document does not.
+      readerItem:
+        state.readerItem && state.readerItem.id === id
+          ? { ...state.readerItem, ...changes }
+          : state.readerItem
+    })),
   setLibraryLoading: (loading) => set({ libraryLoading: loading }),
 
   requireHf: () => {

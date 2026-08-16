@@ -306,6 +306,41 @@ def count_items() -> int:
         return conn.execute("SELECT COUNT(*) FROM library").fetchone()[0]
 
 
+def update_item(item_id: str, *, content: Optional[str] = None, title: Optional[str] = None):
+    """Edit a saved item in place. Returns the updated row, or None if it is gone.
+
+    Only the fields passed are touched, so an autosaving editor can send content alone
+    without having to round-trip the title it is not changing.
+
+    `created_at` is deliberately left as it was: it is when the thing was generated, and
+    the Library is sorted by it. Bumping it on every keystroke-batch would make an item
+    jump to the top of the shelf while its author was still typing into it.
+
+    A file at output_path is not rewritten. That document belongs to the tool that
+    produced it, and this column is the note about it — silently editing one to match the
+    other would be a guess about which the user meant.
+    """
+    sets: list[str] = []
+    values: list[str] = []
+    if content is not None:
+        sets.append("content = ?")
+        values.append(content)
+    if title is not None:
+        sets.append("title = ?")
+        values.append(title)
+    if not sets:
+        return get_item(item_id)
+
+    with _connect() as conn:
+        cursor = conn.execute(
+            f"UPDATE library SET {', '.join(sets)} WHERE id = ?", (*values, item_id)
+        )
+        if cursor.rowcount == 0:
+            return None
+        row = conn.execute("SELECT * FROM library WHERE id = ?", (item_id,)).fetchone()
+        return dict(row) if row else None
+
+
 def delete_item(item_id: str) -> None:
     """Remove one Library entry. The file at output_path, if any, is left alone — it is the
     user's document, and deleting the note about it should not delete it."""
