@@ -1,6 +1,6 @@
 import secrets
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -46,6 +46,13 @@ app = FastAPI(title="Mr. AI Marketer backend")
 # API surface, which is public in this repo anyway.
 _OPEN_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"})
 
+# The one prefix that answers without the session token, because the caller cannot send it:
+# the Distribute engine runs in its own container and fetches an image by URL to attach it
+# to a post. Everything under it is signed and expiring and names exactly one file inside
+# OUTPUTS_DIR — see services/share_links.py. It is a prefix rather than a member of
+# _OPEN_PATHS only because the token is part of the path.
+_OPEN_PREFIXES = ("/shared/",)
+
 # The header the renderer sends. A custom name rather than Authorization so it can never be
 # confused with a credential for one of the upstream services this app talks to.
 API_TOKEN_HEADER = "x-mraim-token"
@@ -68,7 +75,11 @@ async def require_local_token(request: Request, call_next):
     """
     if not config.API_TOKEN:
         return await call_next(request)  # dev mode; see the warning printed at startup
-    if request.method == "OPTIONS" or request.url.path in _OPEN_PATHS:
+    if (
+        request.method == "OPTIONS"
+        or request.url.path in _OPEN_PATHS
+        or request.url.path.startswith(_OPEN_PREFIXES)
+    ):
         return await call_next(request)
     supplied = request.headers.get(API_TOKEN_HEADER, "")
     # compare_digest, not ==, so a wrong token cannot be narrowed down by timing.
@@ -225,3 +236,25 @@ app.include_router(tracker.router)
 # them over http://127.0.0.1:<port>/outputs/... instead of file:// (unreliable from a
 # renderer whose origin is the Vite dev server in dev mode).
 app.mount("/outputs", StaticFiles(directory=str(config.OUTPUTS_DIR)), name="outputs")
+
+
+@app.get("/shared/{token:path}")
+def shared_file(token: str):
+    """One generated file, by signed link, without the session token.
+
+    This is how the Distribute engine attaches an image: it runs in its own container, so
+    it cannot send the header the renderer sends, and a post with a picture needs a URL
+    the engine itself can fetch. The link is signed, expiring and names one path inside
+    OUTPUTS_DIR — see services/share_links.py for why it is shaped that way.
+
+    A bad, expired, forged or out-of-bounds token is all one answer: 404. Distinguishing
+    them would tell an unauthenticated caller which files exist.
+    """
+    from fastapi.responses import FileResponse
+
+    from .services import share_links
+
+    path = share_links.resolve(token)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(path)
