@@ -715,21 +715,92 @@ export function generateSocialPost(
   return postJson('/social-post/generate', { userInput, niche, platform, sourceUrl, avoidTexts, brandVoiceId })
 }
 
-export async function generateSocialPostImage(
+/** A suggested image direction, for the user to read and edit before anything is drawn. */
+export interface ImagePromptSuggestion {
+  prompt: string
+  /** 'model' when a language model wrote it, 'template' when the fallback did. */
+  source: 'model' | 'template'
+  /** Why the fallback was used, when it was. Empty otherwise. */
+  note: string
+  width: number
+  height: number
+}
+
+/**
+ * Image generation is deliberately two calls, not one.
+ *
+ * The backend refuses to draw a prompt it was not given, so there is no path — here or
+ * anywhere else — that renders text the user has not seen. Suggest, let them edit,
+ * then draw exactly what they approved.
+ */
+export function suggestSocialImagePrompt(
   postText: string,
   niche: string,
   platform: string
+): Promise<ImagePromptSuggestion> {
+  return window.api.settings
+    .getAll()
+    .then((settings) =>
+      postJson<ImagePromptSuggestion>('/social-post/image-prompt', {
+        postText,
+        niche,
+        platform,
+        hfToken: settings.hfToken
+      })
+    )
+}
+
+export async function generateSocialPostImage(
+  postText: string,
+  niche: string,
+  platform: string,
+  prompt: string
 ): Promise<SocialGeneratedImage> {
   const settings = await window.api.settings.getAll()
   return postJson('/social-post/images', {
     postText,
     niche,
     platform,
+    prompt,
     hfToken: settings.hfToken,
     modalTokenId: settings.brandForge.modalTokenId,
     modalTokenSecret: settings.brandForge.modalTokenSecret,
     useModal: Boolean(settings.brandForge.modalProvisionedAt.trim())
   })
+}
+
+async function imageCredentials(): Promise<Record<string, unknown>> {
+  const settings = await window.api.settings.getAll()
+  return {
+    hfToken: settings.hfToken,
+    modalTokenId: settings.brandForge.modalTokenId,
+    modalTokenSecret: settings.brandForge.modalTokenSecret,
+    useModal: Boolean(settings.brandForge.modalProvisionedAt.trim())
+  }
+}
+
+export async function suggestMastodonImagePrompt(
+  postText: string,
+  niche: string
+): Promise<ImagePromptSuggestion> {
+  const settings = await window.api.settings.getAll()
+  return postJson('/mastodon-post/image-prompt', { postText, niche, hfToken: settings.hfToken })
+}
+
+export async function generateMastodonImage(prompt: string): Promise<SocialGeneratedImage> {
+  return postJson('/mastodon-post/images', { prompt, ...(await imageCredentials()) })
+}
+
+export async function suggestTumblrImagePrompt(
+  postText: string,
+  niche: string
+): Promise<ImagePromptSuggestion> {
+  const settings = await window.api.settings.getAll()
+  return postJson('/tumblr-post/image-prompt', { postText, niche, hfToken: settings.hfToken })
+}
+
+export async function generateTumblrImage(prompt: string): Promise<SocialGeneratedImage> {
+  return postJson('/tumblr-post/images', { prompt, ...(await imageCredentials()) })
 }
 
 export function markSocialPublished(

@@ -46,7 +46,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from ..services import brand_voice, tumblr as tumblr_api, tumblr_corpus
+from ..services import brand_voice, image_prompt, tumblr as tumblr_api, tumblr_corpus
 from ..services.genqueue import queue_slot
 from ..services.tumblr import TumblrError
 
@@ -967,6 +967,82 @@ def generate(body: GenerateRequest) -> GenerateResponse:
         provider=spg_llm.provider(),
         model=spg_llm.model_name(),
     )
+
+
+# ---------------------------------------------------------------------------
+# Companion image
+#
+# The prompt is suggested, shown, and only drawn once the user has approved it —
+# see services/image_prompt.py. Deliberately two calls rather than one: an image
+# decided by text nobody read is an image nobody can fix.
+# ---------------------------------------------------------------------------
+
+
+class ImagePromptRequest(BaseModel):
+    postText: str
+    niche: str = ""
+    hfToken: str = ""
+
+
+class ImagePromptResponse(BaseModel):
+    prompt: str
+    #: "model" when a language model wrote it, "template" when the fallback did.
+    source: str
+    note: str
+    width: int
+    height: int
+
+
+class GenerateImageRequest(BaseModel):
+    #: The prompt the user reviewed and approved. Required.
+    prompt: str
+    hfToken: str = ""
+    modalTokenId: str = ""
+    modalTokenSecret: str = ""
+    useModal: bool = False
+
+
+class GenerateImageResponse(BaseModel):
+    url: str
+    promptUsed: str
+    width: int
+    height: int
+
+
+@router.post("/image-prompt", response_model=ImagePromptResponse)
+def suggest_image_prompt(body: ImagePromptRequest) -> ImagePromptResponse:
+    """Propose an image direction for a draft, for the user to edit before drawing."""
+    result = image_prompt.suggest(body.postText, body.niche, PLATFORM, body.hfToken)
+    width, height = image_prompt.dimensions_for(PLATFORM)
+    return ImagePromptResponse(
+        prompt=result.prompt, source=result.source, note=result.note, width=width, height=height
+    )
+
+
+@router.post(
+    "/images", response_model=GenerateImageResponse, dependencies=[Depends(queue_slot("image"))]
+)
+def generate_image(body: GenerateImageRequest) -> GenerateImageResponse:
+    """Draw the approved prompt. Refuses an empty one rather than inventing a fallback."""
+    prompt = body.prompt.strip()
+    if not prompt:
+        raise HTTPException(
+            status_code=400,
+            detail="Ask for a prompt suggestion and approve it before generating an image.",
+        )
+    try:
+        url, width, height = image_prompt.render(
+            prompt,
+            PLATFORM,
+            body.hfToken,
+            tool='tumblr',
+            use_modal=body.useModal,
+            modal_token_id=body.modalTokenId,
+            modal_token_secret=body.modalTokenSecret,
+        )
+    except image_prompt.ImageRenderError as err:
+        raise HTTPException(status_code=502, detail=str(err)) from err
+    return GenerateImageResponse(url=url, promptUsed=prompt, width=width, height=height)
 
 
 # ---------------------------------------------------------------------------

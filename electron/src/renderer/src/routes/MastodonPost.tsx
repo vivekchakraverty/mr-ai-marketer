@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react'
 import {
   acceptMastodonPolicy,
   collectMastodonNiche,
+  generateMastodonImage,
   generateMastodonPost,
   getMastodonPolicy,
   getMastodonStatus,
   listMastodonNiches,
   saveSocialNiche,
   markMastodonPublished,
+  suggestMastodonImagePrompt,
   revokeMastodonPolicy,
   type MastodonCollectResponse,
   type MastodonGenerateResponse,
@@ -23,6 +25,7 @@ import BrandVoiceSelect from '../components/BrandVoiceSelect'
 import NichePanel from '../components/NichePanel'
 import HashtagSuggester from '../components/HashtagSuggester'
 import PostingTimePanel from '../components/PostingTimePanel'
+import PostImagePanel from '../components/PostImagePanel'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import SaveButton from '../components/SaveButton'
 
@@ -471,6 +474,14 @@ export default function MastodonPost(): React.JSX.Element {
               linked={linked}
               onLink={handleLink}
               instance={policy.instance}
+            />
+          )}
+
+          {result && (
+            <PostImagePanel
+              postText={result.text}
+              onSuggest={() => suggestMastodonImagePrompt(result.text, fields.niche)}
+              onGenerate={(prompt) => generateMastodonImage(prompt)}
             />
           )}
 

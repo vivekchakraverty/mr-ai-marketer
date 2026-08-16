@@ -4,8 +4,10 @@ import {
   generateTumblrPost,
   getTumblrPostStatus,
   importTumblrCorpus,
+  generateTumblrImage,
   markTumblrPublished,
   measureTumblrPosts,
+  suggestTumblrImagePrompt,
   type TumblrDraft,
   type TumblrImportResult,
   type TumblrPostStatus
@@ -13,6 +15,7 @@ import {
 import { useAppStore } from '../state/store'
 import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, textInput } from '../styles/styleKit'
 import BrandVoiceSelect from '../components/BrandVoiceSelect'
+import PostImagePanel from '../components/PostImagePanel'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 
 /**
@@ -421,6 +424,14 @@ export default function TumblrPost(): React.JSX.Element {
               </details>
             </Card>
           </div>
+        )}
+
+        {result && (
+          <PostImagePanel
+            postText={result.text}
+            onSuggest={() => suggestTumblrImagePrompt(result.text, result.niche)}
+            onGenerate={(prompt) => generateTumblrImage(prompt)}
+          />
         )}
 
         {error && (

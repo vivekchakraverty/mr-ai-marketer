@@ -17,23 +17,18 @@ starts with the backend. It is inert until the user has configured credentials.
 
 from __future__ import annotations
 
-import io
 import logging
 import threading
 import time
-import uuid
 from datetime import timedelta
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..services import brand_voice, niche_firstfill
+from ..services import brand_voice, image_prompt, niche_firstfill
 from ..services.genqueue import queue_slot
-from PIL import Image
 from pydantic import BaseModel
 
 from .. import config, db
-from ..brandforge.client import BrandForgeError, text_to_image
 
 log = logging.getLogger(__name__)
 
@@ -139,6 +134,23 @@ class GenerateResponse(BaseModel):
     source: SourceOut | None = None
 
 
+class ImagePromptRequest(BaseModel):
+    postText: str
+    niche: str = ""
+    platform: str = "bluesky"
+    hfToken: str = ""
+
+
+class ImagePromptResponse(BaseModel):
+    prompt: str
+    #: "model" when a language model wrote it, "template" when the fallback did.
+    source: str
+    #: Why the fallback was used, when it was. Empty otherwise.
+    note: str
+    width: int
+    height: int
+
+
 class GenerateImageRequest(BaseModel):
     postText: str
     niche: str = ""
@@ -147,6 +159,9 @@ class GenerateImageRequest(BaseModel):
     modalTokenId: str = ""
     modalTokenSecret: str = ""
     useModal: bool = False
+    #: The prompt the user reviewed and approved. Required — there is deliberately no
+    #: server-side fallback that would draw something nobody looked at.
+    prompt: str
 
 
 class GenerateImageResponse(BaseModel):
@@ -507,57 +522,6 @@ def _bsky_web_url(at_uri: str) -> str:
         return ""
 
 
-_SOCIAL_IMAGE_DIMENSIONS: dict[str, tuple[int, int]] = {
-    "bluesky": (1200, 672),
-    "x": (1200, 672),
-    "linkedin": (1200, 1200),
-    "mastodon": (1024, 1024),
-}
-
-
-def _social_image_prompt(post_text: str, niche: str, platform: str) -> str:
-    """Turn a post draft into an image direction without asking the model for text.
-
-    Image models remain unreliable at typesetting. The composer therefore gets a
-    clear visual that communicates the post's idea, with deliberately calm space
-    for a marketer to add a real headline afterwards.
-    """
-    return " ".join(
-        part
-        for part in (
-            "Create an original editorial social-media image for a marketing post.",
-            f"Platform: {platform}.",
-            f"Audience niche: {niche}." if niche.strip() else "",
-            "Communicate the post's central idea visually with a polished, specific composition.",
-            "No lettering, no logo, no watermark, no UI mockup, no collage of screenshots.",
-            "Leave a calm, uncluttered focal area suitable for real text to be added later.",
-            f"Post to illustrate: {post_text.strip()[:1800]}",
-        )
-        if part
-    )
-
-
-def _social_image_path() -> Path:
-    run_dir = config.OUTPUTS_DIR / "social" / str(uuid.uuid4())
-    run_dir.mkdir(parents=True, exist_ok=True)
-    return run_dir / "post-image.png"
-
-
-def _outputs_url(path: Path) -> str:
-    return "/outputs/" + path.resolve().relative_to(config.OUTPUTS_DIR.resolve()).as_posix()
-
-
-def _modal_runtime():
-    try:
-        from ..brandforge import modal_runtime
-    except ImportError as err:
-        raise HTTPException(
-            status_code=500,
-            detail="The Modal SDK isn't installed in this build, so a personal GPU backend can't be used.",
-        ) from err
-    return modal_runtime
-
-
 @router.post("/generate", response_model=GenerateResponse, dependencies=[Depends(queue_slot("model"))])
 def generate(body: GenerateRequest) -> GenerateResponse:
     if not body.userInput.strip():
@@ -640,43 +604,49 @@ def generate_image(body: GenerateImageRequest) -> GenerateImageResponse:
     Modal is selected after Settings has successfully provisioned it. The HF
     provider remains available before that, matching BrandForge's behavior.
     """
-    if not body.postText.strip():
-        raise HTTPException(status_code=400, detail="Generate or paste a post before creating its image.")
-    if not body.hfToken.strip():
-        raise HTTPException(status_code=400, detail="Please connect your Hugging Face account in Settings.")
+    # No prompt, no picture. This endpoint used to build the prompt itself and draw
+    # immediately, which meant the image was decided by text the user never saw; the
+    # prompt is now reviewed and approved first, and refusing here is what makes that
+    # a rule rather than a habit of the current UI.
+    prompt = body.prompt.strip()
+    if not prompt:
+        raise HTTPException(
+            status_code=400,
+            detail="Ask for a prompt suggestion and approve it before generating an image.",
+        )
     if body.platform not in PLATFORMS:
         raise HTTPException(status_code=400, detail=f"Unknown platform: {body.platform}")
 
-    prompt = _social_image_prompt(body.postText, body.niche, body.platform)
-    width, height = _SOCIAL_IMAGE_DIMENSIONS[body.platform]
-    use_modal = bool(body.useModal and body.modalTokenId.strip() and body.modalTokenSecret.strip())
-
     try:
-        if use_modal:
-            runtime = _modal_runtime()
-            modal_cfg = runtime.ModalConfig(
-                token_id=body.modalTokenId.strip(),
-                token_secret=body.modalTokenSecret.strip(),
-                hf_token=body.hfToken.strip(),
-            )
-            png = runtime.generate_image(modal_cfg, prompt, width, height)
-            with Image.open(io.BytesIO(png)) as response_image:
-                response_image.load()
-                image = response_image.copy()
-        else:
-            image = text_to_image(body.hfToken, prompt)
-    except BrandForgeError as err:
+        url, width, height = image_prompt.render(
+            prompt,
+            body.platform,
+            body.hfToken,
+            tool="social",
+            use_modal=body.useModal,
+            modal_token_id=body.modalTokenId,
+            modal_token_secret=body.modalTokenSecret,
+        )
+    except image_prompt.ImageRenderError as err:
         raise HTTPException(status_code=502, detail=str(err)) from err
-    except (OSError, ValueError) as err:
-        raise HTTPException(status_code=502, detail=f"The image backend returned invalid PNG data: {err}") from err
 
-    path = _social_image_path()
-    image.save(path)
-    return GenerateImageResponse(
-        url=_outputs_url(path),
-        promptUsed=prompt,
-        width=width,
-        height=height,
+    return GenerateImageResponse(url=url, promptUsed=prompt, width=width, height=height)
+
+
+@router.post("/image-prompt", response_model=ImagePromptResponse)
+def suggest_image_prompt(body: ImagePromptRequest) -> ImagePromptResponse:
+    """Propose an image direction for a draft, for the user to edit before drawing.
+
+    Never fails on the model's behalf: an unreachable or gated model returns the
+    built-in template with a note saying so, because the whole point is that the user
+    edits this text anyway.
+    """
+    if body.platform not in PLATFORMS:
+        raise HTTPException(status_code=400, detail=f"Unknown platform: {body.platform}")
+    result = image_prompt.suggest(body.postText, body.niche, body.platform, body.hfToken)
+    width, height = image_prompt.dimensions_for(body.platform)
+    return ImagePromptResponse(
+        prompt=result.prompt, source=result.source, note=result.note, width=width, height=height
     )
 
 

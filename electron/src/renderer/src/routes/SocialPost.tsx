@@ -3,11 +3,11 @@ import {
   collectSocialNiche,
   generateSocialPost,
   generateSocialPostImage,
+  suggestSocialImagePrompt,
   getSocialStatus,
   listSocialNiches,
   markSocialPublished,
   saveSocialNiche,
-  type SocialGeneratedImage,
   type SocialGenerateResponse,
   type SocialNiche,
   type SocialStatus
@@ -15,7 +15,7 @@ import {
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, textInput } from '../styles/styleKit'
-import BackendImage from '../components/BackendImage'
+import PostImagePanel from '../components/PostImagePanel'
 import BrandVoiceSelect from '../components/BrandVoiceSelect'
 import NichePanel from '../components/NichePanel'
 import HashtagSuggester from '../components/HashtagSuggester'
@@ -46,9 +46,6 @@ export default function SocialPost(): React.JSX.Element {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
-  const [postImage, setPostImage] = useState<SocialGeneratedImage | null>(null)
-  const [imageLoading, setImageLoading] = useState(false)
-  const [imageError, setImageError] = useState('')
 
   const [postedUrl, setPostedUrl] = useState('')
   const [linking, setLinking] = useState(false)
@@ -87,8 +84,6 @@ export default function SocialPost(): React.JSX.Element {
     setLoading(true)
     setError('')
     if (!rewrite) setResult(null)
-    setPostImage(null)
-    setImageError('')
     setLinked('')
     setPostedUrl('')
     try {
@@ -112,19 +107,6 @@ export default function SocialPost(): React.JSX.Element {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
-    }
-  }
-
-  async function handleGenerateImage(): Promise<void> {
-    if (!result?.text.trim()) return
-    setImageLoading(true)
-    setImageError('')
-    try {
-      setPostImage(await generateSocialPostImage(result.text, fields.niche, fields.platform))
-    } catch (err) {
-      setImageError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setImageLoading(false)
     }
   }
 
@@ -405,34 +387,16 @@ export default function SocialPost(): React.JSX.Element {
               >
                 {loading ? 'Rewriting…' : 'Try again'}
               </div>
-              <div
-                style={{ ...secondaryButtonSmall, opacity: imageLoading ? 0.6 : 1 }}
-                onClick={imageLoading ? undefined : handleGenerateImage}
-              >
-                {imageLoading ? 'Generating image…' : postImage ? 'Regenerate image' : 'Generate image'}
-              </div>
             </div>
-            {imageError && (
-              <div style={{ marginTop: 10, font: "700 12.5px 'Quicksand'", color: 'var(--danger-ink)' }}>{imageError}</div>
-            )}
-            {postImage && (
-              <div style={{ marginTop: 14 }}>
-                <BackendImage
-                  url={postImage.url}
-                  alt="Generated visual for the post"
-                  style={{
-                    width: '100%',
-                    maxHeight: 640,
-                    objectFit: 'contain',
-                    background: 'var(--surface)',
-                    border: '2px solid var(--border)',
-                    borderRadius: 8,
-                    display: 'block'
-                  }}
-                />
-              </div>
-            )}
           </div>
+
+          <PostImagePanel
+            postText={result.text}
+            onSuggest={() => suggestSocialImagePrompt(result.text, fields.niche, fields.platform)}
+            onGenerate={(prompt) =>
+              generateSocialPostImage(result.text, fields.niche, fields.platform, prompt)
+            }
+          />
 
           {/* --- what informed it ---------------------------------------- */}
           <details

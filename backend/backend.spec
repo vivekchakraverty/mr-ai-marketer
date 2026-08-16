@@ -53,6 +53,7 @@ hiddenimports = [
     "app.routers.tumblr_engage",
     "app.routers.tumblr_post",
     "app.services.tumblr_corpus",
+    "app.services.image_prompt",
     "app.services.tumblr",
     "requests_oauthlib",
     "oauthlib.oauth1",
