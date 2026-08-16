@@ -462,7 +462,11 @@ def _accepted_mastodon_hosts() -> list[str]:
 
 
 def collect_mastodon(
-    instance: str, days: int = 31, settle_hours: int = 24, pages: int = 60
+    instance: str,
+    days: int = 31,
+    settle_hours: int = 24,
+    pages: int = 60,
+    token: str = "",
 ) -> Curve:
     """One instance's own curve, from its own local accounts.
 
@@ -477,6 +481,15 @@ def collect_mastodon(
     else it holds only what federated to it. Scoring remote posts on a local view
     would rank an author's posts by how well they federated rather than how they
     did, so remote accounts are dropped entirely.
+
+    THE TOKEN IS OFTEN THE DIFFERENCE BETWEEN A CURVE AND NOTHING. The public
+    local timeline is the only broad sample of an instance's own accounts, and the
+    larger instances no longer serve it to anonymous callers: mastodon.social
+    answers `422 {"error":"This method requires an authenticated user"}` to every
+    form of the request. Reading it as the user — the same account the composer
+    already publishes with — is what makes the biggest instances measurable at
+    all. It stays optional, because smaller servers (hachyderm, toot.garden) do
+    serve it anonymously and should not require a login to be measured.
     """
     from . import mastodon as m
     from . import mastodon_gate as gate
@@ -513,12 +526,20 @@ def collect_mastodon(
 
     for _ in range(pages):
         try:
-            batch = m.public_timeline(host, limit=40, max_id=max_id, local=True)
+            batch = m.public_timeline(host, limit=40, max_id=max_id, local=True, token=token)
         except m.MastodonError as err:
             log.warning("[posting-time] %s local timeline unavailable: %s", host, err)
             if not seen_ids:
-                # Nothing was readable at all — mastodon.social answers 422 to
-                # unauthenticated reads here, which is "unavailable", not "empty".
+                # Nothing was readable at all. Two different causes, and telling them
+                # apart is the difference between "try connecting your account" and
+                # "this server cannot be measured": the big instances refuse anonymous
+                # reads of this endpoint outright.
+                needs_login = "authenticated" in str(err).lower() or "401" in str(err)
+                if needs_login and not token:
+                    return refused(
+                        f"{host} only serves its public timeline to a logged-in account. "
+                        f"Connect your {host} account in the composer and measure again."
+                    )
                 return refused(
                     f"{host} does not serve a public local timeline, so there is no "
                     "sample to learn from."

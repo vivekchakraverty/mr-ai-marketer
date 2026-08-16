@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 
 from . import posting_time_corpus as ptc
@@ -40,6 +41,15 @@ def main(argv: list[str] | None = None) -> int:
         help="mastodon only: one instance host. Omitted means every accepted instance.",
     )
     parser.add_argument(
+        "--token",
+        default="",
+        help=(
+            "mastodon only: an access token. The larger instances (mastodon.social) "
+            "refuse anonymous reads of the public local timeline, which is the only "
+            "sample this learns from. Defaults to MASTODON_ACCESS_TOKEN."
+        ),
+    )
+    parser.add_argument(
         "--dry-run", action="store_true", help="print the result without storing it"
     )
     args = parser.parse_args(argv)
@@ -51,6 +61,9 @@ def main(argv: list[str] | None = None) -> int:
     kwargs: dict = {"days": args.days}
     if args.settle_hours is not None:
         kwargs["settle_hours"] = args.settle_hours
+    if args.platform == "mastodon":
+        # Env fallback so the token need not appear in shell history.
+        kwargs["token"] = args.token or os.environ.get("MASTODON_ACCESS_TOKEN", "")
 
     if args.platform == "bluesky":
         kwargs["target_authors"] = args.target_authors

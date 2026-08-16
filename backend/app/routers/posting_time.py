@@ -351,11 +351,18 @@ class MeasureResponse(BaseModel):
     detail: str
 
 
+class MeasureRequest(BaseModel):
+    instance: str
+    days: int = 31
+    #: Optional. The larger instances refuse anonymous reads of the public local
+    #: timeline, which is the only sample this can learn from — see collect_mastodon.
+    #: In the body rather than the query string on purpose: a token in a URL ends up
+    #: in server logs and browser history, and this one can post as the user.
+    accessToken: str = ""
+
+
 @router.post("/measure", response_model=MeasureResponse)
-def measure(
-    instance: str = Query(..., description="The Mastodon host to measure."),
-    days: int = Query(31, ge=7, le=90),
-) -> MeasureResponse:
+def measure(body: MeasureRequest) -> MeasureResponse:
     """Read one instance's last month and work out whether it can support a curve.
 
     Exposed because the instance is the user's to name — they type a server into
@@ -370,11 +377,18 @@ def measure(
     """
     from ..services import mastodon as m
 
-    host = m.normalise_host(instance)
+    days = max(7, min(90, body.days))
+    # normalise_host RAISES on empty or malformed input rather than returning "", so the
+    # old `if not host` guard below could never fire and a blank instance surfaced as a
+    # 500. Its message is already written for a user, so it is passed straight through.
+    try:
+        host = m.normalise_host(body.instance)
+    except m.MastodonError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from None
     if not host:
         raise HTTPException(status_code=400, detail="Give a Mastodon host, e.g. toot.garden")
 
-    curve = ptc.collect_mastodon(host, days=days)
+    curve = ptc.collect_mastodon(host, days=days, token=body.accessToken)
     ptc.save_curve(curve)
 
     if not curve.attempted:

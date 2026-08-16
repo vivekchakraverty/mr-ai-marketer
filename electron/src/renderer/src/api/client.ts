@@ -957,8 +957,19 @@ export function fetchPostingTime(
  * Slow (tens of seconds) — it is paging that server's public timeline — so
  * callers must show progress. Only ever run when the user asks for it.
  */
-export function measureInstance(instance: string): Promise<InstanceMeasurement> {
-  return postJson(`/posting-time/measure?instance=${encodeURIComponent(instance)}`, {})
+/**
+ * Measure one instance's own posting-time curve.
+ *
+ * Sends the Mastodon access token when there is one: the public local timeline is the
+ * only sample this can learn from, and the larger instances (mastodon.social among them)
+ * refuse to serve it to anonymous callers. It rides in the body rather than the query
+ * string because a token in a URL ends up in logs and history.
+ */
+export async function measureInstance(instance: string): Promise<InstanceMeasurement> {
+  return postJson('/posting-time/measure', {
+    instance,
+    accessToken: await mastodonToken()
+  })
 }
 
 // ---------------------------------------------------------------------------
