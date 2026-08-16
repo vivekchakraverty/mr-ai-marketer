@@ -996,6 +996,8 @@ class ImagePromptResponse(BaseModel):
 class GenerateImageRequest(BaseModel):
     #: The prompt the user reviewed and approved. Required.
     prompt: str
+    #: Only used to title the Library entry the image is filed under.
+    postText: str = ""
     hfToken: str = ""
     modalTokenId: str = ""
     modalTokenSecret: str = ""
@@ -1036,6 +1038,7 @@ def generate_image(body: GenerateImageRequest) -> GenerateImageResponse:
             PLATFORM,
             body.hfToken,
             tool='tumblr',
+            post_text=body.postText,
             use_modal=body.useModal,
             modal_token_id=body.modalTokenId,
             modal_token_secret=body.modalTokenSecret,

@@ -200,12 +200,47 @@ def _modal_runtime():
     return modal_runtime
 
 
+#: Library `tool` for a generated companion image.
+#
+# Deliberately the existing Social value rather than a new one. An image made here is a
+# companion to a post, not a separate kind of artefact, and the renderer keys several
+# per-tool maps off this union — a new member means touching all of them (LibraryCard has
+# its own, and only typecheck catches a miss) to express a distinction the user does not
+# have. The subtitle carries "<platform> image", which is what actually distinguishes it.
+LIBRARY_TOOL = "Social"
+
+
+def _remember(path: Path, prompt: str, platform: str, post_text: str) -> None:
+    """Put a generated image on the Library shelf. Best effort, never fatal.
+
+    The entry stores the *approved prompt* as its text and the PNG as its file, which
+    makes the pair legible later: the Library's editor shows what produced the picture,
+    and the file sits beside it. Failing to file it must not fail the generation — the
+    image exists and the user is looking at it.
+    """
+    from .. import db
+
+    source = (post_text or prompt).strip().replace("\n", " ")
+    title = (source[:60].rstrip() + "…") if len(source) > 60 else source
+    try:
+        db.add_item(
+            tool=LIBRARY_TOOL,
+            title=title or "Companion image",
+            subtitle=f"{platform} image",
+            content=prompt,
+            output_path=str(path),
+        )
+    except Exception:  # noqa: BLE001
+        log.exception("[image-prompt] could not save the image to the Library")
+
+
 def render(
     prompt: str,
     platform: str,
     hf_token: str,
     *,
     tool: str,
+    post_text: str = "",
     use_modal: bool = False,
     modal_token_id: str = "",
     modal_token_secret: str = "",
@@ -257,6 +292,7 @@ def render(
 
     path = output_path(tool)
     image.save(path)
+    _remember(path, prompt, platform, post_text)
     return outputs_url(path), width, height
 
 

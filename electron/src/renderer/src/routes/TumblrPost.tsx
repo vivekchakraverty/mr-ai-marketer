@@ -430,7 +430,7 @@ export default function TumblrPost(): React.JSX.Element {
           <PostImagePanel
             postText={result.text}
             onSuggest={() => suggestTumblrImagePrompt(result.text, result.niche)}
-            onGenerate={(prompt) => generateTumblrImage(prompt)}
+            onGenerate={(prompt) => generateTumblrImage(prompt, result.text)}
           />
         )}
 

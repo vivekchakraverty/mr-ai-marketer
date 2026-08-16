@@ -481,7 +481,7 @@ export default function MastodonPost(): React.JSX.Element {
             <PostImagePanel
               postText={result.text}
               onSuggest={() => suggestMastodonImagePrompt(result.text, fields.niche)}
-              onGenerate={(prompt) => generateMastodonImage(prompt)}
+              onGenerate={(prompt) => generateMastodonImage(prompt, result.text)}
             />
           )}
 

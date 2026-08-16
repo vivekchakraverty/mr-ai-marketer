@@ -623,6 +623,7 @@ def generate_image(body: GenerateImageRequest) -> GenerateImageResponse:
             body.platform,
             body.hfToken,
             tool="social",
+            post_text=body.postText,
             use_modal=body.useModal,
             modal_token_id=body.modalTokenId,
             modal_token_secret=body.modalTokenSecret,

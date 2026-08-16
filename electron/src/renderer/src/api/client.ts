@@ -800,8 +800,11 @@ export async function suggestMastodonImagePrompt(
   return postJson('/mastodon-post/image-prompt', { postText, niche, hfToken: settings.hfToken })
 }
 
-export async function generateMastodonImage(prompt: string): Promise<SocialGeneratedImage> {
-  return postJson('/mastodon-post/images', { prompt, ...(await imageCredentials()) })
+export async function generateMastodonImage(
+  prompt: string,
+  postText = ''
+): Promise<SocialGeneratedImage> {
+  return postJson('/mastodon-post/images', { prompt, postText, ...(await imageCredentials()) })
 }
 
 export async function suggestTumblrImagePrompt(
@@ -812,8 +815,11 @@ export async function suggestTumblrImagePrompt(
   return postJson('/tumblr-post/image-prompt', { postText, niche, hfToken: settings.hfToken })
 }
 
-export async function generateTumblrImage(prompt: string): Promise<SocialGeneratedImage> {
-  return postJson('/tumblr-post/images', { prompt, ...(await imageCredentials()) })
+export async function generateTumblrImage(
+  prompt: string,
+  postText = ''
+): Promise<SocialGeneratedImage> {
+  return postJson('/tumblr-post/images', { prompt, postText, ...(await imageCredentials()) })
 }
 
 export function markSocialPublished(
