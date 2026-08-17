@@ -126,20 +126,42 @@ jobs:
       # johnvansickle's "release" URL is a floating pointer to the current stable, not a pinned
       # version — there is no stable per-version URL. The published .md5 is checked so a
       # truncated or tampered download fails here instead of at runtime on a user's machine.
+      # Was johnvansickle.com, which went dark between 0.5.2 and 0.5.3 and took every
+      # Linux build with it — three releases failed identically without anything in this
+      # repo changing. It is one person's server with no mirror, so the fix is not a retry
+      # but a host that CI already depends on anyway. BtbN's builds are GitHub-hosted,
+      # publish a checksum file, and are the same GPL static build class as before, so the
+      # licensing of what ships is unchanged.
       - name: Fetch ffmpeg (Linux)
         if: matrix.platform == 'linux'
         shell: bash
         run: |
           set -euo pipefail
-          base="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
-          curl -fsSL "$base"      -o ffmpeg.tar.xz
-          curl -fsSL "${base}.md5" -o ffmpeg.tar.xz.md5
-          # The published .md5 names the file as it sits on their server; check against ours.
-          echo "$(cut -d' ' -f1 ffmpeg.tar.xz.md5)  ffmpeg.tar.xz" | md5sum -c -
+          rel="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
+          asset="ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"
+          curl -fsSL --retry 3 --retry-delay 5 "$rel/$asset"           -o ffmpeg.tar.xz
+          curl -fsSL --retry 3 --retry-delay 5 "$rel/checksums.sha256" -o checksums.sha256
+          # The published list covers every asset in the release. The hash is pulled out by
+          # exact filename and a fresh line is written for the local name — patching the
+          # published line with sed leaves the field separator wrong and sha256sum then
+          # looks for a file whose name begins with a space.
+          hash="$(awk -v a="$asset" '$2 == a {print $1}' checksums.sha256)"
+          test -n "$hash" || { echo "$asset is not in the published checksums"; exit 1; }
+          printf '%s  ffmpeg.tar.xz\n' "$hash" > expected.sha256
+          sha256sum -c expected.sha256
           mkdir -p resources/ffmpeg/linux extracted
           tar -xJf ffmpeg.tar.xz -C extracted --strip-components=1
-          cp extracted/ffmpeg extracted/ffprobe resources/ffmpeg/linux/
+          # Located rather than assumed: this layout puts the binaries under bin/ while the
+          # old one had them at the root, and a hard-coded path is how that difference
+          # becomes a broken package rather than a failed step. Matched on name alone —
+          # the archive's execute bits are not something to depend on.
+          for bin in ffmpeg ffprobe; do
+            found="$(find extracted -type f -name "$bin" | head -n1)"
+            test -n "$found" || { echo "no $bin in the extracted archive"; exit 1; }
+            cp "$found" resources/ffmpeg/linux/
+          done
           chmod +x resources/ffmpeg/linux/ffmpeg resources/ffmpeg/linux/ffprobe
+          resources/ffmpeg/linux/ffmpeg -version | head -n1
 
       # Both binaries must exist AND run. A zero-byte file or an HTML error page saved under
       # the right name would otherwise sail through and ship.
