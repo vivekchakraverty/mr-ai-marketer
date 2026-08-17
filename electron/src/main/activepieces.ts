@@ -2,7 +2,14 @@ import { app } from 'electron'
 import { randomBytes } from 'crypto'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { dockerCommand, toWslPath, startWslKeepAlive, stopWslKeepAlive } from './dockerRuntime'
+import {
+  dockerCommand,
+  detectStatus,
+  ensureDaemonRunning,
+  toWslPath,
+  startWslKeepAlive,
+  stopWslKeepAlive
+} from './dockerRuntime'
 
 export const ACTIVEPIECES_PORT = 8081
 // 127.0.0.1, not localhost. Node resolves `localhost` verbatim and hands back ::1 first on
@@ -110,6 +117,54 @@ export async function startActivepieces(): Promise<void> {
     throw new Error(`Failed to start the distribution engine: ${result.stderr.slice(0, 500)}`)
   }
   await waitForActivepiecesHealth()
+}
+
+/** True once the engine has been set up on this machine — the secrets file is written
+ *  the first time it is started, and only then. */
+export function hasBeenSetUp(): boolean {
+  return existsSync(secretsEnvPath())
+}
+
+export type AutoStartOutcome = 'started' | 'already-running' | 'not-set-up' | 'no-docker' | 'failed'
+
+/**
+ * Bring the engine up at app launch, if it is this machine's to bring up.
+ *
+ * WHY THIS IS NOT OPTIONAL ANY MORE. The engine only ran while someone was looking at the
+ * Distribute screen and had pressed the button. Everything scheduled through it — a post
+ * queued for 3:30am — fires against whatever is running at that moment, so a send queued
+ * on Tuesday would simply fail on Wednesday because the app had been restarted in between.
+ * A scheduler that only works while you are watching is not a scheduler.
+ *
+ * WHAT IT DELIBERATELY WILL NOT DO. It never installs anything. `bootstrap()` can install
+ * WSL and Docker and may demand a reboot; that is a decision with consequences for the
+ * whole machine and it stays behind the button on the Distribute screen, where the user
+ * asked for it. This only starts what is already there:
+ *
+ *   - no secrets file  -> the engine has never been set up here. Do nothing.
+ *   - Docker absent    -> do nothing. Installing it is not ours to decide.
+ *   - daemon stopped   -> start the daemon (cheap, already installed, no prompts).
+ *   - already running  -> nothing to do; this is the common case on a warm machine.
+ *
+ * Failure is reported, never thrown: the app has to open whether or not Docker cooperates,
+ * and the Distribute screen already explains an engine that is down.
+ */
+export async function startActivepiecesIfConfigured(): Promise<AutoStartOutcome> {
+  if (!hasBeenSetUp()) return 'not-set-up'
+
+  const status = await detectStatus()
+  if (!status.dockerInstalled) return 'no-docker'
+  if (!status.dockerRunning) await ensureDaemonRunning()
+
+  if (await isActivepiecesRunning()) {
+    // Still take the keep-alive: the container may have been left running by a previous
+    // session, and without it the WSL2 VM can idle out from under it.
+    startWslKeepAlive()
+    return 'already-running'
+  }
+
+  await startActivepieces()
+  return 'started'
 }
 
 export async function stopActivepieces(): Promise<void> {

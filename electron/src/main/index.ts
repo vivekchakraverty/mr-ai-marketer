@@ -5,7 +5,12 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { startBackend, stopBackend, waitForBackendHealth, API_TOKEN, BACKEND_URL } from './backend'
 import { getHfToken, getSettings, setHfToken, setSettings, type SettingsPatch } from './settingsStore'
 import { bootstrap, detectStatus, RebootRequiredError } from './dockerRuntime'
-import { isActivepiecesRunning, startActivepieces, stopActivepieces } from './activepieces'
+import {
+  isActivepiecesRunning,
+  startActivepieces,
+  startActivepiecesIfConfigured,
+  stopActivepieces
+} from './activepieces'
 import { isLeadgenRunning, startLeadgen, stopLeadgen } from './leadgen'
 import { checkForUpdate, downloadUpdate, getUpdateState, installUpdate, startUpdateWatch } from './updater'
 
@@ -254,6 +259,27 @@ app.whenReady().then(async () => {
 
   // After the window exists, so the first check has somewhere to push its result to.
   startUpdateWatch()
+
+  // Bring the distribution engine up in the background.
+  //
+  // Deliberately not awaited: starting the WSL2 VM and the container can take the better
+  // part of a minute, and none of the app's other screens need it. Blocking here would
+  // trade a working Distribute tab for a minute of empty window on every launch.
+  //
+  // It only starts what is already installed and configured — see
+  // startActivepiecesIfConfigured. A machine that has never set it up, or has no Docker,
+  // is left alone rather than prompted, because installing that is a decision the user
+  // makes on the Distribute screen and it can require a reboot.
+  void startActivepiecesIfConfigured()
+    .then((outcome) => {
+      if (outcome === 'started') console.log('[distribution] engine started')
+      else if (outcome !== 'already-running') console.log(`[distribution] engine not started: ${outcome}`)
+    })
+    .catch((err) => {
+      // Never fatal. The Distribute screen already explains an engine that is down, and
+      // the app has to open whether or not Docker cooperates.
+      console.error('[distribution] could not start the engine automatically:', err)
+    })
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
