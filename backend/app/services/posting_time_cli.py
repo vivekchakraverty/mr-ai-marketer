@@ -63,7 +63,20 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["settle_hours"] = args.settle_hours
     if args.platform == "mastodon":
         # Env fallback so the token need not appear in shell history.
-        kwargs["token"] = args.token or os.environ.get("MASTODON_ACCESS_TOKEN", "")
+        token = args.token or os.environ.get("MASTODON_ACCESS_TOKEN", "")
+        if token and not args.instance:
+            # Without --instance this collects every accepted instance, and one token
+            # handed to all of them would give each server a credential issued by
+            # another. A token belongs to exactly one host and must name it.
+            print(
+                "A token applies to one instance only — pass --instance with it, or drop "
+                "--token to read every accepted instance anonymously.",
+                file=sys.stderr,
+            )
+            return 2
+        if token:
+            kwargs["token"] = token
+            kwargs["token_instance"] = args.instance
 
     if args.platform == "bluesky":
         kwargs["target_authors"] = args.target_authors

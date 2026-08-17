@@ -928,6 +928,9 @@ export interface PostingTimeRecommendation {
     windowEnd: string
     collectedAt: string
     reliability: number
+    /** Width of the time-of-day buckets the sample actually supported, in hours.
+     *  1 is an hourly curve; larger means a window was the finest answerable question. */
+    resolutionHours: number
     source: string
     platform: string
   }>
@@ -972,9 +975,13 @@ export function fetchPostingTime(
  * string because a token in a URL ends up in logs and history.
  */
 export async function measureInstance(instance: string): Promise<InstanceMeasurement> {
+  const token = await mastodonTokenFor(instance)
+  // tokenInstance is sent so the backend can check the binding itself rather than
+  // trusting this side of the wire — see collect_mastodon.
   return postJson('/posting-time/measure', {
     instance,
-    accessToken: await mastodonToken()
+    accessToken: token,
+    tokenInstance: token ? instance : ''
   })
 }
 
@@ -1064,6 +1071,29 @@ export interface MastodonCollectResponse {
   stored: number
   skipped: Record<string, number>
   exemplars: number
+}
+
+function normaliseInstance(value: string): string {
+  return (value ?? '').trim().replace(/^https?:\/\//, '').split('/')[0].replace(/\.$/, '').toLowerCase()
+}
+
+/**
+ * The token for one specific instance, or '' when the user has no account there.
+ *
+ * A Mastodon token is issued by one server and is unsafe to send to any other, so this
+ * never falls back to "whichever token we happen to have". An instance the user has not
+ * connected is read anonymously, which most of the fediverse allows.
+ */
+export async function mastodonTokenFor(instance: string): Promise<string> {
+  const host = normaliseInstance(instance)
+  if (!host) return ''
+  const settings = await window.api.settings.getAll()
+  const accounts = settings.mastodonAccounts ?? []
+  const match = accounts.find((a) => normaliseInstance(a.instance) === host)
+  if (match?.accessToken) return match.accessToken
+  // Installs that predate the account list keep a single pair; honour it for its own host.
+  if (normaliseInstance(settings.mastodonInstance) === host) return settings.mastodonAccessToken ?? ''
+  return ''
 }
 
 async function mastodonToken(): Promise<string> {

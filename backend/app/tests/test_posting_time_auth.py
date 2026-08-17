@@ -14,6 +14,23 @@ from app.services import mastodon as m
 from app.services import posting_time_corpus as ptc
 
 
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """Nothing in this module may touch the network.
+
+    Author discovery falls back to hashtag timelines when the public timeline yields
+    nobody, so a test that stubs only `public_timeline` would quietly start making real
+    requests — which is how this file once took three minutes to run.
+    """
+    monkeypatch.setattr(m, "tag_timeline", lambda *a, **k: [])
+    monkeypatch.setattr(m, "author_statuses_in_window", lambda *a, **k: [])
+    monkeypatch.setattr(
+        m, "public_timeline", lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("a test reached the network without stubbing public_timeline")
+        )
+    )
+
+
 @pytest.fixture()
 def accepted(monkeypatch):
     """Pretend the instance's rules are accepted; the gate has its own tests."""
@@ -35,7 +52,9 @@ def _capture(monkeypatch) -> dict:
 
 def test_the_token_reaches_the_timeline_call(accepted, monkeypatch):
     seen = _capture(monkeypatch)
-    ptc.collect_mastodon("mastodon.social", days=7, token="tok-123")
+    ptc.collect_mastodon(
+        "mastodon.social", days=7, token="tok-123", token_instance="mastodon.social"
+    )
     assert seen["token"] == "tok-123"
 
 
@@ -46,7 +65,9 @@ def test_it_still_asks_only_for_local_accounts(accepted, monkeypatch):
     rank an author by how well they federated rather than how they did.
     """
     seen = _capture(monkeypatch)
-    ptc.collect_mastodon("mastodon.social", days=7, token="tok-123")
+    ptc.collect_mastodon(
+        "mastodon.social", days=7, token="tok-123", token_instance="mastodon.social"
+    )
     assert seen["local"] is True
 
 
@@ -89,7 +110,9 @@ def test_a_token_that_still_gets_refused_does_not_suggest_connecting_again(accep
         raise m.MastodonError("This method requires an authenticated user")
 
     monkeypatch.setattr(m, "public_timeline", refuse)
-    curve = ptc.collect_mastodon("mastodon.social", days=7, token="tok-123")
+    curve = ptc.collect_mastodon(
+        "mastodon.social", days=7, token="tok-123", token_instance="mastodon.social"
+    )
 
     assert "logged-in account" not in curve.notes[0]
 
@@ -168,3 +191,58 @@ def test_an_instance_with_no_eligible_authors_says_so(accepted, monkeypatch):
     curve = ptc.collect_mastodon("tiny.instance", days=31)
     assert curve.attempted is False
     assert "follower floor" in curve.notes[0] or "opted out" in curve.notes[0]
+
+
+# --- a token belongs to exactly one instance --------------------------------
+
+
+def test_a_token_is_not_sent_to_another_instance(accepted, monkeypatch):
+    """The bug this guards: measuring server B while holding server A's token.
+
+    A Mastodon token is issued by one server and means nothing elsewhere — but sending it
+    still hands that server a working credential that can post as the user. Reading
+    anonymously is the correct fallback, not "try it and see".
+    """
+    seen = _capture(monkeypatch)
+    ptc.collect_mastodon(
+        "some.other.instance", days=7, token="tok-for-mastodon-social",
+        token_instance="mastodon.social",
+    )
+    assert seen["token"] == "", "a foreign instance must be read anonymously"
+
+
+def test_a_token_is_sent_to_its_own_instance(accepted, monkeypatch):
+    seen = _capture(monkeypatch)
+    ptc.collect_mastodon(
+        "mastodon.social", days=7, token="tok-123", token_instance="https://mastodon.social/"
+    )
+    assert seen["token"] == "tok-123", "the issuing host is normalised before comparison"
+
+
+def test_an_unstated_owner_is_treated_as_foreign(accepted, monkeypatch):
+    """Silence is not consent: an unnamed owner must not default to 'send it anyway'."""
+    seen = _capture(monkeypatch)
+    ptc.collect_mastodon("mastodon.social", days=7, token="tok-123")
+    assert seen["token"] == ""
+
+
+def test_collecting_every_instance_never_shares_one_token(accepted, monkeypatch):
+    """collect_mastodon_all iterates several servers — the exact shape of the mistake."""
+    sent: dict[str, str] = {}
+
+    def spy(host, days=31, settle_hours=24, discovery_pages=12, max_authors=120,
+            token="", token_instance=""):
+        sent[host] = token
+        return ptc.compute_curve(
+            [], platform="mastodon", instance=host,
+            window_start=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+            window_end=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+            source="test",
+        )
+
+    monkeypatch.setattr(ptc, "collect_mastodon", spy)
+    monkeypatch.setattr(ptc, "_accepted_mastodon_hosts", lambda: ["a.social", "b.social"])
+
+    ptc.collect_mastodon_all(tokens={"a.social": "only-a"})
+
+    assert sent == {"a.social": "only-a", "b.social": ""}

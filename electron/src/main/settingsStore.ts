@@ -88,6 +88,20 @@ export interface TumblrSettings {
   blog: string
 }
 
+/**
+ * One Mastodon account, on one instance.
+ *
+ * A Mastodon token is issued by a single server and is worthless — and unsafe to send —
+ * anywhere else, so a credential is never stored on its own: it is always paired with the
+ * host that granted it. Users routinely hold accounts on more than one instance, and each
+ * needs its own entry.
+ */
+export interface MastodonAccount {
+  /** Host only, e.g. "mastodon.social". */
+  instance: string
+  accessToken: string
+}
+
 export interface AppSettings {
   hfToken: string
   youtubeApiKey: string
@@ -95,8 +109,14 @@ export interface AppSettings {
   // Mastodon Post Creator. The instance is not a secret and is the more important
   // of the two — it decides the rules and the character limit. The token is only
   // needed for full-text search and for linking a published post back to its draft.
+  //
+  // `mastodonInstance` is the ACTIVE account — the one the composer posts to and whose
+  // rules gate applies. `mastodonAccounts` is every account the user has connected, so
+  // anything that reads a *different* instance (the posting-time collector, for one) can
+  // find that instance's own credential instead of misusing the active one.
   mastodonInstance: string
   mastodonAccessToken: string
+  mastodonAccounts: MastodonAccount[]
   // Engage, Tumblr side. Nothing else in the app reads these yet.
   tumblr: TumblrSettings
   googleAds: GoogleAdsSettings
@@ -129,6 +149,7 @@ const EMPTY_SETTINGS: AppSettings = {
   hfAssets: { influencerRepo: '', guestPostRepo: '', ctrModelRepo: '' },
   mastodonInstance: '',
   mastodonAccessToken: '',
+  mastodonAccounts: [],
   tumblr: { consumerKey: '', consumerSecret: '', oauthToken: '', oauthTokenSecret: '', blog: '' },
   googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
   brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '', modelRepo: '', imageBucket: '' },
@@ -209,8 +230,39 @@ function writeSettings(settings: AppSettings): void {
   writeFileSync(configPath(), data)
 }
 
+/** Host only, lower-cased — the form accounts are keyed by. */
+export function normaliseInstance(value: string): string {
+  return (value ?? '')
+    .trim()
+    .replace(/^https?:\/\//, '')
+    .split('/')[0]
+    .replace(/\.$/, '')
+    .toLowerCase()
+}
+
 export function getSettings(): AppSettings {
-  return readSettings()
+  const stored = readSettings()
+
+  // Installs that predate the account list still have a single instance/token pair. Read
+  // it as the first account rather than migrating on write: nothing is lost if the user
+  // downgrades, and the pair remains the active account either way.
+  const accounts = stored.mastodonAccounts ?? []
+  const active = normaliseInstance(stored.mastodonInstance)
+  if (active && stored.mastodonAccessToken && !accounts.some((a) => normaliseInstance(a.instance) === active)) {
+    return {
+      ...stored,
+      mastodonAccounts: [...accounts, { instance: active, accessToken: stored.mastodonAccessToken }]
+    }
+  }
+  return { ...stored, mastodonAccounts: accounts }
+}
+
+/** The token for one instance, or '' when the user has no account there. */
+export function mastodonTokenFor(instance: string): string {
+  const host = normaliseInstance(instance)
+  if (!host) return ''
+  const match = getSettings().mastodonAccounts.find((a) => normaliseInstance(a.instance) === host)
+  return match?.accessToken ?? ''
 }
 
 export function setSettings(partial: SettingsPatch): AppSettings {

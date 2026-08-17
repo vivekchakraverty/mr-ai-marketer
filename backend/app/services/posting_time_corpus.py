@@ -70,6 +70,35 @@ MIN_POSTS_PER_AUTHOR = 5
 MIN_FOLLOWERS_BLUESKY = 200
 MIN_FOLLOWERS_MASTODON = 50
 
+# Time-of-day resolutions to try, finest first.
+#
+# WHY A LADDER RATHER THAN ONE ANSWER. An hourly curve asks the data for more precision
+# than most instances hold, and the reliability gate then refuses everything — including
+# a coarser statement that the same data supports perfectly well. Measured on two real
+# instances, the hourly curve fails while blocks of a few hours pass comfortably:
+#
+#                        hourly    2h      3h      4h     day-of-week
+#   hachyderm.io         +0.142  +0.213  +0.214  +0.316    +0.454
+#   mastodon.social      +0.263  +0.426  +0.593  +0.613    +0.311
+#
+# The ordering differs between them — hachyderm's strongest signal is the day of the
+# week, mastodon.social's is the time of day — so the resolution is chosen per instance
+# from its own numbers rather than fixed here.
+#
+# Four hours is the coarsest rung: at six buckets it is the last one _pearson will score,
+# and anything broader than "morning / afternoon / evening" stops being advice anyway.
+RESOLUTION_LADDER = (1, 2, 3, 4)
+
+# Broad, long-lived hashtags used to find an instance's own accounts when its public
+# timeline gives nothing (mastodon.social returns 200-and-empty for that endpoint).
+# Deliberately generic and varied: this is a sample of WHO posts on a server, and a
+# narrow set would return a curve describing one community's hours rather than the
+# server's. Order is irrelevant — collection stops once max_authors is reached.
+DISCOVERY_TAGS = (
+    "art", "news", "photography", "music", "books", "science",
+    "technology", "politics", "film", "history", "food", "nature",
+)
+
 # Reliability floor a curve must clear to be shown at all. Split-half r on the
 # pooled Bluesky corpus was +0.583; per-niche curves averaged +0.131 and were
 # refused. 0.30 sits between them: comfortably better than the noise that got
@@ -107,6 +136,14 @@ class Curve:
     # the UI later report "this server has no usable posts" about a server nobody
     # ever looked at.
     attempted: bool = True
+    # How wide the time-of-day buckets are, in hours: the finest rung of
+    # RESOLUTION_LADDER this sample could actually support. 0 means none of them did,
+    # and there is no time-of-day advice to give.
+    resolution_hours: int = 1
+    # Day-of-week is scored separately because it is a different question, not a coarser
+    # one. An instance can have a readable weekly rhythm and no usable daily one, or the
+    # reverse — both happen in the measured data.
+    daily_reliability: float = 0.0
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -115,7 +152,17 @@ class Curve:
 
     @property
     def usable(self) -> bool:
-        return self.reliability >= MIN_RELIABILITY
+        """True when there is time-of-day advice worth giving, at some resolution."""
+        return self.resolution_hours > 0 and self.reliability >= MIN_RELIABILITY
+
+    @property
+    def daily_usable(self) -> bool:
+        return self.daily_reliability >= MIN_RELIABILITY
+
+    @property
+    def anything_usable(self) -> bool:
+        """The panel should show something if either axis survived."""
+        return self.usable or self.daily_usable
 
     def to_dict(self) -> dict:
         return {
@@ -128,6 +175,9 @@ class Curve:
             "scoredAuthors": self.scored_authors,
             "reliability": round(self.reliability, 4),
             "usable": self.usable,
+            "resolutionHours": self.resolution_hours,
+            "dailyReliability": round(self.daily_reliability, 4),
+            "dailyUsable": self.daily_usable,
             "windowStart": self.window_start,
             "windowEnd": self.window_end,
             "collectedAt": self.collected_at,
@@ -209,6 +259,48 @@ def _pearson(a: list[float], b: list[float]) -> float:
     return num / den if den else 0.0
 
 
+def _reliability_of(
+    scored: list[tuple[datetime, float]],
+    bucket_of,
+    n_buckets: int,
+    trials: int = 40,
+) -> float:
+    """Split-half correlation of any bucketing of the same scored posts.
+
+    The generalised form of _reliability, which asks the question only of hours. Used to
+    find the finest resolution a sample can actually support — see RESOLUTION_LADDER.
+
+    Returns 0.0 for a bucketing too coarse to test: _pearson refuses fewer than six
+    points, so a four-bucket scheme cannot be scored here rather than scoring badly.
+    """
+    if len(scored) < 200 or n_buckets < 6:
+        return 0.0
+    rng = random.Random(0)
+    rs: list[float] = []
+    for _ in range(trials):
+        shuffled = scored[:]
+        rng.shuffle(shuffled)
+        half = len(shuffled) // 2
+        a_buckets: dict[int, list[float]] = defaultdict(list)
+        b_buckets: dict[int, list[float]] = defaultdict(list)
+        for created, pct in shuffled[:half]:
+            a_buckets[bucket_of(created)].append(pct)
+        for created, pct in shuffled[half:]:
+            b_buckets[bucket_of(created)].append(pct)
+        common = [
+            k for k in range(n_buckets) if len(a_buckets[k]) >= 5 and len(b_buckets[k]) >= 5
+        ]
+        if len(common) < 6:
+            continue
+        rs.append(
+            _pearson(
+                [sum(a_buckets[k]) / len(a_buckets[k]) for k in common],
+                [sum(b_buckets[k]) / len(b_buckets[k]) for k in common],
+            )
+        )
+    return sum(rs) / len(rs) if rs else 0.0
+
+
 def _reliability(scored: list[tuple[datetime, float]], trials: int = 40) -> float:
     """Split-half correlation of the hourly curve — does it reproduce on itself?
 
@@ -260,6 +352,34 @@ def compute_curve(
     for p in posts:
         volume_buckets[p.created_at.hour] += 1
 
+    # Walk the ladder finest-first and keep the first resolution that reproduces on its
+    # own data. Failing every rung leaves resolution_hours at 0, which is `usable` False
+    # and no time-of-day advice — the same refusal as before, just arrived at after
+    # asking the easier questions too.
+    resolution_hours = 0
+    reliability = 0.0
+    for width in RESOLUTION_LADDER:
+        r = _reliability_of(scored, lambda d, w=width: d.hour // w, 24 // width)
+        if width == 1:
+            # Always report the hourly figure when the hourly curve is what shipped, so
+            # the number in the UI keeps meaning what it used to.
+            reliability = r
+        if r >= MIN_RELIABILITY:
+            resolution_hours = width
+            reliability = r
+            break
+
+    # Rewrite the 24 values as block means at the chosen width. The array shape is left
+    # alone on purpose: the renderer maps it to local time with real Date objects (see
+    # routers/posting_time.py on why timezone handling lives there), and that mapping
+    # should not have to learn about bucket widths. A block simply reads as a plateau.
+    if resolution_hours > 1:
+        blocks: dict[int, list[float]] = defaultdict(list)
+        for hour, value in enumerate(hourly):
+            blocks[hour // resolution_hours].append(value)
+        means = {k: sum(v) / len(v) for k, v in blocks.items()}
+        hourly = [means[h // resolution_hours] for h in range(24)]
+
     return Curve(
         platform=platform,
         hourly=hourly,
@@ -267,7 +387,10 @@ def compute_curve(
         volume=[volume_buckets[h] for h in range(24)],
         scored_posts=len(scored),
         scored_authors=len({p.author for p in posts}),
-        reliability=_reliability(scored),
+        reliability=reliability,
+        resolution_hours=resolution_hours,
+        # A different question, scored on its own terms — see the field's comment.
+        daily_reliability=_reliability_of(scored, lambda d: d.weekday(), 7),
         window_start=window_start.date().isoformat(),
         window_end=window_end.date().isoformat(),
         collected_at=datetime.now(timezone.utc).isoformat(),
@@ -468,6 +591,7 @@ def collect_mastodon(
     discovery_pages: int = 12,
     max_authors: int = 120,
     token: str = "",
+    token_instance: str = "",
 ) -> Curve:
     """One instance's own curve, from its own local accounts.
 
@@ -496,6 +620,30 @@ def collect_mastodon(
     from . import mastodon_gate as gate
 
     host = m.normalise_host(instance)
+
+    # A Mastodon access token is issued BY one instance and means nothing anywhere else —
+    # but sending it still hands that server a working credential for your account, which
+    # it can log and which can post as you. So a token is used only on the instance it
+    # belongs to, and silently dropped otherwise rather than "tried in case it works".
+    #
+    # An empty token_instance means the caller did not say, which is treated as not
+    # matching: reading a server anonymously is a worse result than leaking to it.
+    def _owner_host(value: str) -> str:
+        # normalise_host raises on empty or malformed input; here that just means
+        # "not this host", which is the safe answer.
+        try:
+            return m.normalise_host(value)
+        except m.MastodonError:
+            return ""
+
+    if token and _owner_host(token_instance) != host:
+        log.info(
+            "[posting-time] not sending the stored token to %s — it belongs to %s",
+            host,
+            token_instance or "(unstated)",
+        )
+        token = ""
+
     now = datetime.now(timezone.utc)
     end = now - timedelta(hours=settle_hours)
     start = end - timedelta(days=days)
@@ -573,10 +721,44 @@ def collect_mastodon(
             break
         time.sleep(m.POLITE_DELAY_SECONDS)
 
+    # --- fallback: find authors through hashtags -----------------------------
+    #
+    # mastodon.social answers /timelines/public with 200 and an EMPTY LIST — for every
+    # variant, authenticated or not. Not an error, not a permission refusal: the endpoint
+    # is simply switched off there, which is invisible to a caller that treats "no posts"
+    # as "quiet server". Its tag timelines and home timeline both work normally.
+    #
+    # So when the public timeline yields nobody, authors are discovered through hashtags
+    # instead. Tag timelines are federated, so remote accounts are dropped here — an acct
+    # containing "@" is somebody else's user, and this instance holds only the part of
+    # their engagement that happened to federate to it.
+    if not authors:
+        for tag in DISCOVERY_TAGS:
+            try:
+                batch = m.tag_timeline(host, tag, 40, token)
+            except m.MastodonError as err:
+                log.info("[posting-time] #%s on %s unavailable: %s", tag, host, str(err)[:90])
+                continue
+            for s_ in batch:
+                account = s_.account
+                if not account.id or account.id in authors or "@" in account.acct:
+                    continue
+                ok, _why = m.should_learn_from(s_)
+                if not ok:
+                    rejected += 1
+                    continue
+                if account.followers < MIN_FOLLOWERS_MASTODON:
+                    below_floor += 1
+                    continue
+                authors[account.id] = account
+            if len(authors) >= max_authors:
+                break
+            time.sleep(m.POLITE_DELAY_SECONDS)
+
     if not authors:
         return refused(
-            f"{host} has no local accounts that can be learned from — every author in "
-            f"its recent timeline either opted out of discovery or is under the "
+            f"{host} has no local accounts that can be learned from — every author it "
+            f"showed either opted out of discovery or is under the "
             f"{MIN_FOLLOWERS_MASTODON}-follower floor."
         )
 
@@ -628,9 +810,21 @@ def collect_mastodon(
     )
 
 
-def collect_mastodon_all(**kwargs) -> list[Curve]:
-    """One curve per accepted instance."""
-    return [collect_mastodon(host, **kwargs) for host in _accepted_mastodon_hosts()]
+def collect_mastodon_all(tokens: dict[str, str] | None = None, **kwargs) -> list[Curve]:
+    """One curve per accepted instance.
+
+    `tokens` maps host -> that host's own token. A single shared token is deliberately
+    not accepted here: this iterates several servers, and one credential handed to all of
+    them is exactly the mistake collect_mastodon guards against. Hosts with no entry are
+    read anonymously, which most instances allow.
+    """
+    tokens = tokens or {}
+    out: list[Curve] = []
+    for host in _accepted_mastodon_hosts():
+        out.append(
+            collect_mastodon(host, token=tokens.get(host, ""), token_instance=host, **kwargs)
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------
