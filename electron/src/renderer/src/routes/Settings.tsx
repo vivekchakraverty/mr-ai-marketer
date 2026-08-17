@@ -24,6 +24,7 @@ const EMPTY: AppSettings = {
   hfAssets: { influencerRepo: '', guestPostRepo: '', ctrModelRepo: '' },
   mastodonInstance: '',
   mastodonAccessToken: '',
+  mastodonAccounts: [],
   tumblr: { consumerKey: '', consumerSecret: '', oauthToken: '', oauthTokenSecret: '', blog: '' },
   googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
   brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '', modelRepo: '', imageBucket: '' },

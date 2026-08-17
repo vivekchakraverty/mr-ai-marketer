@@ -268,6 +268,9 @@ export default function PostingTimePanel({
 
   const localScores = hours.map((h) => h.score)
   const { best: windows, worst } = rankWindows(localScores, data.windowHours, data.baseline)
+  // 1 means the hourly curve held up; anything larger means the sample only
+  // supported wider blocks and the copy below must not imply otherwise.
+  const resolutionHours = data.sample?.resolutionHours ?? 1
   const best = windows[0]
   const slots = nextSlots(hourlyUtc, dailyUtc, data.baseline, 5)
 
@@ -295,6 +298,15 @@ export default function PostingTimePanel({
               <>
                 Your best window is <b>{best.label}</b> in {zoneName}. The quiet hours do better — engagement runs
                 opposite to how many people are posting.
+                {/* When the sample only supported wider blocks, say so rather than let a
+                    window imply the data could distinguish the hours inside it. */}
+                {resolutionHours > 1 && (
+                  <>
+                    {' '}
+                    This server&rsquo;s data resolves to <b>{resolutionHours}-hour blocks</b>, so treat
+                    anything finer than that as noise.
+                  </>
+                )}
               </>
             ) : (
               <>No hour beats an average slot by enough to call it.</>

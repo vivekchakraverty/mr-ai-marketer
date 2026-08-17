@@ -184,6 +184,11 @@ def _build(
     sample: dict,
     caveats: list[str],
 ) -> Recommendation:
+    # A window can never be narrower than the resolution the sample supported: if the
+    # data only distinguishes 4-hour blocks, suggesting a 3-hour slot inside one of them
+    # is precision the measurement does not have. The default stays the floor.
+    window_hours = max(WINDOW_HOURS, int(sample.get("resolutionHours") or 1))
+
     total_volume = sum(volume) or 1
     hours = [
         HourScore(
@@ -217,7 +222,7 @@ def _build(
         hours=hours,
         days=days,
         baseline=BASELINE,
-        windowHours=WINDOW_HOURS,
+        windowHours=window_hours,
         effect={
             "bestScore": best,
             "worstScore": worst,
@@ -271,7 +276,7 @@ def recommendation(
         key = f"mastodon:{host}"
 
     stored = ptc.load_curves().get(key)
-    if stored and stored.get("usable"):
+    if stored and (stored.get("usable") or stored.get("dailyUsable")):
         return _build(
             platform,
             stored["hourly"],
@@ -284,6 +289,11 @@ def recommendation(
                 "windowEnd": stored["windowEnd"],
                 "collectedAt": stored.get("collectedAt", ""),
                 "reliability": stored.get("reliability"),
+                # How wide the time-of-day buckets are. 1 is the hourly curve; anything
+                # larger means the sample supported a window and not an hour, and the
+                # panel must not claim more precision than that.
+                "resolutionHours": stored.get("resolutionHours", 1),
+                "dailyUsable": stored.get("dailyUsable", True),
                 "platform": platform,
                 "instance": stored.get("instance", ""),
                 "source": stored.get("source", ""),
@@ -359,6 +369,10 @@ class MeasureRequest(BaseModel):
     #: In the body rather than the query string on purpose: a token in a URL ends up
     #: in server logs and browser history, and this one can post as the user.
     accessToken: str = ""
+    #: Which instance issued that token. A Mastodon token is only valid on the server
+    #: that granted it, and sending it anywhere else hands a third party a credential
+    #: that can post as the user — so the collector drops it unless this matches.
+    tokenInstance: str = ""
 
 
 @router.post("/measure", response_model=MeasureResponse)
@@ -388,7 +402,9 @@ def measure(body: MeasureRequest) -> MeasureResponse:
     if not host:
         raise HTTPException(status_code=400, detail="Give a Mastodon host, e.g. toot.garden")
 
-    curve = ptc.collect_mastodon(host, days=days, token=body.accessToken)
+    curve = ptc.collect_mastodon(
+        host, days=days, token=body.accessToken, token_instance=body.tokenInstance
+    )
     ptc.save_curve(curve)
 
     if not curve.attempted:
