@@ -880,6 +880,72 @@ def verify_credentials(host: str, token: str) -> dict:
     }
 
 
+def author_statuses_in_window(
+    host: str,
+    account_id: str,
+    since: datetime,
+    until: datetime,
+    token: str = "",
+    max_pages: int = 4,
+) -> list[Status]:
+    """One account's own posts inside a time window, newest first.
+
+    THE POINT OF THIS IS DEPTH, WHICH A TIMELINE CANNOT GIVE. A public local timeline is
+    read newest-first and is as deep as the instance is quiet: measured, 600 posts covers
+    21 hours on hachyderm and 5 on mstdn.social. Anything that has to score *settled*
+    posts — which means older than a day — never reaches them on a busy server, however
+    many pages it reads. Asking each author for their own posts reaches back by
+    construction, and gives the several-posts-per-author that a within-author statistic
+    needs at the same time.
+
+    Stops at the window edge rather than paging a fixed number of times, so a prolific
+    account costs the same as a quiet one. `max_pages` is the ceiling for an account that
+    posts constantly.
+
+    Replies and boosts are excluded: a boost carries someone else's numbers, and a reply
+    into a thread is not a post in the sense being measured.
+    """
+    host = normalise_host(host)
+    out: list[Status] = []
+    max_id = ""
+
+    for _ in range(max_pages):
+        params: dict[str, Any] = {
+            "limit": PAGE_LIMIT,
+            "exclude_replies": True,
+            "exclude_reblogs": True,
+        }
+        if max_id:
+            params["max_id"] = max_id
+        try:
+            page = _request(host, f"/api/v1/accounts/{quote(account_id)}/statuses", token, params)
+        except MastodonError:
+            # One unreadable account (suspended, moved, rate-limited) must not cost the
+            # whole pass — the caller is sampling many.
+            break
+        if not page:
+            break
+
+        reached_past_window = False
+        for raw in page:
+            status = _parse_status(raw)
+            if status is None or status.created_at is None:
+                continue
+            if status.created_at < since:
+                reached_past_window = True
+                continue
+            if status.created_at > until:
+                continue  # too recent to have settled
+            out.append(status)
+
+        max_id = str(page[-1].get("id") or "")
+        if reached_past_window or not max_id:
+            break
+        time.sleep(POLITE_DELAY_SECONDS)
+
+    return out
+
+
 def account_statuses(
     host: str,
     token: str,

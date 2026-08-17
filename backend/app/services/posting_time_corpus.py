@@ -465,7 +465,8 @@ def collect_mastodon(
     instance: str,
     days: int = 31,
     settle_hours: int = 24,
-    pages: int = 60,
+    discovery_pages: int = 12,
+    max_authors: int = 120,
     token: str = "",
 ) -> Curve:
     """One instance's own curve, from its own local accounts.
@@ -520,16 +521,24 @@ def collect_mastodon(
     by_account: dict[str, list[Post]] = defaultdict(list)
     rejected = 0
     below_floor = 0
-    max_id = ""
-    seen_ids: set[str] = set()
     reached: datetime | None = None
 
-    for _ in range(pages):
+    # --- step 1: discover this instance's own accounts -----------------------
+    #
+    # The timeline is used for WHO posts here, not for what they posted. It is read
+    # newest-first and is only as deep as the instance is quiet — measured, 600 posts
+    # covers 21 hours on hachyderm and 5 on mstdn.social — so on any busy server every
+    # post it returns is newer than the settle cutoff and nothing survives scoring. That
+    # is why this used to report "no usable public posts" on exactly the large instances
+    # it should have worked best on.
+    authors: dict[str, m.Account] = {}
+    max_id = ""
+    for _ in range(discovery_pages):
         try:
             batch = m.public_timeline(host, limit=40, max_id=max_id, local=True, token=token)
         except m.MastodonError as err:
             log.warning("[posting-time] %s local timeline unavailable: %s", host, err)
-            if not seen_ids:
+            if not authors:
                 # Nothing was readable at all. Two different causes, and telling them
                 # apart is the difference between "try connecting your account" and
                 # "this server cannot be measured": the big instances refuse anonymous
@@ -547,40 +556,44 @@ def collect_mastodon(
             break
         if not batch:
             break
-
-        oldest: datetime | None = None
-        for s in batch:
-            if s.id in seen_ids:
+        for s_ in batch:
+            account = s_.account
+            if not account.id or account.id in authors:
                 continue
-            seen_ids.add(s.id)
-            if not s.created_at:
-                continue
-            created = s.created_at.astimezone(timezone.utc)
-            oldest = created if oldest is None or created < oldest else oldest
-            if not (start <= created <= end):
-                continue
-            ok, _why = m.should_learn_from(s)
+            ok, _why = m.should_learn_from(s_)
             if not ok:
                 rejected += 1
                 continue
-            if s.account.followers < MIN_FOLLOWERS_MASTODON:
+            if account.followers < MIN_FOLLOWERS_MASTODON:
                 below_floor += 1
                 continue
-            by_account[s.account.acct].append(
-                Post(
-                    author=f"{host}:{s.account.acct}",
-                    created_at=created,
-                    engagement=s.favourites + s.reblogs + s.replies,
-                    followers=s.account.followers,
-                )
-            )
-        if oldest:
-            reached = oldest if reached is None or oldest < reached else reached
+            authors[account.id] = account
         max_id = batch[-1].id
-        # Stop once the timeline has run past the far edge of the window.
-        if oldest and oldest < start:
+        if len(authors) >= max_authors:
             break
         time.sleep(m.POLITE_DELAY_SECONDS)
+
+    if not authors:
+        return refused(
+            f"{host} has no local accounts that can be learned from — every author in "
+            f"its recent timeline either opted out of discovery or is under the "
+            f"{MIN_FOLLOWERS_MASTODON}-follower floor."
+        )
+
+    # --- step 2: read each author's own posts, which reach back ---------------
+    for account in list(authors.values())[:max_authors]:
+        window = m.author_statuses_in_window(host, account.id, start, end, token=token)
+        for s_ in window:
+            created = s_.created_at.astimezone(timezone.utc)
+            reached = created if reached is None or created < reached else reached
+            by_account[account.acct].append(
+                Post(
+                    author=f"{host}:{account.acct}",
+                    created_at=created,
+                    engagement=s_.favourites + s_.reblogs + s_.replies,
+                    followers=account.followers,
+                )
+            )
 
     posts = [p for group in by_account.values() for p in group]
     eligible = sum(1 for group in by_account.values() if len(group) >= MIN_POSTS_PER_AUTHOR)
