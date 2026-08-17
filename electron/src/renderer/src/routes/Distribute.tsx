@@ -13,6 +13,7 @@ import {
 } from '../api/client'
 import AddChannelModal from '../components/AddChannelModal'
 import ApprovalQueueCard from '../components/ApprovalQueueCard'
+import BackendImage from '../components/BackendImage'
 import ChannelConnectModal from '../components/ChannelConnectModal'
 import MailComposer from '../components/MailComposer'
 import {
@@ -123,6 +124,9 @@ export default function Distribute(): React.JSX.Element {
   const [engineReady, setEngineReady] = useState<boolean | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [activeChannel, setActiveChannel] = useState<string | null>(null)
+  // Which history row is open. One at a time: these are read to answer a specific
+  // question ("what went out?", "why did that fail?"), not browsed side by side.
+  const [expandedJob, setExpandedJob] = useState<string | null>(null)
   const [customChannels, setCustomChannels] = useState<CustomChannelStatus[]>([])
   const [addOpen, setAddOpen] = useState(false)
   // The connect form for a user-added channel is generated from its piece's own auth
@@ -407,32 +411,57 @@ export default function Distribute(): React.JSX.Element {
 
       {recentJobs.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {recentJobs.map((job) => (
-            <div
-              key={job.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '11px 16px',
-                background: 'var(--surface)',
-                border: '2px solid var(--border)',
-                borderRadius: 14
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={tag}>
-                  {PLATFORM_SETUP_GUIDES[job.channel]?.label ??
-                    customChannels.find((c) => c.channel === job.channel)?.label ??
-                    job.channel}
-                </span>
-                <span style={{ font: "700 12.5px 'Quicksand'", color: job.status === 'failed' ? '#a34a3a' : 'var(--ink-muted)' }}>
-                  {STATUS_LABEL[job.status] ?? job.status}
-                </span>
+          {recentJobs.map((job) => {
+            const open = expandedJob === job.id
+            return (
+              <div
+                key={job.id}
+                style={{
+                  background: 'var(--surface)',
+                  border: '2px solid var(--border)',
+                  borderRadius: 14,
+                  overflow: 'hidden'
+                }}
+              >
+                <div
+                  onClick={() => setExpandedJob(open ? null : job.id)}
+                  title={open ? 'Hide details' : 'Show what was sent'}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '11px 16px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span
+                      style={{
+                        font: "700 12px 'Quicksand'",
+                        color: 'var(--ink-faint)',
+                        display: 'inline-block',
+                        width: 10,
+                        transform: open ? 'rotate(90deg)' : 'none',
+                        transition: 'transform .12s'
+                      }}
+                    >
+                      ›
+                    </span>
+                    <span style={tag}>
+                      {PLATFORM_SETUP_GUIDES[job.channel]?.label ??
+                        customChannels.find((c) => c.channel === job.channel)?.label ??
+                        job.channel}
+                    </span>
+                    <span style={{ font: "700 12.5px 'Quicksand'", color: job.status === 'failed' ? '#a34a3a' : 'var(--ink-muted)' }}>
+                      {STATUS_LABEL[job.status] ?? job.status}
+                    </span>
+                  </div>
+                  <span style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-faint)' }}>{formatDate(job.updated_at)}</span>
+                </div>
+                {open && <JobDetails job={job} />}
               </div>
-              <span style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-faint)' }}>{formatDate(job.updated_at)}</span>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -454,6 +483,98 @@ export default function Distribute(): React.JSX.Element {
       )}
 
       {addOpen && <AddChannelModal onClose={() => setAddOpen(false)} onAdded={refreshChannels} />}
+    </div>
+  )
+}
+
+
+/**
+ * What a send actually was, revealed when its row is clicked.
+ *
+ * The history used to show only channel, status and a date — enough to see that
+ * something failed and nothing to act on it. Everything worth knowing is already stored
+ * with the job: the exact text that went out, the image if there was one, when it was
+ * meant to go, and the engine's own error.
+ *
+ * `payload` is the JSON the engine was handed. It is parsed defensively because it is
+ * whatever was current when the job was queued — an older row may not have the fields a
+ * newer one does, and a history view is the last place that should throw.
+ */
+function JobDetails({ job }: { job: DistributionJob }): React.JSX.Element {
+  let payload: Record<string, unknown> = {}
+  try {
+    payload = job.payload ? (JSON.parse(job.payload) as Record<string, unknown>) : {}
+  } catch {
+    payload = {}
+  }
+
+  const text = typeof payload.text === 'string' ? payload.text : ''
+  const imageUrl = typeof payload.imageUrl === 'string' ? payload.imageUrl : ''
+  // Everything except the post body, which gets its own block above.
+  const extras = Object.entries(payload).filter(
+    ([k, v]) => k !== 'text' && k !== 'imageUrl' && typeof v === 'string' && v
+  )
+
+  return (
+    <div style={{ borderTop: '2px dashed var(--border-soft)', padding: '14px 16px', background: 'var(--surface-paper)' }}>
+      {job.error && (
+        <div
+          style={{
+            font: "600 12.5px/1.6 'Quicksand'",
+            color: 'var(--danger-ink)',
+            background: 'var(--tip-bg)',
+            border: '2px dashed var(--border-soft)',
+            borderRadius: 12,
+            padding: '9px 12px',
+            marginBottom: 12
+          }}
+        >
+          {job.error}
+        </div>
+      )}
+
+      {text ? (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ font: "700 11px 'Quicksand'", letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink-faint)', marginBottom: 5 }}>
+            What was sent
+          </div>
+          <div style={{ font: "600 13.5px/1.7 'Quicksand'", color: 'var(--ink)', whiteSpace: 'pre-wrap' }}>{text}</div>
+        </div>
+      ) : (
+        <div style={{ font: "600 12.5px 'Quicksand'", color: 'var(--ink-faint)', marginBottom: 12 }}>
+          No post text was recorded for this send.
+        </div>
+      )}
+
+      {imageUrl && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ font: "700 11px 'Quicksand'", letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink-faint)', marginBottom: 5 }}>
+            Image
+          </div>
+          {/* A locally generated image is served by this app; anything else is somebody
+              else's URL and is shown as a link rather than fetched. */}
+          {imageUrl.startsWith('/outputs/') ? (
+            <BackendImage
+              url={imageUrl}
+              alt="Attached image"
+              style={{ maxWidth: 220, borderRadius: 10, border: '2px solid var(--border)', display: 'block' }}
+            />
+          ) : (
+            <div style={{ font: "600 12.5px 'Quicksand'", color: 'var(--ink-muted)', wordBreak: 'break-all' }}>{imageUrl}</div>
+          )}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 18px', font: "600 12px 'Quicksand'", color: 'var(--ink-muted)' }}>
+        <span>Queued {formatDate(job.created_at)}</span>
+        {job.scheduled_at && <span>Scheduled for {formatDate(job.scheduled_at)}</span>}
+        {job.updated_at !== job.created_at && <span>Last change {formatDate(job.updated_at)}</span>}
+        {extras.map(([k, v]) => (
+          <span key={k}>
+            {k}: {String(v)}
+          </span>
+        ))}
+      </div>
     </div>
   )
 }
