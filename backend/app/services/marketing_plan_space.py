@@ -20,9 +20,14 @@ with weaker numbers and a source note that says so.
 Keyword Surfer is the one source that is deliberately *not* asked of the Space. It has to
 be scraped from a browser on a real consumer network, which a Space does not have — see
 services/keyword_surfer.py, which runs it here and merges the result in afterwards.
+
+What the Space *will* take is the finished figures. A collected run can be attached to a
+plan and travels as `supplied_keywords`, where it is used only if the Google Ads tier comes
+back empty — so the SEO plan is built on real numbers whenever there are any.
 """
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -124,6 +129,7 @@ def generate(
     model: str,
     hf_token: str,
     google_ads: dict | None = None,
+    supplied_keywords: list[dict] | None = None,
     copy_files_to: Path | None = None,
 ) -> PlanResult:
     ga = google_ads or {}
@@ -142,6 +148,9 @@ def generate(
             google_ads_client_secret=ga.get("clientSecret", ""),
             google_ads_refresh_token=ga.get("refreshToken", ""),
             google_ads_login_customer_id=ga.get("loginCustomerId", ""),
+            # Sent as JSON text because Gradio's typed inputs are scalars; the Space
+            # parses it and ignores anything malformed rather than failing the plan.
+            keyword_data_json=json.dumps(supplied_keywords) if supplied_keywords else "",
             api_name="/generate_plan",
         )
     except Exception as err:  # noqa: BLE001 — any transport/protocol failure

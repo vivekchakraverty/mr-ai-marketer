@@ -420,7 +420,8 @@ export async function generatePlan(fields: PlanFields): Promise<GeneratePlanResp
     hfToken: settings.hfToken,
     model: fields.model,
     googleAds: settings.googleAds,
-    keywordSurfer: settings.keywordSurfer
+    keywordSurfer: settings.keywordSurfer,
+    surferRunId: fields.surferRunId ?? ''
   })
 }
 

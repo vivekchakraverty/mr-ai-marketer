@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react'
-import { generatePlan, listPlanModels, type GeneratePlanResponse } from '../api/client'
+import {
+  generatePlan,
+  listPlanModels,
+  listSurferRuns,
+  type GeneratePlanResponse,
+  type SurferRunSummary
+} from '../api/client'
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import { PLAN_INDUSTRY_OPTIONS, PLAN_MODEL_OPTIONS } from '../state/types'
@@ -91,6 +97,16 @@ export default function Research(): React.JSX.Element {
   const [showSend, setShowSend] = useState(false)
   const [researchTool, setResearchTool] = useState<ResearchTool>('plan')
   const [planMode, setPlanMode] = useState<PlanMode>('plan')
+
+  // Finished Keyword Surfer runs, offered as the keyword basis for a plan. Reloaded when
+  // returning from the collector tab so a run collected just now is immediately pickable.
+  const [surferRuns, setSurferRuns] = useState<SurferRunSummary[]>([])
+  useEffect(() => {
+    if (researchTool !== 'plan') return
+    void listSurferRuns()
+      .then((r) => setSurferRuns(r.runs.filter((run) => run.completedCount > 0)))
+      .catch(() => undefined)
+  }, [researchTool, planMode])
 
   // Which models are on offer depends on where the plan is generated — a configured Space
   // enforces its own policy — so the backend is asked rather than assumed. PLAN_MODEL_OPTIONS
@@ -273,6 +289,28 @@ export default function Research(): React.JSX.Element {
           <div>
             <label style={label}>Geography (country code, optional)</label>
             <input value={fields.geo} onChange={(e) => setPlanField('geo', e.target.value)} placeholder="e.g. US" style={textInput} />
+          </div>
+
+          <div>
+            <label style={label}>Keyword data</label>
+            <select
+              value={fields.surferRunId ?? ''}
+              onChange={(e) => setPlanField('surferRunId', e.target.value)}
+              style={select}
+            >
+              <option value="">Research keywords automatically</option>
+              {surferRuns.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.createdAt.slice(0, 10)} — {r.completedCount} keyword
+                  {r.completedCount === 1 ? '' : 's'} ({r.country?.name ?? 'US'})
+                </option>
+              ))}
+            </select>
+            <div style={{ font: "600 11.5px 'Quicksand'", color: 'var(--ink-faint)', marginTop: 4 }}>
+              {surferRuns.length === 0
+                ? 'Collect keywords in the Keyword Surfer tab to build the SEO plan on real volumes.'
+                : 'The SEO plan clusters and sequences around these volumes, CPC and similarity. Google Ads credentials, if set, still win.'}
+            </div>
           </div>
 
           <div>

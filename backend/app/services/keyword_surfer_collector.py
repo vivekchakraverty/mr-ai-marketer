@@ -270,6 +270,43 @@ CSV_COLUMNS = [
 ]
 
 
+def run_as_keyword_data(run: dict) -> list[dict]:
+    """A finished run as the rich rows the plan Space's supplied-keyword tier expects.
+
+    Deliberately not the flattened table used for the sheet. The seed keeps its ideas
+    nested, each with its own volume, CPC and similarity, because that nesting is what
+    lets the SEO stage cluster by similarity and order work by volume — flattening it
+    would hand the planner a list of names and the same problem it had before.
+    """
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for result in run.get("results") or []:
+        keyword = str(result.get("query") or "").strip()
+        key = keyword.casefold()
+        if not keyword or key in seen:
+            continue
+        seen.add(key)
+        rows.append(
+            {
+                "keyword": keyword,
+                "volume": result.get("volume"),
+                "cpc": result.get("cpcDisplay") or result.get("cpc"),
+                "source": "keyword_surfer",
+                "related": [
+                    {
+                        "keyword": s.get("keyword"),
+                        "volume": s.get("volume"),
+                        "cpc": s.get("cpcDisplay") or s.get("cpc"),
+                        "similarity": s.get("similarity"),
+                    }
+                    for s in (result.get("suggestions") or [])
+                    if s.get("keyword")
+                ],
+            }
+        )
+    return rows
+
+
 def run_csv(run: dict) -> str:
     """One row per keyword, seeds and their suggestions interleaved under each seed."""
     rows = [CSV_COLUMNS]

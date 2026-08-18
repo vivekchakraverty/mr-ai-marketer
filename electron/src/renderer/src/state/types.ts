@@ -31,6 +31,10 @@ export interface LibraryItem {
 }
 
 export interface PlanFields {
+  /** A finished Keyword Surfer run to build the plan's keyword work on. Empty means the
+   * plan researches its own keywords, as it always did. Only used when Google Ads
+   * returns nothing, so attaching one never overrides measured figures. */
+  surferRunId?: string
   name: string
   productDescription: string
   budgetUsdPerMonth: number
@@ -130,6 +134,7 @@ export const PLAN_MODEL_OPTIONS = [
 export const BLOG_GOAL_OPTIONS = ['Informational', 'Persuasive', 'Authoritative', 'Thought Leadership'] as const
 
 export const DEFAULT_PLAN_FIELDS: PlanFields = {
+  surferRunId: '',
   name: '',
   productDescription: '',
   budgetUsdPerMonth: 2000,

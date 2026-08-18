@@ -511,6 +511,14 @@ own volumes and similarity -- is shown as you go and exports to CSV.
 The extension is downloaded once into your data directory on first use rather than shipped in
 the installer.
 
+**A collected run can be the basis of a plan.** The plan brief has a **Keyword data**
+dropdown listing your finished runs; pick one and the SEO plan is clustered and sequenced
+around those figures — grouped by similarity, ordered by volume, with CPC read as the
+commercial-intent signal that decides whether a term gets a landing page or a blog post.
+Each cluster reports its summed volume, so the plan can be checked against its own data.
+Google Ads credentials, if you have them, still win: an attached run is used only when the
+official tier returns nothing.
+
 A second, silent pass also runs after a plan is generated, merging any Surfer figures it can
 get into the plan's keyword sheet without overwriting measured Google Ads numbers. That one is
 unattended, so it is usually blocked; **Settings -> Keyword Surfer proxy** takes a residential

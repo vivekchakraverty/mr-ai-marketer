@@ -249,6 +249,9 @@ class GeneratePlanRequest(BaseModel):
     model: str = "Auto"
     googleAds: GoogleAdsCreds = GoogleAdsCreds()
     keywordSurfer: SurferProxy = SurferProxy()
+    # A finished Keyword Surfer run to build the plan's keyword work on. Used only when
+    # Google Ads returns nothing, so attaching one never overrides measured figures.
+    surferRunId: str = ""
 
 
 class KeywordRow(BaseModel):
@@ -656,6 +659,7 @@ def _generate_via_space(body: GeneratePlanRequest, industry_label: str) -> Gener
             model=marketing_plan_space.AUTO_MODEL_LABEL if body.model in ("Auto", "") else body.model,
             hf_token=body.hfToken,
             google_ads=body.googleAds.model_dump(),
+            supplied_keywords=_attached_keywords(body.surferRunId),
             copy_files_to=directory,
         )
     except marketing_plan_space.PlanSpaceError as err:
@@ -678,6 +682,24 @@ def _generate_via_space(body: GeneratePlanRequest, industry_label: str) -> Gener
         keyword_source_note=source_note,
         directory=directory,
     )
+
+
+def _attached_keywords(run_id: str) -> list[dict]:
+    """The keyword rows from an attached Surfer run, or nothing.
+
+    A missing or unreadable run is not an error worth refusing a plan over — the plan
+    simply falls back to researching its own keywords, which is what it did before anyone
+    attached anything.
+    """
+    if not (run_id or "").strip():
+        return []
+    run = keyword_surfer_collector.load_run(run_id)
+    if run is None:
+        print(f"[marketing-plan] attached Surfer run {run_id!r} not found — ignoring it")
+        return []
+    rows = keyword_surfer_collector.run_as_keyword_data(run)
+    print(f"[marketing-plan] attaching {len(rows)} keywords from Surfer run {run_id}")
+    return rows
 
 
 def _with_surfer(
