@@ -51,6 +51,17 @@ function brandForgeEnv(): Record<string, string> {
   return env
 }
 
+/** The Space that generates the marketing plan, handed over at spawn.
+ *
+ * app/config.py reads MARKETING_PLAN_SPACE from the environment, and nothing in a packaged
+ * install could ever write it — so the tool would have kept building plans locally no
+ * matter what the user set. Only set when present, so an operator exporting the variable
+ * before launch still wins. */
+function marketingPlanEnv(): Record<string, string> {
+  const { spaceUrl } = getSettings().marketingPlan
+  return spaceUrl.trim() ? { MARKETING_PLAN_SPACE: spaceUrl.trim() } : {}
+}
+
 export const BACKEND_PORT = 8756
 export const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`
 
@@ -92,6 +103,7 @@ function spawnDevBackend(): ChildProcessWithoutNullStreams {
       ...leadgenBackendEnv(),
       ...sharedTokenEnv(),
       ...brandForgeEnv(),
+      ...marketingPlanEnv(),
       ...hfAssetEnv()
     }
   })
@@ -123,6 +135,7 @@ function spawnPackagedBackend(): ChildProcessWithoutNullStreams {
       ...leadgenBackendEnv(),
       ...sharedTokenEnv(),
       ...brandForgeEnv(),
+      ...marketingPlanEnv(),
       ...hfAssetEnv()
     }
   })

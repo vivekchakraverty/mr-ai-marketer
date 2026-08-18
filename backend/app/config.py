@@ -102,6 +102,20 @@ BLOG_WRITER_SPACE = os.environ.get("BLOG_WRITER_SPACE", "").strip()
 EMAIL_WRITER_SPACE = os.environ.get("EMAIL_WRITER_SPACE", "").strip()
 BRANDFORGE_SPACE = os.environ.get("BRANDFORGE_SPACE", "").strip()
 MARKETING_PLAN_RAG_DATASET = os.environ.get("MARKETING_PLAN_RAG_DATASET", "").strip()
+
+# The Space that generates the marketing plan end to end — keyword research, the SEO,
+# social and ads plans, the composed strategy, and its own grounding. Set it and none of
+# the local pipeline below is used: no reference index to download, nothing to warm up.
+#
+# Unset is still a working configuration, and deliberately the default. The plan is then
+# built here exactly as it always was, so a checkout with no Space configured is not a
+# broken one. Point this at a Space you host or trust: the request carries your own
+# Hugging Face token so the inference is billed to you, but the token does leave this
+# machine to get there, which is the thing worth checking before you point it anywhere.
+#
+# Accepts either form gradio_client understands — "owner/space-name" or a full
+# https://...hf.space URL.
+MARKETING_PLAN_SPACE = os.environ.get("MARKETING_PLAN_SPACE", "").strip()
 # --- Local API authentication -------------------------------------------------
 #
 # Set by Electron when it spawns this process, and required on every request. The reason is

@@ -29,6 +29,42 @@ export interface BrandForgeSettings {
   imageBucket: string
 }
 
+/**
+ * The Space that generates the marketing plan — keyword research, the SEO, social and
+ * ads plans, the composed strategy, and its own grounding.
+ *
+ * Empty is a working configuration, not a broken one: the backend then builds the plan
+ * locally exactly as it always did. It lives here rather than only in the environment for
+ * the same reason brandForge.spaceId does — a packaged install has no way to set an env
+ * var, so a build without this had no path to configure it at all.
+ *
+ * Either form gradio_client understands: "owner/space-name" or a full https://...hf.space
+ * URL.
+ */
+export interface MarketingPlanSettings {
+  spaceUrl: string
+}
+
+/**
+ * Proxy for the Marketing Plan's Keyword Surfer tier, which scrapes Google with a
+ * headless browser.
+ *
+ * Google captchas automated browsers from ordinary addresses — measured from both a
+ * datacenter IP and a plain residential one — so without a residential proxy pool that
+ * source returns nothing and the plan keeps whatever the other keyword tiers found. Empty
+ * is perfectly valid; it just means Surfer stays blocked.
+ *
+ * Unlike the Google Ads credentials, these never leave this machine: the scrape runs in the
+ * app's own browser, because a Space has no consumer network to scrape from.
+ */
+export interface KeywordSurferSettings {
+  /** e.g. http://gate.provider.com:7000 or socks5://host:1080 */
+  proxyServer: string
+  /** Optional — an open proxy needs neither. */
+  proxyUsername: string
+  proxyPassword: string
+}
+
 // Topic Scout runs key-free by default. Everything here unlocks one extra source
 // whose provider requires identification (SEC and ReliefWeb), a key (FRED), or a
 // session (Twitter/X) — or just raises a rate limit (GitHub).
@@ -120,6 +156,8 @@ export interface AppSettings {
   // Engage, Tumblr side. Nothing else in the app reads these yet.
   tumblr: TumblrSettings
   googleAds: GoogleAdsSettings
+  keywordSurfer: KeywordSurferSettings
+  marketingPlan: MarketingPlanSettings
   brandForge: BrandForgeSettings
   topicScout: TopicScoutSettings
   telegram: TelegramSettings
@@ -133,10 +171,22 @@ export interface AppSettings {
  * other three. The nested groups merge key-by-key on write, so the type says so too.
  */
 export type SettingsPatch = Partial<
-  Omit<AppSettings, 'googleAds' | 'brandForge' | 'topicScout' | 'telegram' | 'hfAssets' | 'tumblr'>
+  Omit<
+    AppSettings,
+    | 'googleAds'
+    | 'keywordSurfer'
+    | 'marketingPlan'
+    | 'brandForge'
+    | 'topicScout'
+    | 'telegram'
+    | 'hfAssets'
+    | 'tumblr'
+  >
 > & {
   hfAssets?: Partial<HfAssetSettings>
   googleAds?: Partial<GoogleAdsSettings>
+  keywordSurfer?: Partial<KeywordSurferSettings>
+  marketingPlan?: Partial<MarketingPlanSettings>
   brandForge?: Partial<BrandForgeSettings>
   topicScout?: Partial<TopicScoutSettings>
   telegram?: Partial<TelegramSettings>
@@ -152,6 +202,8 @@ const EMPTY_SETTINGS: AppSettings = {
   mastodonAccounts: [],
   tumblr: { consumerKey: '', consumerSecret: '', oauthToken: '', oauthTokenSecret: '', blog: '' },
   googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
+  keywordSurfer: { proxyServer: '', proxyUsername: '', proxyPassword: '' },
+  marketingPlan: { spaceUrl: '' },
   brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '', modelRepo: '', imageBucket: '' },
   topicScout: {
     contactEmail: '',
@@ -184,6 +236,8 @@ function withDefaults(parsed: Partial<AppSettings>): AppSettings {
     ...parsed,
     hfAssets: { ...EMPTY_SETTINGS.hfAssets, ...(parsed.hfAssets ?? {}) },
     googleAds: { ...EMPTY_SETTINGS.googleAds, ...(parsed.googleAds ?? {}) },
+    keywordSurfer: { ...EMPTY_SETTINGS.keywordSurfer, ...(parsed.keywordSurfer ?? {}) },
+    marketingPlan: { ...EMPTY_SETTINGS.marketingPlan, ...(parsed.marketingPlan ?? {}) },
     brandForge: { ...EMPTY_SETTINGS.brandForge, ...(parsed.brandForge ?? {}) },
     topicScout: { ...EMPTY_SETTINGS.topicScout, ...(parsed.topicScout ?? {}) },
     telegram: { ...EMPTY_SETTINGS.telegram, ...(parsed.telegram ?? {}) },
@@ -274,6 +328,8 @@ export function setSettings(partial: SettingsPatch): AppSettings {
     ...partial,
     hfAssets: { ...current.hfAssets, ...(partial.hfAssets ?? {}) },
     googleAds: { ...current.googleAds, ...(partial.googleAds ?? {}) },
+    keywordSurfer: { ...current.keywordSurfer, ...(partial.keywordSurfer ?? {}) },
+    marketingPlan: { ...current.marketingPlan, ...(partial.marketingPlan ?? {}) },
     brandForge: { ...current.brandForge, ...(partial.brandForge ?? {}) },
     topicScout: { ...current.topicScout, ...(partial.topicScout ?? {}) },
     telegram: { ...current.telegram, ...(partial.telegram ?? {}) },

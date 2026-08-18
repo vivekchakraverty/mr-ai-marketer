@@ -450,7 +450,8 @@ Set these in your environment, or in a `.env` file in `backend/`:
 | `BLOG_WRITER_SPACE` | Blog Writer | The Space you deployed, e.g. `you/blog-writer`. |
 | `EMAIL_WRITER_SPACE` | Email Writer | Your email-model Space. |
 | `BRANDFORGE_SPACE` | Brand Studio | Your brand-model Space. Also settable in Settings. |
-| `MARKETING_PLAN_RAG_DATASET` | Marketing Plan | A private Hugging Face Dataset holding the reference index — see [The reference index](#the-reference-index). Without it, plans are still written, just without retrieval. |
+| `MARKETING_PLAN_SPACE` | Marketing Plan | A Space that generates the whole plan — see [Generating plans on a Space](#generating-plans-on-a-space). Without it, plans are built on this machine as before. Also settable in Settings. |
+| `MARKETING_PLAN_RAG_DATASET` | Marketing Plan | A private Hugging Face Dataset holding the reference index — see [The reference index](#the-reference-index). Only used when plans are built locally. Without it, plans are still written, just without retrieval. |
 | `MAIL_TRACKER_URL` | Email open/click tracking | Your tracking Space. Without it, tracking is simply off. |
 | `BRANDFORGE_MODEL` | Brand Studio on Modal | Your merged model repo. |
 | `BRANDFORGE_IMAGE_BUCKET` | Brand visuals | Your Hugging Face Bucket holding the image model. |
@@ -464,7 +465,66 @@ consumer key and secret, then open [api.tumblr.com/console](https://api.tumblr.c
 pick that application, and copy the token and token secret it hands you. All four are secrets.
 The blog name is optional — leave it blank and the app acts as your primary blog.
 
+### Generating plans on a Space
+
+By default the Marketing Plan tool does everything on your machine: keyword research, the
+SEO, social and paid-ads plans, the composed strategy, and the retrieval that grounds it —
+which is why it needs [the reference index](#the-reference-index) below.
+
+Set `MARKETING_PLAN_SPACE` and all of that moves to a Space instead. Nothing to download,
+no index to warm up, and the Space does its own grounding. The tool works either way; the
+local path is untouched and still runs when no Space is configured.
+
+Three things worth knowing before you point it somewhere:
+
+- **You are still billed for the models.** Your Hugging Face token travels with the request
+  and the inference runs on your account, exactly as it did locally. What is new is that the
+  token leaves your machine to get there — a fine-grained, inference-scoped token is worth
+  using unless the Space is your own.
+- **Your Google Ads credentials travel too**, if you set them in Settings, so the official
+  keyword tier runs against *your* account. Leave them empty and the Space falls back through
+  its own free tiers -- Google Autocomplete and Trends, then clearly labelled LLM estimates --
+  which give relative interest rather than real volumes. The plan always states which one it
+  used, and Google Ads credentials are the only route to measured search volume and CPC.
+  The API is free; the fiddly part is the refresh token, so there is a script for it:
+  `python scripts/google_ads/auth.py --client-id ... --client-secret ...` runs the consent
+  flow and prints one. Add `--developer-token` and it also verifies the credentials against
+  the live API and lists your usable customer IDs. See
+  [scripts/google_ads/README.md](scripts/google_ads/README.md).
+- **What comes back is a plan, not a corpus.** The Space assembles its grounding internally
+  and returns only the finished text.
+
+### Keyword Surfer
+
+**Keyword Surfer** publishes its volumes only inside a browser on a real Google results page,
+so reading them means driving one. Google answers a *hidden* automated browser with a captcha
+and no results -- measured from a datacenter address and from ordinary home broadband, with
+automation tells masked and a real window on screen. Hiding harder does not fix it.
+
+So the app does the opposite, in **Marketing Plan -> Keyword Surfer**. It opens a visible
+Chromium with the extension loaded and a profile of its own, searches your keywords one at a
+time with a cooldown between them, and when Google asks for a check it **stops and waits for
+you** to complete it in that window before carrying on. The profile is kept, so the next run
+is not asked again. What you collect -- seed volume, CPC, and related keyword ideas with their
+own volumes and similarity -- is shown as you go and exports to CSV.
+
+The extension is downloaded once into your data directory on first use rather than shipped in
+the installer.
+
+A second, silent pass also runs after a plan is generated, merging any Surfer figures it can
+get into the plan's keyword sheet without overwriting measured Google Ads numbers. That one is
+unattended, so it is usually blocked; **Settings -> Keyword Surfer proxy** takes a residential
+proxy if you have one. Leaving it empty costs only what that pass would have added -- the tab
+above is the reliable way to collect Surfer data.
+
+Every part of the result — the composed plan, the keyword research, and the SEO, social and
+ads plans — is written to disk as both Markdown and Word, plus the keyword table as CSV and
+Excel. The **Save a copy** row under the plan opens any of them.
+
 ### The reference index
+
+Only needed when plans are built locally — a configured `MARKETING_PLAN_SPACE` does its own
+grounding and downloads nothing.
 
 The Marketing Plan tool grounds its advice in a library of marketing books, stored as a
 searchable index of about 104,000 passages. That index is roughly **1.1 GB** — too big to put

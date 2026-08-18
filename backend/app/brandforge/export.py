@@ -5,13 +5,13 @@ python-docx only.
 from __future__ import annotations
 
 import io
-import re
 from datetime import date
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt
 
+from ..services.markdown_docx import HEADING_RE, render_markdown_body
 from .archetypes import ARCHETYPES_BY_ID
 from .imaging import extract_palette, palette_markdown, strip_palette_block
 from .intake import BrandIntake
@@ -60,83 +60,6 @@ def to_markdown(intake: BrandIntake, sections: dict[str, str]) -> str:
 
 # --- docx ----------------------------------------------------------------
 
-_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
-_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
-
-
-def _add_markdown_paragraph(doc: Document, line: str) -> None:
-    para = doc.add_paragraph()
-    pos = 0
-    for m in _BOLD_RE.finditer(line):
-        if m.start() > pos:
-            para.add_run(line[pos : m.start()])
-        run = para.add_run(m.group(1))
-        run.bold = True
-        pos = m.end()
-    if pos < len(line):
-        para.add_run(line[pos:])
-
-
-def _add_markdown_table(doc: Document, lines: list[str]) -> None:
-    rows = [
-        [cell.strip() for cell in line.strip().strip("|").split("|")]
-        for line in lines
-        if line.strip().startswith("|")
-    ]
-    rows = [r for r in rows if not all(re.fullmatch(r"-+", c) for c in r)]
-    if not rows:
-        return
-    table = doc.add_table(rows=len(rows), cols=len(rows[0]))
-    table.style = "Light Grid Accent 1"
-    for i, row in enumerate(rows):
-        for j, cell in enumerate(row):
-            if j < len(table.columns):
-                table.cell(i, j).text = cell
-            if i == 0:
-                for p in table.cell(i, j).paragraphs:
-                    for r in p.runs:
-                        r.bold = True
-
-
-def _render_markdown_body(doc: Document, markdown: str) -> None:
-    lines = markdown.splitlines()
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        stripped = line.strip()
-
-        if not stripped:
-            i += 1
-            continue
-
-        heading_match = _HEADING_RE.match(stripped)
-        if heading_match:
-            level = min(len(heading_match.group(1)), 4)
-            doc.add_heading(heading_match.group(2), level=level)
-            i += 1
-            continue
-
-        if stripped.startswith("|"):
-            table_lines = []
-            while i < len(lines) and lines[i].strip().startswith("|"):
-                table_lines.append(lines[i])
-                i += 1
-            _add_markdown_table(doc, table_lines)
-            continue
-
-        if stripped.startswith(("- ", "* ")):
-            doc.add_paragraph(stripped[2:].strip(), style="List Bullet")
-            i += 1
-            continue
-
-        if re.match(r"^\d+\.\s", stripped):
-            doc.add_paragraph(re.sub(r"^\d+\.\s", "", stripped), style="List Number")
-            i += 1
-            continue
-
-        _add_markdown_paragraph(doc, stripped)
-        i += 1
-
 
 def to_docx_bytes(intake: BrandIntake, sections: dict[str, str]) -> bytes:
     doc = Document()
@@ -169,9 +92,9 @@ def to_docx_bytes(intake: BrandIntake, sections: dict[str, str]) -> bytes:
             content = _display_content(sections[name].strip())
             doc.add_heading(name, level=2)
             body_lines = content.splitlines()
-            if body_lines and _HEADING_RE.match(body_lines[0].strip()):
+            if body_lines and HEADING_RE.match(body_lines[0].strip()):
                 body_lines = body_lines[1:]
-            _render_markdown_body(doc, "\n".join(body_lines))
+            render_markdown_body(doc, "\n".join(body_lines))
 
     buf = io.BytesIO()
     doc.save(buf)

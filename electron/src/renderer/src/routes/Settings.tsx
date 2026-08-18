@@ -7,6 +7,7 @@ import {
   provisionModalBackend,
   pushLeadgenEnv,
   pushSocialPostEnv,
+  testKeywordSurfer,
   verifyHfToken,
   verifyLeadgen,
   verifySocialPost,
@@ -27,6 +28,8 @@ const EMPTY: AppSettings = {
   mastodonAccounts: [],
   tumblr: { consumerKey: '', consumerSecret: '', oauthToken: '', oauthTokenSecret: '', blog: '' },
   googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
+  keywordSurfer: { proxyServer: '', proxyUsername: '', proxyPassword: '' },
+  marketingPlan: { spaceUrl: '' },
   brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '', modelRepo: '', imageBucket: '' },
   topicScout: {
     contactEmail: '',
@@ -249,6 +252,33 @@ export default function Settings(): React.JSX.Element {
       setChecks((c) => ({
         ...c,
         [target]: { state: 'error', detail: err instanceof Error ? err.message : String(err) }
+      }))
+    }
+  }
+
+  /** One real Keyword Surfer lookup, so a proxy can be checked in seconds rather than by
+   * generating a whole plan and reading the log afterwards.
+   *
+   * Nothing is persisted first: the backend reads the proxy off the request body, so what
+   * gets tested is exactly what is typed in the boxes above, unsaved edits included.
+   */
+  async function runSurferCheck(): Promise<void> {
+    setChecks((c) => ({ ...c, surfer: { state: 'checking' } }))
+    try {
+      const res = await testKeywordSurfer(settings.keywordSurfer)
+      // The exit address is what separates "blocked" from "blocked, and not even through
+      // the proxy I configured" — worth showing on success and failure alike.
+      const where = res.exitIp
+        ? ` (seen as ${res.exitIp}${res.usingProxy ? ', via your proxy' : ', no proxy'})`
+        : ''
+      setChecks((c) => ({
+        ...c,
+        surfer: { state: res.ok ? 'ok' : 'error', detail: res.detail + where }
+      }))
+    } catch (err) {
+      setChecks((c) => ({
+        ...c,
+        surfer: { state: 'error', detail: err instanceof Error ? err.message : String(err) }
       }))
     }
   }
@@ -648,9 +678,29 @@ export default function Settings(): React.JSX.Element {
           </Section>
 
           <Section
+            title="Marketing Plan Space"
+            optional
+            blurb="Generate plans on a Hugging Face Space instead of on this machine — no reference index to download. Leave it empty to keep building plans locally. Generation is billed to your own Hugging Face account either way, but your token is sent to the Space to get there, so point this only at one you host or trust."
+            accent="var(--tool-plan)"
+          >
+            <div>
+              <label style={label}>Space</label>
+              <input
+                type="text"
+                value={settings.marketingPlan.spaceUrl}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, marketingPlan: { ...s.marketingPlan, spaceUrl: e.target.value } }))
+                }
+                placeholder="owner/space-name or https://owner-space-name.hf.space"
+                style={textInput}
+              />
+            </div>
+          </Section>
+
+          <Section
             title="Google Ads API"
             optional
-            blurb="Real search-volume and CPC data for the Marketing Plan Generator. Without it, keyword research falls back to free estimates."
+            blurb="Real search-volume and CPC data for the Marketing Plan Generator. Without it, keyword research falls back to free estimates — a headless-Chromium Keyword Surfer scrape, then Google Autocomplete and Trends, then clearly labelled LLM estimates. These credentials are used whether the plan is built here or on the Space."
             accent="var(--tool-plan)"
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -675,6 +725,40 @@ export default function Settings(): React.JSX.Element {
                   />
                 </div>
               ))}
+            </div>
+          </Section>
+
+          <Section
+            title="Keyword Surfer proxy"
+            optional
+            blurb="Keyword Surfer only publishes its volumes inside a browser on a real Google results page, so the app reads them here on your machine rather than on the Space. Google shows automated browsers a captcha from ordinary addresses, home broadband included — a residential proxy is what gets past it. Without one this source stays blocked and the other keyword sources are used instead. These stay on this machine."
+            accent="var(--tool-plan)"
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {(
+                [
+                  ['proxyServer', 'Proxy server', 'http://gate.provider.com:7000', false],
+                  ['proxyUsername', 'Username', 'Optional — open proxies need none', false],
+                  ['proxyPassword', 'Password', '', true]
+                ] as [keyof AppSettings['keywordSurfer'], string, string, boolean][]
+              ).map(([key, text, hint, secret]) => (
+                <div key={key}>
+                  <label style={label}>{text}</label>
+                  <input
+                    type={secret ? 'password' : 'text'}
+                    value={settings.keywordSurfer[key]}
+                    onChange={(e) =>
+                      setSettings((s) => ({ ...s, keywordSurfer: { ...s.keywordSurfer, [key]: e.target.value } }))
+                    }
+                    placeholder={hint}
+                    style={textInput}
+                  />
+                </div>
+              ))}
+            </div>
+            <CheckRow check={checks.surfer} onRun={runSurferCheck} labelText="Test proxy" />
+            <div style={{ font: "600 11.5px 'Quicksand'", color: 'var(--ink-faint)', marginTop: 6 }}>
+              Starts a browser and fetches one Google results page, so give it a few seconds.
             </div>
           </Section>
 

@@ -227,13 +227,185 @@ export function exportTracker(
   return postJson('/tracker/export', { format, workbook, sheets })
 }
 
+/** One row of the keyword research table. Blank means the tier that ran publishes no
+ * such number — not zero. */
+export interface KeywordRow {
+  keyword: string
+  volume: string
+  cpc: string
+  related: string[]
+  source: string
+  sourceLabel: string
+}
+
+/** One exported file on disk. `aspect` is which part of the plan it holds — 'full',
+ * 'keywords', 'seo', 'social', 'ads', or 'bundle' for all of them in one document. */
+export interface PlanFile {
+  aspect: string
+  label: string
+  format: string
+  path: string
+  url: string
+}
+
 export interface GeneratePlanResponse {
   markdown: string
   seoMarkdown: string
   socialMarkdown: string
   adsMarkdown: string
+  keywordsMarkdown: string
+  keywordRows: KeywordRow[]
   keywordSourceNote: string
   libraryId: string
+  files: PlanFile[]
+}
+
+/**
+ * The models the Marketing Plan can actually be generated with.
+ *
+ * Asked rather than hardcoded because the answer depends on where generation happens: a
+ * configured Space enforces its own model policy, and offering the local pipeline's list
+ * while generating there would let the user pick something the Space rejects.
+ */
+// --- Keyword Surfer collector ----------------------------------------------
+//
+// A visible browser the user can reach into, driven from the Marketing Plan screen. The
+// run happens on the backend; this screen starts it and polls.
+
+export interface SurferCountry {
+  code: string
+  name: string
+  language: string
+}
+
+export interface SurferConfig {
+  countries: SurferCountry[]
+  minDelayMs: number
+  maxKeywordsPerRun: number
+  storeUrl: string
+}
+
+export interface SurferSuggestion {
+  keyword: string
+  volume: number | null
+  cpc: number | null
+  cpcDisplay: string | null
+  similarity: number | null
+}
+
+export interface SurferResult {
+  query: string
+  status: string
+  message: string
+  volume: number | null
+  cpc: number | null
+  cpcDisplay: string | null
+  countryLabel: string | null
+  suggestions: SurferSuggestion[]
+  collectedAt: string
+}
+
+export interface SurferRun {
+  id: string
+  status: string
+  message: string
+  keywordCount: number
+  completedCount: number
+  currentIndex: number
+  settings: { country: SurferCountry; delayMs: number; maxSuggestions: number }
+  results: SurferResult[]
+}
+
+export interface SurferBrowserState {
+  running: boolean
+  extensionInstalled: boolean
+  error: string
+  profileDirectory: string
+  storeUrl: string
+}
+
+export interface SurferStatus {
+  browser: SurferBrowserState
+  run: SurferRun | null
+}
+
+export interface SurferRunSummary {
+  id: string
+  status: string
+  createdAt: string
+  finishedAt: string | null
+  keywordCount: number
+  completedCount: number
+  country: SurferCountry
+}
+
+export function getSurferConfig(): Promise<SurferConfig> {
+  return getJson('/marketing-plan/keyword-surfer/config')
+}
+
+export function getSurferStatus(): Promise<SurferStatus> {
+  return getJson('/marketing-plan/keyword-surfer/status')
+}
+
+export function openSurferBrowser(target?: 'store'): Promise<SurferBrowserState> {
+  return postJson('/marketing-plan/keyword-surfer/browser/open', target ? { target } : {})
+}
+
+export function closeSurferBrowser(): Promise<SurferBrowserState> {
+  return postJson('/marketing-plan/keyword-surfer/browser/close', {})
+}
+
+export function startSurferRun(body: {
+  keywords: string[]
+  country: string
+  delayMs: number
+  maxSuggestions: number
+}): Promise<SurferRun> {
+  return postJson('/marketing-plan/keyword-surfer/runs', body)
+}
+
+export function cancelSurferRun(): Promise<SurferRun> {
+  return postJson('/marketing-plan/keyword-surfer/runs/cancel', {})
+}
+
+export function listSurferRuns(): Promise<{ runs: SurferRunSummary[] }> {
+  return getJson('/marketing-plan/keyword-surfer/runs')
+}
+
+/** Writes the CSV into the outputs tree and returns its path, for window.api.openFile. */
+export function exportSurferRun(runId: string): Promise<{ path: string; url: string }> {
+  return postJson(`/marketing-plan/keyword-surfer/runs/${encodeURIComponent(runId)}/export`, {})
+}
+
+/** A finished run as keyword rows, in the shape the plan's keyword sheet already uses. */
+export function surferRunAsRows(runId: string): Promise<KeywordRow[]> {
+  return postJson(`/marketing-plan/keyword-surfer/runs/${encodeURIComponent(runId)}/to-plan`, {})
+}
+
+export interface SurferTestResult {
+  ok: boolean
+  detail: string
+  exitIp: string
+  usingProxy: boolean
+  sample: KeywordRow | null
+}
+
+/**
+ * One real Keyword Surfer lookup, to check a proxy without generating a whole plan.
+ *
+ * Slow by nature — it starts a browser and fetches a Google results page — so expect
+ * this to take a few seconds rather than to feel instant.
+ */
+export function testKeywordSurfer(proxy: {
+  proxyServer: string
+  proxyUsername: string
+  proxyPassword: string
+}): Promise<SurferTestResult> {
+  return postJson('/marketing-plan/keyword-surfer/test', proxy)
+}
+
+export function listPlanModels(): Promise<{ models: string[] }> {
+  return getJson('/marketing-plan/models')
 }
 
 export async function generatePlan(fields: PlanFields): Promise<GeneratePlanResponse> {
@@ -247,7 +419,8 @@ export async function generatePlan(fields: PlanFields): Promise<GeneratePlanResp
     geo: fields.geo,
     hfToken: settings.hfToken,
     model: fields.model,
-    googleAds: settings.googleAds
+    googleAds: settings.googleAds,
+    keywordSurfer: settings.keywordSurfer
   })
 }
 

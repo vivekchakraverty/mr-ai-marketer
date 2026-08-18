@@ -1,16 +1,17 @@
-import { useState } from 'react'
-import { generatePlan, type GeneratePlanResponse } from '../api/client'
+import { useEffect, useState } from 'react'
+import { generatePlan, listPlanModels, type GeneratePlanResponse } from '../api/client'
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import { PLAN_INDUSTRY_OPTIONS, PLAN_MODEL_OPTIONS } from '../state/types'
 import BrandForge from '../components/BrandForge'
 import InfluencerDb from '../components/InfluencerDb'
+import KeywordSurfer from '../components/KeywordSurfer'
 import MarkdownPanel from '../components/MarkdownPanel'
 import SendToDistributionModal from '../components/SendToDistributionModal'
 import TopicScout from '../components/TopicScout'
 import LeadGenPanel from '../components/leadgen/LeadGenPanel'
 import ScreenBackdrop from '../components/ScreenBackdrop'
-import { card, label, primaryButton, primaryButtonSmall, sectionEyebrow, segGroup, segItem, select, textInput, textarea } from '../styles/styleKit'
+import { card, label, primaryButton, primaryButtonSmall, secondaryButtonSmall, sectionEyebrow, segGroup, segItem, select, textInput, textarea } from '../styles/styleKit'
 import SaveButton from '../components/SaveButton'
 
 type ResearchTool = 'plan' | 'brand' | 'scout' | 'leads' | 'influencers'
@@ -50,13 +51,33 @@ const TOOL_HEADINGS: Record<ResearchTool, { title: string; subtitle: string }> =
   }
 }
 
-type Tab = 'full' | 'seo' | 'social' | 'ads'
+// The two halves of the Marketing Plan tool. Keyword Surfer is a workbench rather than a
+// view of a generated plan, so it sits beside the generator instead of inside its result
+// tabs — which only exist once a plan has been produced.
+type PlanMode = 'plan' | 'surfer'
+const PLAN_MODES: { key: PlanMode; label: string }[] = [
+  { key: 'plan', label: 'Generate plan' },
+  { key: 'surfer', label: 'Keyword Surfer' }
+]
+
+type Tab = 'full' | 'keywords' | 'seo' | 'social' | 'ads'
 const TABS: { key: Tab; label: string }[] = [
   { key: 'full', label: 'Full Plan' },
+  { key: 'keywords', label: 'Keyword Research' },
   { key: 'seo', label: 'SEO Plan' },
   { key: 'social', label: 'Social Plan' },
   { key: 'ads', label: 'Ads Plan' }
 ]
+
+// The order downloads are offered in: the whole plan first, then the single aspect the
+// user is currently looking at, then everything else. Word before markdown within a pair,
+// because the document is what most people want and the markdown is for the ones who
+// asked for it by name.
+const FORMAT_ORDER = ['docx', 'md', 'xlsx', 'csv']
+
+function formatLabel(fmt: string): string {
+  return fmt === 'docx' ? 'Word' : fmt === 'md' ? 'Markdown' : fmt === 'xlsx' ? 'Excel' : fmt.toUpperCase()
+}
 
 export default function Research(): React.JSX.Element {
   const fields = useAppStore((s) => s.fields.plan)
@@ -69,6 +90,31 @@ export default function Research(): React.JSX.Element {
   const [error, setError] = useState('')
   const [showSend, setShowSend] = useState(false)
   const [researchTool, setResearchTool] = useState<ResearchTool>('plan')
+  const [planMode, setPlanMode] = useState<PlanMode>('plan')
+
+  // Which models are on offer depends on where the plan is generated — a configured Space
+  // enforces its own policy — so the backend is asked rather than assumed. PLAN_MODEL_OPTIONS
+  // stays as the fallback for the local pipeline and for a backend still starting up.
+  const [models, setModels] = useState<readonly string[]>(PLAN_MODEL_OPTIONS)
+  useEffect(() => {
+    let cancelled = false
+    void listPlanModels()
+      .then((res) => {
+        if (!cancelled && res.models.length > 0) setModels(res.models)
+      })
+      .catch(() => {
+        /* keep the fallback; a dropdown is not worth an error banner */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // A model the current engine does not offer would otherwise sit in the field, look
+  // selected, and be rejected on generate. Fall back to Auto, which every engine accepts.
+  useEffect(() => {
+    if (!models.includes(fields.model)) setPlanField('model', 'Auto')
+  }, [models, fields.model, setPlanField])
 
   async function handleGenerate(): Promise<void> {
     if (!requireHf()) return
@@ -91,8 +137,25 @@ export default function Research(): React.JSX.Element {
   }
 
   const tabMarkdown: Record<Tab, string> = result
-    ? { full: result.markdown, seo: result.seoMarkdown, social: result.socialMarkdown, ads: result.adsMarkdown }
-    : { full: '', seo: '', social: '', ads: '' }
+    ? {
+        full: result.markdown,
+        keywords: result.keywordsMarkdown,
+        seo: result.seoMarkdown,
+        social: result.socialMarkdown,
+        ads: result.adsMarkdown
+      }
+    : { full: '', keywords: '', seo: '', social: '', ads: '' }
+
+  // A plan generated before this build has no `files` — an older Library item reopened,
+  // or a backend that hasn't restarted. Treat it as "nothing to download" rather than
+  // letting the map below throw on undefined.
+  const files = result?.files ?? []
+  const downloads = [...files].sort((a, b) => {
+    const rank = (f: (typeof files)[number]): number =>
+      (f.aspect === 'bundle' ? 0 : f.aspect === tab ? 1 : 2) * 10 +
+      Math.max(FORMAT_ORDER.indexOf(f.format), 0)
+    return rank(a) - rank(b)
+  })
 
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '30px 34px 60px' }}>
@@ -107,7 +170,9 @@ export default function Research(): React.JSX.Element {
           {TOOL_HEADINGS[researchTool].title}
         </div>
         <div style={{ font: "600 14px 'Quicksand'", color: 'var(--ink-muted)', marginTop: 4 }}>
-          {TOOL_HEADINGS[researchTool].subtitle}
+          {researchTool === 'plan' && planMode === 'surfer'
+            ? 'Collect real search volumes, CPC and related keyword ideas from the Keyword Surfer extension, in a browser you can see and step into when Google asks.'
+            : TOOL_HEADINGS[researchTool].subtitle}
         </div>
 
         <div style={{ ...segGroup, marginTop: 14 }}>
@@ -128,7 +193,25 @@ export default function Research(): React.JSX.Element {
       {researchTool === 'leads' && <LeadGenPanel />}
       {researchTool === 'influencers' && <InfluencerDb />}
 
-      <div style={{ display: researchTool === 'plan' ? 'flex' : 'none', gap: 24, alignItems: 'flex-start' }}>
+      {researchTool === 'plan' && (
+        <div style={{ ...segGroup, marginBottom: 20, width: 'fit-content' }}>
+          {PLAN_MODES.map((m) => (
+            <div key={m.key} style={segItem(planMode === m.key)} onClick={() => setPlanMode(m.key)}>
+              {m.label}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {researchTool === 'plan' && planMode === 'surfer' && <KeywordSurfer />}
+
+      <div
+        style={{
+          display: researchTool === 'plan' && planMode === 'plan' ? 'flex' : 'none',
+          gap: 24,
+          alignItems: 'flex-start'
+        }}
+      >
         <div style={{ width: 400, flexShrink: 0, ...card, display: 'flex', flexDirection: 'column', gap: 17 }}>
           <div style={sectionEyebrow}>Brief</div>
 
@@ -195,7 +278,7 @@ export default function Research(): React.JSX.Element {
           <div>
             <label style={label}>Model</label>
             <select value={fields.model} onChange={(e) => setPlanField('model', e.target.value)} style={select}>
-              {PLAN_MODEL_OPTIONS.map((o) => (
+              {models.map((o) => (
                 <option key={o}>{o}</option>
               ))}
             </select>
@@ -243,6 +326,27 @@ export default function Research(): React.JSX.Element {
               <div style={{ marginTop: 6 }}>
                 <MarkdownPanel markdown={tabMarkdown[tab]} />
               </div>
+
+              {downloads.length > 0 && (
+                <div style={{ marginTop: 22, paddingTop: 18, borderTop: '2px dashed var(--border-soft)' }}>
+                  <div style={sectionEyebrow}>Save a copy</div>
+                  <div style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-faint)', marginTop: 4 }}>
+                    Every part of the plan is already written to disk. Click one to open it.
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+                    {downloads.map((f) => (
+                      <div
+                        key={f.path}
+                        style={f.aspect === 'bundle' ? primaryButtonSmall : secondaryButtonSmall}
+                        title={f.path}
+                        onClick={() => void window.api.openFile(f.path)}
+                      >
+                        {f.label} · {formatLabel(f.format)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div
                 style={{
