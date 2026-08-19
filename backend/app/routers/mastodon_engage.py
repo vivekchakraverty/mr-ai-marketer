@@ -43,6 +43,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..services.genqueue import queue_slot
 from pydantic import BaseModel
 
+from ..services import image_prompt
 from ..services import mastodon as masto
 from ..services import mastodon_gate as gate
 from ..services.mastodon import MastodonError
@@ -111,6 +112,11 @@ class ComposeRequest(EngageRequest):
     language: str = ""
     inReplyToId: str = ""
     sensitive: bool = False
+    #: A /outputs URL for an image this app generated. Empty posts text only.
+    imageUrl: str = ""
+    #: Alt text. Much of the fediverse treats missing alt text as rude, and several
+    #: instances' rules ask for it outright, so it is a first-class field here.
+    imageAlt: str = ""
     # Sent by the composer, stable across retries of the same draft, so a
     # double-submit or a retried timeout cannot publish the same post twice.
     idempotencyKey: str = ""
@@ -1134,6 +1140,23 @@ def compose(body: ComposeRequest) -> ActionOut:
         payload["language"] = body.language.strip()[:8]
     if body.inReplyToId.strip():
         payload["in_reply_to_id"] = body.inReplyToId.strip()
+
+    if body.imageUrl.strip():
+        # Uploaded first and separately: Mastodon takes media on its own endpoint and
+        # the status then references the id. A failure here must stop the post rather
+        # than quietly publish the words without the picture they were written around.
+        try:
+            filename, content = image_prompt.attachment_bytes(body.imageUrl)
+        except image_prompt.ImageRenderError as err:
+            # 400, not 502: the picture is unusable before Mastodon is involved.
+            raise HTTPException(status_code=400, detail=str(err)) from None
+        try:
+            media_id = masto.upload_media(
+                host, token, filename, content, description=body.imageAlt.strip()
+            )
+        except MastodonError as err:
+            raise HTTPException(status_code=502, detail=str(err)) from None
+        payload["media_ids"] = [media_id]
 
     try:
         created = (

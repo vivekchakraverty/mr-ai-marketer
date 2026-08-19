@@ -188,6 +188,42 @@ class ImageRenderError(RuntimeError):
     """The image backend refused or returned something unusable. Message is user-facing."""
 
 
+#: Largest attachment worth sending. Bluesky rejects over 1MB outright, Mastodon's
+#: default cap is 16MB, Tumblr's is larger still; this is a sanity bound before any of
+#: them, so an accidental 200MB file fails here rather than after a long upload.
+MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
+
+
+def attachment_bytes(url: str) -> tuple[str, bytes]:
+    """Read a generated image off disk for uploading. Returns (filename, bytes).
+
+    Engage posts through each network's own API from this process, so an attachment is
+    just a file it already has — no URL for anyone else to fetch, which is the whole
+    reason this works here and not in Distribute, where the posting engine lives in a
+    container that cannot reach this machine.
+
+    Only paths inside OUTPUTS_DIR are accepted: the caller hands over a URL that came
+    from this app, and anything else is either a mistake or an attempt to read a file
+    the user never generated.
+    """
+    from . import share_links
+
+    path = share_links.path_from_outputs_url(url)
+    if path is None:
+        raise ImageRenderError(
+            "That image is not one this app generated, so it cannot be attached."
+        )
+    size = path.stat().st_size
+    if size > MAX_ATTACHMENT_BYTES:
+        raise ImageRenderError(
+            # One decimal, not zero: a 16.4MB file rounded to whole megabytes reads as
+            # "16MB, past the 16MB limit", which sounds like the app is confused.
+            f"That image is {size / 1e6:.1f}MB, past the {MAX_ATTACHMENT_BYTES / 1e6:.1f}MB "
+            "limit for an attachment."
+        )
+    return path.name, path.read_bytes()
+
+
 def _modal_runtime():
     """Indirection so the Modal path stays substitutable in tests.
 
@@ -210,28 +246,51 @@ def _modal_runtime():
 LIBRARY_TOOL = "Social"
 
 
-def _remember(path: Path, prompt: str, platform: str, post_text: str) -> None:
+def remember_image(
+    path: Path,
+    *,
+    tool: str,
+    title: str,
+    subtitle: str,
+    prompt: str,
+) -> None:
     """Put a generated image on the Library shelf. Best effort, never fatal.
 
-    The entry stores the *approved prompt* as its text and the PNG as its file, which
-    makes the pair legible later: the Library's editor shows what produced the picture,
-    and the file sits beside it. Failing to file it must not fail the generation — the
-    image exists and the user is looking at it.
+    The entry stores the *prompt* as its text and the file as its output, which makes the
+    pair legible later: the Library's editor shows what produced the picture, and the file
+    sits beside it. Failing to file it must not fail the generation — the image exists and
+    the user is looking at it, so a Library write that throws would turn a success into an
+    error about the wrong thing.
+
+    Public and tool-agnostic because every generator that draws something belongs on the
+    same shelf: the post creators' companion images and Brand Studio's assets file through
+    here, and the compose-box picker reads whatever lands.
     """
     from .. import db
 
-    source = (post_text or prompt).strip().replace("\n", " ")
-    title = (source[:60].rstrip() + "…") if len(source) > 60 else source
+    cleaned = (title or "").strip().replace("\n", " ")
+    trimmed = (cleaned[:60].rstrip() + "…") if len(cleaned) > 60 else cleaned
     try:
         db.add_item(
-            tool=LIBRARY_TOOL,
-            title=title or "Companion image",
-            subtitle=f"{platform} image",
+            tool=tool,
+            title=trimmed or "Generated image",
+            subtitle=subtitle,
             content=prompt,
             output_path=str(path),
         )
     except Exception:  # noqa: BLE001
         log.exception("[image-prompt] could not save the image to the Library")
+
+
+def _remember(path: Path, prompt: str, platform: str, post_text: str) -> None:
+    """A companion image for a post, titled by the post it accompanies."""
+    remember_image(
+        path,
+        tool=LIBRARY_TOOL,
+        title=post_text or prompt,
+        subtitle=f"{platform} image",
+        prompt=prompt,
+    )
 
 
 def render(

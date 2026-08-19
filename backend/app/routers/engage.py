@@ -12,6 +12,7 @@ import re
 from typing import Any
 
 from atproto import AtUri, models
+from ..services import image_prompt
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -130,6 +131,11 @@ class ActionResponse(BaseModel):
 
 class ComposeRequest(BaseModel):
     text: str
+    #: A /outputs URL for an image this app generated. Empty posts text only.
+    imageUrl: str = ""
+    #: Alt text. Bluesky shows it to screen readers and its own composer nags for it,
+    #: so it is offered rather than silently omitted.
+    imageAlt: str = ""
 
 
 class TargetRequest(BaseModel):
@@ -678,7 +684,20 @@ def notifications(limit: int = 30) -> FeedResponse:
 def create_post(body: ComposeRequest) -> ActionResponse:
     try:
         client = _client()
-        created = client.send_post(_clean_text(body.text))
+        text = _clean_text(body.text)
+        if body.imageUrl.strip():
+            # send_images rather than send_post: the SDK builds the blob upload and the
+            # embed together, and a post whose embed was assembled by hand is the kind
+            # of thing that renders as a broken card on someone else's client.
+            try:
+                filename, content = image_prompt.attachment_bytes(body.imageUrl)
+            except image_prompt.ImageRenderError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from None
+            created = client.send_images(
+                text, images=[content], image_alts=[body.imageAlt.strip() or filename]
+            )
+        else:
+            created = client.send_post(text)
         return ActionResponse(createdUri=created.uri, createdCid=created.cid, post=_get_feed_post(client, created.uri))
     except HTTPException:
         raise

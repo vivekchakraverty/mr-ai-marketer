@@ -27,6 +27,7 @@ import {
   type PostMediaItem
 } from '../api/client'
 import PostMedia from './PostMedia'
+import AttachImagePicker from './AttachImagePicker'
 import SuggestedFollows, { type SuggestionRow } from './SuggestedFollows'
 import { useAppStore } from '../state/store'
 import { chip, label, primaryButtonSmall, secondaryButtonSmall, segGroup, segItem, select, textarea, textInput } from '../styles/styleKit'
@@ -488,6 +489,8 @@ function Composer({
     spoilerText: string
     language: string
     idempotencyKey: string
+    imageUrl: string
+    imageAlt: string
   }) => Promise<boolean>
 }): React.JSX.Element {
   const [text, setText] = useState('')
@@ -495,6 +498,7 @@ function Composer({
   const [showSpoiler, setShowSpoiler] = useState(false)
   const [visibility, setVisibility] = useState(suggestedVisibility)
   const [language, setLanguage] = useState('')
+  const [image, setImage] = useState({ url: '', alt: '' })
   // One key per draft, not per click: a double-submit or a retried timeout then
   // lands on the same post server-side instead of publishing twice.
   const [key, setKey] = useState(() => crypto.randomUUID())
@@ -521,12 +525,15 @@ function Composer({
       visibility,
       spoilerText: showSpoiler ? spoiler : '',
       language,
-      idempotencyKey: key
+      idempotencyKey: key,
+      imageUrl: image.url,
+      imageAlt: image.alt
     })
     if (!posted) return
     setText('')
     setSpoiler('')
     setShowSpoiler(false)
+    setImage({ url: '', alt: '' })
     setKey(crypto.randomUUID())
   }
 
@@ -575,6 +582,14 @@ function Composer({
         onChange={(e) => setText(e.target.value)}
         placeholder={replyTo ? 'Write a reply' : `What's happening?`}
         style={{ ...textarea, minHeight: 96, background: 'var(--surface)' }}
+      />
+
+      <AttachImagePicker
+        url={image.url}
+        alt={image.alt}
+        onChange={setImage}
+        hint="uploaded to your instance"
+        disabled={busy}
       />
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 10 }}>
@@ -1045,6 +1060,8 @@ export default function MastodonEngage(): React.JSX.Element {
     spoilerText: string
     language: string
     idempotencyKey: string
+    imageUrl: string
+    imageAlt: string
   }): Promise<boolean> {
     setPosting(true)
     setError('')

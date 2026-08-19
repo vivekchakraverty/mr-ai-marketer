@@ -20,6 +20,7 @@ import {
   type TumblrSuggestedFollows
 } from '../api/client'
 import PostMedia from './PostMedia'
+import AttachImagePicker from './AttachImagePicker'
 import SaveButton from './SaveButton'
 import SuggestedFollows, { type SuggestionRow } from './SuggestedFollows'
 import { useAppStore } from '../state/store'
@@ -459,6 +460,7 @@ export default function TumblrEngage(): React.JSX.Element {
   const [postTitle, setPostTitle] = useState('')
   const [postTags, setPostTags] = useState('')
   const [postState, setPostState] = useState<TumblrPostState>('published')
+  const [postImage, setPostImage] = useState({ url: '', alt: '' })
 
   useEffect(() => {
     getTumblrSession()
@@ -555,11 +557,14 @@ export default function TumblrEngage(): React.JSX.Element {
         text: postText,
         title: postTitle,
         tags: postTags,
-        state: postState
+        state: postState,
+        imageUrl: postImage.url,
+        imageAlt: postImage.alt
       })
       setPostText('')
       setPostTitle('')
       setPostTags('')
+      setPostImage({ url: '', alt: '' })
       if (result.post && tab === 'dashboard') setPosts((current) => [result.post as TumblrPost, ...current])
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -700,6 +705,13 @@ export default function TumblrEngage(): React.JSX.Element {
           onChange={(e) => setPostTags(e.target.value)}
           placeholder="Tags, comma separated — this is how anyone finds it"
           style={{ ...textInput, marginTop: 8 }}
+        />
+        <AttachImagePicker
+          url={postImage.url}
+          alt={postImage.alt}
+          onChange={setPostImage}
+          hint="posted above your text"
+          disabled={posting}
         />
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
           <select

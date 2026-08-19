@@ -20,12 +20,33 @@ if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
 
-@pytest.fixture()
-def app_db(tmp_path, monkeypatch):
-    """A fresh core-app SQLite DB (library/distribution_jobs/mail_messages/
-    mail_events) in a temp dir."""
-    from app import config, db
+@pytest.fixture(autouse=True)
+def _isolated_db(tmp_path, monkeypatch):
+    """Point every test at a throwaway SQLite file, whether it asked or not.
+
+    Autouse because the tests that needed isolating were not the ones that requested it.
+    Anything that files something in the Library reaches db.add_item several layers down —
+    generating an image saves the picture to the shelf, so `test_social_post_image_…` was
+    quietly adding rows to the real Library on every run, with nothing in the test to
+    suggest a database was involved. An opt-in fixture cannot catch that; the writes are
+    incidental to what each test is about.
+
+    Patching config.DB_PATH rather than the env var: it is a module-level constant
+    computed once at import, so the env var has long since been read.
+    """
+    from app import config
 
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "test.sqlite3")
+
+
+@pytest.fixture()
+def app_db(_isolated_db):
+    """The core-app DB (library/distribution_jobs/mail_messages/mail_events), initialised.
+
+    Isolation comes from the autouse fixture above; this only creates the schema, for
+    tests that read tables rather than just writing through code that creates its own.
+    """
+    from app import db
+
     db.init_db()
     return db

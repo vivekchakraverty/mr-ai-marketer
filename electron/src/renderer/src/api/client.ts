@@ -1632,9 +1632,14 @@ export async function composeMastodonStatus(post: {
   inReplyToId?: string
   /** Stable across retries of the same draft so a double-submit can't post twice. */
   idempotencyKey: string
+  /** An /outputs URL for an image this app generated. Empty posts text only. */
+  imageUrl?: string
+  imageAlt?: string
 }): Promise<MastodonActionResult> {
   return postJson('/mastodon-engage/compose', {
     ...(await mastodonAuth()),
+    imageUrl: post.imageUrl ?? '',
+    imageAlt: post.imageAlt ?? '',
     text: post.text,
     visibility: post.visibility,
     spoilerText: post.spoilerText ?? '',
@@ -1856,13 +1861,18 @@ export async function composeTumblrPost(opts: {
   title?: string
   tags?: string
   state?: TumblrPostState
+  /** An /outputs URL for an image this app generated. Empty posts text only. */
+  imageUrl?: string
+  imageAlt?: string
 }): Promise<TumblrActionResult> {
   return postJson('/tumblr-engage/compose', {
     ...(await tumblrAuth()),
     text: opts.text,
     title: opts.title ?? '',
     tags: opts.tags ?? '',
-    state: opts.state ?? 'published'
+    state: opts.state ?? 'published',
+    imageUrl: opts.imageUrl ?? '',
+    imageAlt: opts.imageAlt ?? ''
   })
 }
 
@@ -2079,8 +2089,11 @@ export function getEngageNotifications(limit = 30): Promise<FeedResponse> {
   return getJson(`/engage/notifications?limit=${limit}`)
 }
 
-export function createEngagePost(text: string): Promise<EngageActionResponse> {
-  return postJson('/engage/post', { text })
+export function createEngagePost(
+  text: string,
+  image: { url: string; alt: string } = { url: '', alt: '' }
+): Promise<EngageActionResponse> {
+  return postJson('/engage/post', { text, imageUrl: image.url, imageAlt: image.alt })
 }
 
 export function replyEngagePost(uri: string, cid: string, text: string): Promise<EngageActionResponse> {

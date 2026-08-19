@@ -26,7 +26,7 @@ from ..brandforge.client import BrandForgeError, text_to_image
 from ..brandforge.export import to_docx_bytes, to_markdown, to_voice_system_prompt
 from ..brandforge.imaging import ASSET_PROMPT_SPECS, ColorSwatch, build_image_prompt, extract_palette
 from ..brandforge.intake import TBD, BrandIntake, demo_brand_dict, validate_intake
-from ..services import brand_voice
+from ..services import brand_voice, image_prompt
 from ..brandforge.sections import (
     BRAND_CATEGORIES,
     BUSINESS_MODELS,
@@ -390,6 +390,16 @@ def generate_images(body: BrandImagesRequest) -> BrandImagesResponse:
             continue
         dest = run_dir / (asset_type.lower().replace(" ", "-") + ".png")
         image.save(dest)
+        # One Library row per asset, not one for the set. They are three different
+        # pictures with three different uses, and the compose-box picker offers whatever
+        # is on the shelf — a single row could only point at one file.
+        image_prompt.remember_image(
+            dest,
+            tool="Brand",
+            title=f"{intake.brand_name} — {asset_type}",
+            subtitle=asset_type,
+            prompt=prompt,
+        )
         images.append(BrandImageOut(assetType=asset_type, url=_outputs_url(dest), promptUsed=prompt))
 
     return BrandImagesResponse(images=images, palette=_swatches_out(palette))

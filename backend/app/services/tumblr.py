@@ -36,6 +36,7 @@ Four things about Tumblr this file exists to get right:
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import random
 import re
@@ -429,6 +430,55 @@ def blog_info(creds: Credentials, identifier: str, *, refresh: bool = False) -> 
     with _cache_lock:
         _info_cache[key] = (now, info)
     return info
+
+
+def create_npf_post_with_media(
+    creds: Credentials,
+    blog: str,
+    payload: dict[str, Any],
+    filename: str,
+    content: bytes,
+    identifier: str = "attached-image",
+) -> Any:
+    """Create an NPF post carrying one uploaded image.
+
+    Tumblr takes media inline rather than through a separate upload endpoint like
+    Mastodon's: the request is multipart, one part holds the NPF JSON, another holds the
+    bytes, and an image block points at that part by `identifier`. So this cannot go
+    through `request()`, which sends JSON — hence a function of its own rather than a
+    files= branch complicating the shared transport for one caller.
+
+    The caller supplies the whole NPF payload including the image block, because only it
+    knows where the picture belongs among the text blocks.
+
+    Not retried. `request()` retries on 429 because its calls are idempotent or cheap to
+    repeat; repeating this one publishes a second post.
+    """
+    url = f"{API_ROOT}/blog/{blog_path(blog)}/posts"
+    # The JSON part must be typed, or Tumblr parses it as a plain string and rejects the
+    # whole body with a generic error that says nothing about which part was wrong.
+    files = {
+        "json": (None, json.dumps(payload), "application/json"),
+        identifier: (filename, content),
+    }
+    try:
+        resp = requests.post(
+            url,
+            auth=_auth(creds),
+            files=files,
+            headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+            timeout=REQUEST_TIMEOUT,
+        )
+    except requests.RequestException as err:
+        raise TumblrError(f"Could not reach Tumblr: {err}") from None
+
+    try:
+        body = resp.json()
+    except ValueError:
+        raise TumblrError(_friendly(resp.status_code, resp.text[:200])) from None
+    if resp.status_code not in (200, 201):
+        raise TumblrError(_friendly(resp.status_code, _detail(body, resp.status_code)))
+    return body.get("response") if isinstance(body, dict) else body
 
 
 def follower_count(creds: Credentials, identifier: str) -> int | None:

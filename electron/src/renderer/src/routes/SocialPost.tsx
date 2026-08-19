@@ -23,11 +23,17 @@ import PostingTimePanel from '../components/PostingTimePanel'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import SaveButton from '../components/SaveButton'
 
-const PLATFORMS = ['bluesky', 'x', 'linkedin', 'mastodon']
+// Bluesky only, deliberately.
+//
+// This screen used to offer x, linkedin and mastodon as well, but everything it knows
+// comes from the Bluesky corpus: the exemplars are Bluesky posts, the engagement that
+// ranked them is Bluesky's, and the timing curve is measured on Bluesky authors. Drafting
+// "for LinkedIn" from that evidence dressed a Bluesky post in another network's name, and
+// the two that have their own measured grounding — Mastodon and Tumblr — have their own
+// creators next door. So the platform is fixed rather than chosen.
+const PLATFORM = 'bluesky'
 
-// Bluesky is the only platform we can actually measure, so it is the only one with
-// a hard limit worth enforcing in the UI.
-const CHAR_LIMIT: Record<string, number> = { bluesky: 300, x: 280 }
+const CHAR_LIMIT = 300
 
 export default function SocialPost(): React.JSX.Element {
   const fields = useAppStore((s) => s.fields.social)
@@ -90,7 +96,7 @@ export default function SocialPost(): React.JSX.Element {
       const res = await generateSocialPost(
         fields.userInput,
         fields.niche,
-        fields.platform,
+        PLATFORM,
         fields.sourceUrl,
         // What it has already written for this request. Without this the prompt
         // is byte-identical every time and the model reliably opens with the same
@@ -124,8 +130,7 @@ export default function SocialPost(): React.JSX.Element {
     }
   }
 
-  const limit = CHAR_LIMIT[fields.platform]
-  const over = result ? Boolean(limit && result.characters > limit) : false
+  const over = result ? result.characters > CHAR_LIMIT : false
 
   return (
     <div style={{ maxWidth: 1120, margin: '0 auto', padding: '22px 34px 60px' }}>
@@ -215,20 +220,6 @@ export default function SocialPost(): React.JSX.Element {
               {niches.map((n) => (
                 <option key={n.name} value={n.name}>
                   {n.name} ({n.exemplars} exemplars)
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label style={label}>Platform</label>
-            <select
-              value={fields.platform}
-              onChange={(e) => setSocialField('platform', e.target.value)}
-              style={select}
-            >
-              {PLATFORMS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
                 </option>
               ))}
             </select>
@@ -327,7 +318,7 @@ export default function SocialPost(): React.JSX.Element {
               <SaveButton
                 libraryId={result.libraryId}
                 tool="Social"
-                title={`${fields.platform} post · ${fields.niche}`}
+                title={`Bluesky post · ${fields.niche}`}
                 subtitle="Social post"
                 content={result.text}
               />
@@ -338,7 +329,7 @@ export default function SocialPost(): React.JSX.Element {
                 }}
               >
                 {result.characters}
-                {limit ? ` / ${limit}` : ''} characters{over ? ' — too long, trim it' : ''}
+                {` / ${CHAR_LIMIT}`} characters{over ? ' — too long, trim it' : ''}
               </div>
               </div>
             </div>
@@ -368,18 +359,13 @@ export default function SocialPost(): React.JSX.Element {
               >
                 {copied ? 'Copied ✓' : 'Copy'}
               </div>
-              {/* Engage's post box is Bluesky's, so this only makes sense for a
-                  Bluesky draft — offering it for an X or LinkedIn post would send
-                  a draft written to the wrong norms to the wrong network. */}
-              {fields.platform === 'bluesky' && (
-                <div
-                  style={secondaryButtonSmall}
-                  title="Open Engage with this post in the Bluesky box, ready to send"
-                  onClick={() => sendToEngage(result.text)}
-                >
-                  Send to Engage →
-                </div>
-              )}
+              <div
+                style={secondaryButtonSmall}
+                title="Open Engage with this post in the Bluesky box, ready to send"
+                onClick={() => sendToEngage(result.text)}
+              >
+                Send to Engage →
+              </div>
               <div
                 style={{ ...secondaryButtonSmall, opacity: loading ? 0.6 : 1 }}
                 title="Write a different post for the same request"
@@ -392,9 +378,9 @@ export default function SocialPost(): React.JSX.Element {
 
           <PostImagePanel
             postText={result.text}
-            onSuggest={() => suggestSocialImagePrompt(result.text, fields.niche, fields.platform)}
+            onSuggest={() => suggestSocialImagePrompt(result.text, fields.niche, PLATFORM)}
             onGenerate={(prompt) =>
-              generateSocialPostImage(result.text, fields.niche, fields.platform, prompt)
+              generateSocialPostImage(result.text, fields.niche, PLATFORM, prompt)
             }
           />
 
@@ -504,7 +490,7 @@ export default function SocialPost(): React.JSX.Element {
       )}
 
       {/* --- when to post -------------------------------------------------- */}
-      <PostingTimePanel platform={fields.platform} />
+      <PostingTimePanel platform={PLATFORM} />
 
       {/* --- hashtag suggester ------------------------------------------- */}
       {(fields.niche || fields.userInput.trim()) && (
@@ -512,8 +498,8 @@ export default function SocialPost(): React.JSX.Element {
           draft={(result?.text ?? '').trim() || fields.userInput}
           postText={result?.text ?? ''}
           niche={fields.niche}
-          platform={fields.platform}
-          charLimit={limit}
+          platform={PLATFORM}
+          charLimit={CHAR_LIMIT}
         />
       )}
     </div>

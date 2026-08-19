@@ -46,6 +46,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from ..services import image_prompt
 from ..services import tumblr
 from ..services.tumblr import Credentials, TumblrError
 
@@ -116,6 +117,9 @@ class ComposeRequest(TumblrRequest):
     title: str = ""
     tags: str = ""
     state: str = "published"
+    #: A /outputs URL for an image this app generated. Empty posts text only.
+    imageUrl: str = ""
+    imageAlt: str = ""
 
 
 class ReblogRequest(TumblrRequest):
@@ -747,6 +751,24 @@ def notes(body: NotesRequest) -> NotesOut:
 # ---------------------------------------------------------------------------
 
 
+#: Name of the multipart part carrying the image, referenced from the NPF block by
+#: `identifier`. Any stable string works; it only has to match between the two.
+_IMAGE_PART = "attached-image"
+
+
+def _mime_for(filename: str) -> str:
+    """NPF wants a media type. Everything this app generates is PNG; the rest is
+    tolerance for an image picked from elsewhere in the Library."""
+    lowered = filename.lower()
+    if lowered.endswith((".jpg", ".jpeg")):
+        return "image/jpeg"
+    if lowered.endswith(".webp"):
+        return "image/webp"
+    if lowered.endswith(".gif"):
+        return "image/gif"
+    return "image/png"
+
+
 @router.post("/compose", response_model=ActionOut)
 def compose(body: ComposeRequest) -> ActionOut:
     """A new post on your blog, in Neue Post Format.
@@ -770,10 +792,32 @@ def compose(body: ComposeRequest) -> ActionOut:
     if tags:
         payload["tags"] = tags
 
+    attachment: tuple[str, bytes] | None = None
+    if body.imageUrl.strip():
+        try:
+            attachment = image_prompt.attachment_bytes(body.imageUrl)
+        except image_prompt.ImageRenderError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from None
+        # The image leads. Tumblr is a visual dashboard — a picture below the caption
+        # reads as an afterthought there in a way it does not on the other two — and NPF
+        # block order is exactly what the reader sees.
+        block: dict[str, Any] = {
+            "type": "image",
+            "media": [{"type": _mime_for(attachment[0]), "identifier": _IMAGE_PART}],
+        }
+        if body.imageAlt.strip():
+            block["alt_text"] = body.imageAlt.strip()[:1000]
+        content.insert(0, block)
+
     try:
-        created = tumblr.request(
-            creds, "POST", f"/blog/{tumblr.blog_path(creds.blog)}/posts", json_body=payload
-        ) or {}
+        if attachment is not None:
+            created = tumblr.create_npf_post_with_media(
+                creds, creds.blog, payload, attachment[0], attachment[1], _IMAGE_PART
+            ) or {}
+        else:
+            created = tumblr.request(
+                creds, "POST", f"/blog/{tumblr.blog_path(creds.blog)}/posts", json_body=payload
+            ) or {}
     except TumblrError as err:
         raise _as_http(err) from None
 

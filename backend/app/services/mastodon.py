@@ -438,6 +438,48 @@ def api_delete(host: str, path: str, token: str) -> Any:
     return _call(normalise_host(host), "DELETE", path, token)
 
 
+def upload_media(
+    host: str, token: str, filename: str, content: bytes, description: str = ""
+) -> str:
+    """Upload one image and return its media id, for attaching to a status.
+
+    A separate call rather than part of _call because this is the one request that is
+    multipart rather than JSON, and folding a files= branch into the shared transport
+    would complicate every other caller for one endpoint's sake.
+
+    Uses v2, which answers 202 for anything the server is still processing — a large
+    image is accepted before it is ready. The id is valid immediately either way, and
+    Mastodon holds the status until processing finishes, so there is nothing to poll.
+
+    Not retried. The shared transport retries writes because they set a state and are
+    safe to repeat; an upload appends, and repeating it leaves orphaned attachments on
+    the user's account.
+    """
+    host = normalise_host(host)
+    if not token:
+        raise MastodonError("Attaching an image needs your access token for this server.")
+
+    files = {"file": (filename, content)}
+    data = {"description": description[:1500]} if description.strip() else None
+    try:
+        resp = requests.post(
+            f"https://{host}/api/v2/media",
+            headers={"User-Agent": USER_AGENT, "Authorization": f"Bearer {token}"},
+            files=files,
+            data=data,
+            timeout=REQUEST_TIMEOUT,
+        )
+    except requests.RequestException as err:
+        raise MastodonError(f"Could not reach {host} to upload the image: {err}") from None
+
+    if resp.status_code not in (200, 202):
+        raise MastodonError(_error_detail(resp))
+    media_id = str((resp.json() or {}).get("id") or "")
+    if not media_id:
+        raise MastodonError(f"{host} accepted the image but returned no id for it.")
+    return media_id
+
+
 # ---------------------------------------------------------------------------
 # Instance metadata + policy
 # ---------------------------------------------------------------------------

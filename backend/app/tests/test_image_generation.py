@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import pathlib
 
 from PIL import Image
 
@@ -159,3 +160,48 @@ def test_a_suggestion_never_fails_the_screen(monkeypatch):
     assert result.source == "template"
     assert result.note
     assert "No lettering" in result.prompt
+
+
+def test_every_generated_image_lands_on_the_library_shelf(monkeypatch, tmp_path, app_db):
+    """Both generators file what they draw, with the prompt beside the file.
+
+    Brand Studio saved its three assets to disk and told nobody: the pictures existed but
+    the Library had no row for them, so they could not be reopened, and the compose-box
+    picker — which reads the shelf — never offered them. The post creators already filed
+    theirs, which is what made the gap easy to miss.
+    """
+    monkeypatch.setattr(brand_forge.config, "OUTPUTS_DIR", tmp_path)
+    monkeypatch.setattr(image_prompt.config, "OUTPUTS_DIR", tmp_path)
+    monkeypatch.setattr(
+        brand_forge,
+        "text_to_image",
+        lambda _token, prompt, model=None: Image.new("RGB", (16, 16), "#126782"),
+    )
+    monkeypatch.setattr(image_prompt, "_modal_runtime", lambda: _FakeModalRuntime)
+
+    brand_forge.generate_images(
+        brand_forge.BrandImagesRequest(
+            intake=brand_forge.IntakeIn(**demo_brand_dict()),
+            visualBrief="Visual direction for a clear, modern brand.",
+            hfToken="hf-test",
+        )
+    )
+    social_post.generate_image(
+        social_post.GenerateImageRequest(
+            postText="We shipped a thing.",
+            platform="bluesky",
+            hfToken="hf-test",
+            modalTokenId="modal-id",
+            modalTokenSecret="modal-secret",
+            useModal=True,
+            prompt="An approved prompt.",
+        )
+    )
+
+    rows = app_db.list_items()
+    images = [r for r in rows if (r["output_path"] or "").endswith(".png")]
+    assert len(images) == 4, "three brand assets and one companion image"
+    assert {r["tool"] for r in images} == {"Brand", "Social"}
+    # The prompt is the row's text, so opening it later shows what produced the picture.
+    assert all(r["content"] for r in images)
+    assert all(pathlib.Path(r["output_path"]).is_file() for r in images)

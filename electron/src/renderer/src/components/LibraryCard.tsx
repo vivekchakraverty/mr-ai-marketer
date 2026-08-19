@@ -1,8 +1,20 @@
+import BackendImage from './BackendImage'
 import type { LibraryItem } from '../state/types'
 
 interface Props {
   item: LibraryItem
   onOpen: () => void
+}
+
+/** The /outputs URL for a card whose file is a picture, else ''.
+ *
+ * Generated images sit on the same shelf as documents, and a card that shows only a
+ * title cannot tell you which of four mood boards it is. The Reader already renders the
+ * picture on open; this is the same test, so the card and what it opens agree. */
+function thumbnailUrl(item: LibraryItem): string {
+  const outputs = item.output_path?.replace(/\\/g, '/') ?? ''
+  if (!/\.(png|jpe?g|webp|gif)$/i.test(outputs)) return ''
+  return '/outputs/' + outputs.split('/outputs/').slice(1).join('/outputs/')
 }
 
 const TAPE_COLOR: Record<LibraryItem['tool'], string> = {
@@ -49,6 +61,7 @@ function formatDate(iso: string): string {
 export default function LibraryCard({ item, onOpen }: Props): React.JSX.Element {
   const tilt = TAPE_TILTS[item.id.charCodeAt(0) % TAPE_TILTS.length]
   const tag = TAG_STYLE[item.tool]
+  const thumbnail = thumbnailUrl(item)
 
   return (
     <div
@@ -94,6 +107,26 @@ export default function LibraryCard({ item, onOpen }: Props): React.JSX.Element 
           {item.tool}
         </span>
       </div>
+      {thumbnail && (
+        <div
+          style={{
+            borderRadius: 12,
+            overflow: 'hidden',
+            border: '1.5px solid var(--border-soft)',
+            aspectRatio: '16 / 9',
+            background: 'var(--surface-tint)'
+          }}
+        >
+          {/* saveable={false}: the card is a click target that opens the Reader, and a
+              save affordance sitting on it would swallow that click. */}
+          <BackendImage
+            url={thumbnail}
+            alt={item.title}
+            saveable={false}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+        </div>
+      )}
       <div style={{ font: "700 17px/1.3 'Kalam'", color: 'var(--ink)', flex: 1 }}>{item.title}</div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span style={{ font: "600 11px 'Quicksand'", color: 'var(--ink-faint)' }}>{item.subtitle}</span>

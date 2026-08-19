@@ -166,8 +166,19 @@ export default function PostingTimePanel({
 
   const [reloadKey, setReloadKey] = useState(0)
 
+  // Mastodon is answerable only per instance, so with no instance there is nothing to
+  // ask. Asking anyway got back "pick the server you're posting to first" — sound advice
+  // on the Mastodon composer, a dead end on a screen with no server box, where the card
+  // named a step the user could not take. Decided here rather than at each call site so
+  // a future caller cannot reintroduce it.
+  const answerable = MEASURED.has(platform) && (platform !== 'mastodon' || Boolean(instance))
+
   useEffect(() => {
-    if (!MEASURED.has(platform)) return
+    if (!answerable) {
+      setData(null)
+      setError('')
+      return
+    }
     let cancelled = false
     setData(null)
     setError('')
@@ -177,7 +188,7 @@ export default function PostingTimePanel({
     return () => {
       cancelled = true
     }
-  }, [platform, instance, reloadKey])
+  }, [answerable, platform, instance, reloadKey])
 
   /**
    * Read this server's last month and see whether it can support a curve.
@@ -205,8 +216,9 @@ export default function PostingTimePanel({
   }
 
   // Nothing was measured for X or LinkedIn, so showing a curve beside one of
-  // those drafts would assert something about a network never in the corpus.
-  if (!MEASURED.has(platform)) return null
+  // those drafts would assert something about a network never in the corpus. Same
+  // silence when Mastodon has no instance to answer for — see `answerable`.
+  if (!answerable) return null
   if (error) return null
   if (!data) return null
 
