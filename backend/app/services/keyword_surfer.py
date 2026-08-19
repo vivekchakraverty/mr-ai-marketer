@@ -180,7 +180,12 @@ def scrape(keywords: list[str], geo: str = "", proxy: dict | None = None) -> lis
 
 
 def _launch(playwright, ext: Path, launch_proxy: dict | None):
-    return playwright.chromium.launch_persistent_context(
+    # Not playwright.chromium directly: a packaged install has no browser of its own, so
+    # this falls back to the machine's Edge/Chrome. See services/chromium_launch.py.
+    from . import chromium_launch
+
+    return chromium_launch.launch_persistent_context(
+        playwright,
         user_data_dir="",
         # Extensions need a headed context; --headless=new is the mode that both loads
         # them and still draws nothing on the user's screen.

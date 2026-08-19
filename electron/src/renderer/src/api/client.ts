@@ -300,7 +300,15 @@ export interface SurferResult {
   volume: number | null
   cpc: number | null
   cpcDisplay: string | null
-  countryLabel: string | null
+  /** Locations Keyword Surfer itself reported these figures for. The extension can have
+   *  several enabled at once, so this is a list. */
+  countryLabels: string[] | null
+  /** The Google region the search was actually run against. Worth showing next to the
+   *  above: a volume is only meaningful for a place, and the two disagreeing is the whole
+   *  reason the numbers would be wrong. */
+  requestedGoogleRegion: string | null
+  /** The exact search this came from — provenance for a figure that ends up in a plan. */
+  googleUrl: string | null
   suggestions: SurferSuggestion[]
   collectedAt: string
 }

@@ -9,6 +9,7 @@ import {
   openSurferBrowser,
   startSurferRun,
   type SurferConfig,
+  type SurferResult,
   type SurferRun,
   type SurferRunSummary,
   type SurferStatus
@@ -54,6 +55,26 @@ const STATUS_TONE: Record<string, string> = {
   extension_not_detected: '#a34a3a',
   navigation_error: '#a34a3a',
   google_challenge: '#a34a3a'
+}
+
+/** The location(s) Keyword Surfer reported these figures for, as one readable string. */
+function detectedLocation(result: SurferResult): string {
+  const labels = result.countryLabels
+  if (!labels) return ''
+  return (Array.isArray(labels) ? labels : [labels]).map((l) => String(l).trim()).filter(Boolean).join(', ')
+}
+
+/** Whether Surfer's location and the searched region disagree.
+ *
+ * Compared loosely on purpose: the two come from different places and spell things
+ * differently ("United States" against "United States (US)"), so an exact match would flag
+ * a mismatch on almost every correct run and quickly train everyone to ignore the warning.
+ */
+function locationMismatch(result: SurferResult): boolean {
+  const detected = detectedLocation(result).toLowerCase()
+  const requested = (result.requestedGoogleRegion ?? '').toLowerCase()
+  if (!detected || !requested) return false
+  return !detected.includes(requested) && !requested.includes(detected)
 }
 
 function formatVolume(value: number | null): string {
@@ -339,8 +360,31 @@ export default function KeywordSurfer(): React.JSX.Element {
               <span style={{ ...pill, color: STATUS_TONE[result.status] ?? 'var(--ink-muted)' }}>
                 {result.status.replace(/_/g, ' ')}
               </span>
-              {result.countryLabel && <span style={pill}>{result.countryLabel}</span>}
+              {result.requestedGoogleRegion && (
+                <span style={pill}>searched in {result.requestedGoogleRegion}</span>
+              )}
+              {detectedLocation(result) && (
+                <span style={pill}>Surfer reporting {detectedLocation(result)}</span>
+              )}
             </div>
+
+            {/* A volume only means something for a place. When the region the search ran
+                in and the location Surfer is reporting for disagree, every figure below is
+                for the wrong country — which looks identical to a correct result unless
+                it is said out loud. */}
+            {locationMismatch(result) && (
+              <div
+                style={{
+                  font: "700 12px/1.5 'Quicksand'",
+                  color: 'var(--danger-ink)',
+                  marginTop: 8
+                }}
+              >
+                These numbers are for {detectedLocation(result)}, but the search ran in{' '}
+                {result.requestedGoogleRegion}. Set Keyword Surfer&rsquo;s own location to match,
+                then run again.
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: 26, marginTop: 12 }}>
               <div>
@@ -408,15 +452,26 @@ export default function KeywordSurfer(): React.JSX.Element {
             </div>
             {runs.length > 0 && (
               <div style={{ marginTop: 20 }}>
+                {/* Not just a list of dates and statuses. This panel is what someone sees
+                    between runs, and "3 keywords, complete" tells them nothing about what
+                    was actually collected — the counts below are the reason to open one. */}
                 <div style={sectionEyebrow}>Earlier runs</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
                   {runs.slice(0, 8).map((r) => (
                     <div
                       key={r.id}
-                      style={{ font: "600 12.5px 'Quicksand'", color: 'var(--ink-muted)' }}
+                      style={{
+                        font: "600 12.5px 'Quicksand'",
+                        color: 'var(--ink-muted)',
+                        borderBottom: '1px solid var(--border-soft)',
+                        paddingBottom: 6
+                      }}
                     >
-                      {r.createdAt.slice(0, 10)} · {r.completedCount}/{r.keywordCount} keywords ·{' '}
-                      {r.status}
+                      <span style={{ color: 'var(--ink)', fontWeight: 700 }}>
+                        {r.createdAt.slice(0, 10)}
+                      </span>{' '}
+                      · {r.completedCount}/{r.keywordCount} keywords · {r.status}
+                      {r.country?.name ? ` · ${r.country.name}` : ''}
                     </div>
                   ))}
                 </div>

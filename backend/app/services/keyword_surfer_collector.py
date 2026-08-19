@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import config
+from . import chromium_launch
 from .keyword_surfer import SurferUnavailable, ensure_extension
 from .keyword_surfer_js import CAPTURE_JS, FOCUS_MODE_JS, HEADER_TERMS
 from .keyword_surfer_parse import normalize_text, parse_snapshot
@@ -270,6 +271,24 @@ CSV_COLUMNS = [
 ]
 
 
+def _detected_location(result: dict) -> str:
+    """The location Surfer reported for these numbers, as one readable string.
+
+    The extension can name more than one (its panel shows a row per country when the user
+    has several enabled), so the collector stores a list. Both readers wanted a single
+    value and asked for a key nobody writes, which is why `surfer_location_detected` and
+    the pill beside each keyword have always been empty.
+
+    This matters more than it looks: a volume is only meaningful for a place, and the whole
+    point of recording it is to catch the case where Surfer is reporting somewhere other
+    than the region the search was run for.
+    """
+    labels = result.get("countryLabels") or []
+    if isinstance(labels, str):
+        return labels
+    return ", ".join(str(label).strip() for label in labels if str(label).strip())
+
+
 def run_as_keyword_data(run: dict) -> list[dict]:
     """A finished run as the rich rows the plan Space's supplied-keyword tier expects.
 
@@ -322,7 +341,7 @@ def run_csv(run: dict) -> str:
                 "",
                 result.get("status"),
                 result.get("requestedGoogleRegion"),
-                result.get("countryLabel"),
+                _detected_location(result),
                 result.get("collectedAt"),
             ]
         )
@@ -338,7 +357,7 @@ def run_csv(run: dict) -> str:
                     suggestion.get("similarity"),
                     result.get("status"),
                     result.get("requestedGoogleRegion"),
-                    result.get("countryLabel"),
+                    _detected_location(result),
                     result.get("collectedAt"),
                 ]
             )
@@ -456,7 +475,11 @@ class CollectorSession:
 
         try:
             with sync_playwright() as p:
-                context = p.chromium.launch_persistent_context(
+                # Via chromium_launch, not p.chromium: a packaged install ships no
+                # browser of its own and falls back to the machine's Edge/Chrome. The
+                # profile below is this app's, on every path.
+                context = chromium_launch.launch_persistent_context(
+                    p,
                     user_data_dir=str(profile),
                     # Visible, and staying visible. The window is how a person completes
                     # Google's check and sets Surfer's own location - hide it and the
@@ -481,6 +504,10 @@ class CollectorSession:
                         context.close()
                     except Exception:  # noqa: BLE001 - the user may have closed it already
                         pass
+        except chromium_launch.NoChromiumAvailable as err:
+            # Already phrased for a person, and naming the exception class in front of it
+            # only buries the one sentence that says what to do about it.
+            self._set(running=False, error=str(err))
         except Exception as err:  # noqa: BLE001
             self._set(running=False, error=f"{type(err).__name__}: {err}")
 
