@@ -17,7 +17,13 @@ function thumbnailUrl(item: LibraryItem): string {
   return '/outputs/' + outputs.split('/outputs/').slice(1).join('/outputs/')
 }
 
-const TAPE_COLOR: Record<LibraryItem['tool'], string> = {
+// Keyed by string, not by the LibraryItem['tool'] union, and looked up through the
+// helpers below. The union is not the truth: the save endpoint accepts any `tool` a caller
+// sends and defaults to "Note", and the app itself already writes "Hashtags" and "Engage",
+// neither of which is in the union or these maps. Indexing them directly meant one such row
+// made `tag.bg` a read of undefined — which took down the entire Library screen, not just
+// its own card, because a render that throws unmounts the tree.
+const TAPE_COLOR: Record<string, string> = {
   Plan: 'rgba(255, 203, 77, .6)',
   Blog: 'rgba(111, 203, 192, .55)',
   Guest: 'rgba(255, 154, 124, .5)',
@@ -29,7 +35,7 @@ const TAPE_COLOR: Record<LibraryItem['tool'], string> = {
   Topics: 'rgba(143, 211, 244, .55)'
 }
 
-const TAG_STYLE: Record<LibraryItem['tool'], { bg: string; ink: string }> = {
+const TAG_STYLE: Record<string, { bg: string; ink: string }> = {
   Plan: { bg: '#ffe3d9', ink: '#b0553b' },
   Blog: { bg: '#dff6e9', ink: '#2fa366' },
   Guest: { bg: '#ffe9dc', ink: '#d8703f' },
@@ -40,6 +46,10 @@ const TAG_STYLE: Record<LibraryItem['tool'], { bg: string; ink: string }> = {
   Brand: { bg: '#dcefe4', ink: '#3f7d63' },
   Topics: { bg: '#d9eefb', ink: '#2c6f93' }
 }
+
+/** Neutral styling for a tool nobody assigned a colour to. Better a plain card than none. */
+const FALLBACK_TAPE = 'rgba(176, 164, 136, .45)'
+const FALLBACK_TAG = { bg: '#f0e8da', ink: '#6b5f4e' }
 
 // A different tilt per card so the washi-tape accent reads as hand-placed, not templated.
 const TAPE_TILTS = [-4, 3, -2, 4, -5, 2]
@@ -60,7 +70,7 @@ function formatDate(iso: string): string {
 
 export default function LibraryCard({ item, onOpen }: Props): React.JSX.Element {
   const tilt = TAPE_TILTS[item.id.charCodeAt(0) % TAPE_TILTS.length]
-  const tag = TAG_STYLE[item.tool]
+  const tag = TAG_STYLE[item.tool] ?? FALLBACK_TAG
   const thumbnail = thumbnailUrl(item)
 
   return (
@@ -87,7 +97,7 @@ export default function LibraryCard({ item, onOpen }: Props): React.JSX.Element 
           left: 22,
           width: 44,
           height: 16,
-          background: TAPE_COLOR[item.tool],
+          background: TAPE_COLOR[item.tool] ?? FALLBACK_TAPE,
           border: '1.5px solid var(--border)',
           borderRadius: 3,
           transform: `rotate(${tilt}deg)`

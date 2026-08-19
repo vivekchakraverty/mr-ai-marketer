@@ -1,5 +1,7 @@
+import { useEffect } from 'react'
 import { useAppStore, type LibraryFilter } from '../state/store'
 import LibraryCard from '../components/LibraryCard'
+import { refreshLibrary } from '../state/actions'
 
 const FILTERS: { label: LibraryFilter; tool: string | null }[] = [
   { label: 'All', tool: null },
@@ -16,6 +18,14 @@ export default function Library(): React.JSX.Element {
   const filter = useAppStore((s) => s.filter)
   const setFilter = useAppStore((s) => s.setFilter)
   const openReader = useAppStore((s) => s.openReader)
+
+  // Re-read the shelf whenever this screen is opened. The store is only topped up by
+  // whichever tool last saved something, so arriving here from anywhere else — or after a
+  // save made from another screen — showed a list that was right when it was last fetched
+  // and stale ever since. Cheap: one request against a local database.
+  useEffect(() => {
+    void refreshLibrary()
+  }, [])
 
   const active = FILTERS.find((f) => f.label === filter) ?? FILTERS[0]
   const items = active.tool ? library.filter((i) => i.tool === active.tool) : library

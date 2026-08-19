@@ -8,6 +8,7 @@ import {
   markTumblrPublished,
   measureTumblrPosts,
   suggestTumblrImagePrompt,
+  type SocialGeneratedImage,
   type TumblrDraft,
   type TumblrImportResult,
   type TumblrPostStatus
@@ -16,6 +17,7 @@ import { useAppStore } from '../state/store'
 import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, textInput } from '../styles/styleKit'
 import BrandVoiceSelect from '../components/BrandVoiceSelect'
 import PostImagePanel from '../components/PostImagePanel'
+import SaveCompositionButton from '../components/SaveCompositionButton'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 
 /**
@@ -37,6 +39,13 @@ export default function TumblrPost(): React.JSX.Element {
   const fields = useAppStore((s) => s.fields.tumblr)
   const setField = useAppStore((s) => s.setTumblrField)
   const goCreate = useAppStore((s) => s.goCreate)
+
+  // What the two panels below currently hold, so one button can keep the finished
+  // post — words, tags and picture — as a single Library entry instead of three
+  // unrelated ones.
+  const [keptImage, setKeptImage] = useState<SocialGeneratedImage | null>(null)
+  // No hashtag panel on this screen — Tumblr's tags are a field on the post itself, not
+  // a suggestion list — so the composition here is words plus picture.
 
   const [status, setStatus] = useState<TumblrPostStatus | null>(null)
   const [result, setResult] = useState<TumblrDraft | null>(null)
@@ -428,10 +437,24 @@ export default function TumblrPost(): React.JSX.Element {
 
         {result && (
           <PostImagePanel
+            onImage={setKeptImage}
             postText={result.text}
             onSuggest={() => suggestTumblrImagePrompt(result.text, result.niche)}
             onGenerate={(prompt) => generateTumblrImage(prompt, result.text)}
           />
+        )}
+
+        {/* --- keep the finished thing ------------------------------------- */}
+        {result && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+            <SaveCompositionButton
+              tool="Social"
+              title={`Tumblr post · ${fields.niche || 'untitled'}`}
+              subtitle="Tumblr post"
+              postText={result.text}
+                imageUrl={keptImage?.url ?? ''}
+            />
+          </div>
         )}
 
         {error && (

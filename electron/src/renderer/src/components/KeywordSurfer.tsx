@@ -445,10 +445,11 @@ export default function KeywordSurfer(): React.JSX.Element {
               Real search volumes, read off the page you could read yourself.
             </div>
             <div style={{ font: "600 13px 'Quicksand'", color: 'var(--ink-muted)', marginTop: 10, lineHeight: 1.6 }}>
-              Open the collector browser, paste your keywords, and every search runs in that
-              window while the volumes, CPC and related ideas are collected here. Nothing is
-              hidden from Google and nothing bypasses it — which is exactly why it works where
-              a silent scrape does not.
+              Two ways in. Paste keywords above and this works through them for you — or just
+              open the collector browser and search for things yourself; anything Keyword Surfer
+              shows in that window is collected here either way. Nothing is hidden from Google
+              and nothing bypasses it, which is exactly why it works where a silent scrape does
+              not.
             </div>
             {runs.length > 0 && (
               <div style={{ marginTop: 20 }}>

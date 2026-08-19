@@ -1,5 +1,17 @@
+import logging
 import os
 import secrets
+
+# Nothing in this app had ever configured logging, so every log.info() in it — the posting
+# time collector, the Mastodon learner, the browser launcher, the share listener — was
+# written and then discarded. That is not a small loss: those lines are the only account of
+# what the background threads did, and their absence turned one silent failure into a
+# guessing game. WARNING and above already reached the console through the root logger's
+# last-resort handler; this is what makes INFO visible too.
+logging.basicConfig(
+    level=os.environ.get("MRAIM_LOG_LEVEL", "INFO").upper(),
+    format="%(levelname)s %(name)s: %(message)s",
+)
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware

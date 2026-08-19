@@ -19,6 +19,7 @@ owns the browser and takes commands off a queue is the shape that fits.
 from __future__ import annotations
 
 import json
+import logging
 import queue
 import re
 import threading
@@ -33,6 +34,8 @@ from . import chromium_launch
 from .keyword_surfer import SurferUnavailable, ensure_extension
 from .keyword_surfer_js import CAPTURE_JS, FOCUS_MODE_JS, HEADER_TERMS
 from .keyword_surfer_parse import normalize_text, parse_snapshot
+
+log = logging.getLogger(__name__)
 
 # Ported from the collector's config.js. Google's `gl`/`hl` pair; Surfer has its own
 # location selector which the user sets once inside the panel, and whose label the parser
@@ -238,6 +241,65 @@ class Run:
         }
 
 
+def _release_stale_profile_lock(profile: Path) -> None:
+    """Clear the lock a hard-killed browser leaves behind in the profile.
+
+    Chromium writes SingletonLock/Cookie/Socket while a profile is open and removes them on
+    a clean exit. Kill the app — or let it crash, or let WSL take the machine down — and
+    they survive, after which every later launch fails with "profile is already in use" and
+    the collector is simply dead until someone deletes files they have no reason to know
+    about. Measured: this happened twice in one afternoon of testing.
+
+    Safe at exactly this moment and nowhere else. We are on the launch path, having already
+    established there is no session of our own running; if some other browser really does
+    hold the profile it will recreate the lock and the launch fails as before, which is the
+    correct outcome. Removing these files does not touch cookies, history or the login this
+    profile exists to remember.
+    """
+    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        try:
+            (profile / name).unlink()
+            log.info("[surfer] cleared a stale %s left by a previous session", name)
+        except FileNotFoundError:
+            pass
+        except OSError as err:
+            log.warning("[surfer] could not clear %s: %s", name, err)
+
+
+def _query_from_google_url(url: str) -> str:
+    """The search term out of a Google results URL, or '' if this is not one.
+
+    Only /search pages count. The homepage, an image tab or a consent screen all carry
+    other things in the query string and none of them render the panel this reads.
+    """
+    from urllib.parse import parse_qs, urlparse
+
+    try:
+        parts = urlparse(url)
+    except ValueError:
+        return ""
+    if "google." not in (parts.netloc or "") or not (parts.path or "").startswith("/search"):
+        return ""
+    query = parse_qs(parts.query or "")
+    # `tbm` selects a vertical — images, news, shopping. Those are /search too, and Surfer
+    # does not publish figures on them, so reading one would file a row whose numbers were
+    # never on screen. Absent `tbm` is the web tab, which is the only one that counts.
+    if query.get("tbm"):
+        return ""
+    return normalize_text((query.get("q") or [""])[0])
+
+
+def _region_from_google_url(url: str) -> str:
+    """The country Google was asked for (`gl`), as the readable name this app uses."""
+    from urllib.parse import parse_qs, urlparse
+
+    try:
+        code = (parse_qs(urlparse(url).query or "").get("gl") or [""])[0]
+    except ValueError:
+        return ""
+    return country_by_code(code)["name"] if code else ""
+
+
 def _clean_keywords(values) -> list[str]:
     seen = set()
     cleaned = []
@@ -380,6 +442,12 @@ class CollectorSession:
         self._commands: queue.Queue = queue.Queue()
         self._thread: threading.Thread | None = None
         self._run: Run | None = None
+        # Searches the user types into the collector window accumulate into this one run;
+        # the URL set stops the same results page being recorded on every idle tick.
+        self._manual: Run | None = None
+        self._seen_manual_urls: set[str] = set()
+        self._last_watch_log: tuple[str, str] | None = None
+        self._watch_started = False
         self._state = {
             "running": False,
             "error": "",
@@ -472,6 +540,7 @@ class CollectorSession:
 
         profile = profile_dir()
         profile.mkdir(parents=True, exist_ok=True)
+        _release_stale_profile_lock(profile)
 
         try:
             with sync_playwright() as p:
@@ -526,6 +595,7 @@ class CollectorSession:
                 # what stops the thread idling forever against a dead browser.
                 if not context.pages:
                     return
+                self._capture_manual_search(context)
                 continue
 
             if command == "close":
@@ -548,6 +618,134 @@ class CollectorSession:
         except Exception:  # noqa: BLE001
             pass
         return page
+
+    # -- searches the user runs themselves ---------------------------------------
+
+    def _capture_manual_search(self, context) -> None:
+        """Record a Google search the user typed into the collector window.
+
+        The window is visible and usable, so people search in it — and every one of those
+        searches renders exactly the panel a run would have read. Collecting only during a
+        run meant someone could sit looking at real volumes on screen while this tool
+        reported nothing, which is a strange thing for a feature whose whole pitch is
+        reading the page you could read yourself.
+
+        Every return says why. This ran for minutes against a real results page producing
+        no output whatsoever, which made it impossible to tell "not looking" from "looking
+        and finding nothing" — the exact ambiguity that hid the original bug. Reading a page
+        mid-navigation genuinely does raise, so the failures stay non-fatal; they just stop
+        being invisible.
+        """
+        if not self._watch_started:
+            self._watch_started = True
+            log.info("[surfer-watch] watching the collector window for searches you run")
+
+        if self._run and self._run.status in ("queued", "running", "needs_attention"):
+            return  # a run owns the browser; its own capture is in charge
+
+        try:
+            page = next((p for p in context.pages if not p.is_closed()), None)
+        except Exception as err:  # noqa: BLE001
+            self._watch_log("", f"could not list the browser's pages ({type(err).__name__}: {err})")
+            return
+        if page is None:
+            self._watch_log("", "the browser has no open page to read")
+            return
+        try:
+            url = page.url or ""
+        except Exception as err:  # noqa: BLE001
+            self._watch_log("", f"could not read the page's address ({type(err).__name__}: {err})")
+            return
+
+        keyword = _query_from_google_url(url)
+        if not keyword:
+            self._watch_log(url, "not a Google web-results page — nothing to collect here")
+            return
+        if url in self._seen_manual_urls:
+            return
+
+        try:
+            snapshot = capture_snapshot(page)
+            parsed = parse_snapshot(snapshot, keyword)
+        except Exception as err:  # noqa: BLE001
+            # Swallowed, but no longer silently: a page mid-navigation raises from half the
+            # calls above, and "nothing happens and nothing is said" is exactly what made
+            # the original failure impossible to diagnose.
+            self._watch_log(url, f"could not read the page yet ({type(err).__name__}: {err})")
+            return
+
+        # Nothing on screen yet. Not marked as seen, so the next tick re-reads the same
+        # page once the extension has drawn.
+        if not parsed["loaded"] or (parsed["volume"] is None and not parsed["suggestions"]):
+            self._watch_log(
+                url,
+                "waiting for the Keyword Surfer panel — "
+                f"panel found={parsed['diagnostics'].get('rootFound')} "
+                f"markers={snapshot.get('markerCount')} "
+                f"frames={len(snapshot.get('frameUrls') or [])} "
+                f"loaded={parsed['loaded']} volume={parsed['volume']} "
+                f"ideas={len(parsed['suggestions'])}",
+            )
+            return
+
+        self._watch_log(
+            url,
+            f"collected {keyword!r} — volume={parsed['volume']} ideas={len(parsed['suggestions'])}",
+        )
+        self._seen_manual_urls.add(url)
+        run = self._manual_run()
+        _append_result(run, {
+            **parsed,
+            "suggestions": parsed["suggestions"][: run.max_suggestions],
+            "status": "complete" if parsed["volume"] is not None else "partial",
+            "message": STATUS_MESSAGES["complete" if parsed["volume"] is not None else "partial"],
+            # Whatever Google was asked for is in the URL the user navigated to, which is
+            # not necessarily this app's country setting — so it is read back rather than
+            # assumed.
+            "requestedGoogleRegion": _region_from_google_url(url) or run.country["name"],
+            "collectedAt": _now(),
+            "googleUrl": url,
+        })
+        run.status = "completed"
+        run.keywords = [r.get("query", "") for r in run.results]
+        run.message = (
+            f"Collected {len(run.results)} search{'' if len(run.results) == 1 else 'es'} "
+            f"you ran in the collector window."
+        )
+        run.finished_at = _now()
+        _save_run(run)
+
+    def _watch_log(self, url: str, message: str) -> None:
+        """Log a watcher observation once per distinct state, not once per second.
+
+        Without the dedupe this writes sixty identical lines a minute while a page settles,
+        which buries the one line that changes.
+        """
+        key = (url, message)
+        if key == self._last_watch_log:
+            return
+        self._last_watch_log = key
+        log.info("[surfer-watch] %s | %s", url[:90], message)
+
+    def _manual_run(self) -> Run:
+        """The run that searches-by-hand accumulate into, created on the first one.
+
+        One run per session rather than one per search, so a browsing session reads as a
+        single piece of work in the history instead of twenty one-keyword entries.
+        """
+        with self._lock:
+            if self._manual is None or self._manual is not self._run:
+                self._manual = Run(
+                    id=f"{_now()[:10]}-manual-{uuid.uuid4().hex[:8]}",
+                    keywords=[],
+                    country=country_by_code("us"),
+                    delay_ms=MIN_DELAY_MS,
+                    max_suggestions=100,
+                    status="running",
+                    message="Watching the collector window.",
+                )
+                self._run = self._manual
+            return self._manual
 
     # -- one run -----------------------------------------------------------------
 

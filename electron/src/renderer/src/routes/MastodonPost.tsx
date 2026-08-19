@@ -11,6 +11,7 @@ import {
   markMastodonPublished,
   suggestMastodonImagePrompt,
   revokeMastodonPolicy,
+  type SocialGeneratedImage,
   type MastodonCollectResponse,
   type MastodonGenerateResponse,
   type MastodonNiche,
@@ -26,6 +27,7 @@ import NichePanel from '../components/NichePanel'
 import HashtagSuggester from '../components/HashtagSuggester'
 import PostingTimePanel from '../components/PostingTimePanel'
 import PostImagePanel from '../components/PostImagePanel'
+import SaveCompositionButton from '../components/SaveCompositionButton'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import SaveButton from '../components/SaveButton'
 
@@ -44,6 +46,12 @@ export default function MastodonPost(): React.JSX.Element {
   const setField = useAppStore((s) => s.setMastodonField)
   const goCreate = useAppStore((s) => s.goCreate)
   const goSettings = useAppStore((s) => s.goSettings)
+
+  // What the two panels below currently hold, so one button can keep the finished
+  // post — words, tags and picture — as a single Library entry instead of three
+  // unrelated ones.
+  const [keptImage, setKeptImage] = useState<SocialGeneratedImage | null>(null)
+  const [keptTags, setKeptTags] = useState<string[]>([])
 
   const [status, setStatus] = useState<MastodonStatus | null>(null)
   const [policy, setPolicy] = useState<MastodonPolicy | null>(null)
@@ -479,6 +487,7 @@ export default function MastodonPost(): React.JSX.Element {
 
           {result && (
             <PostImagePanel
+              onImage={setKeptImage}
               postText={result.text}
               onSuggest={() => suggestMastodonImagePrompt(result.text, fields.niche)}
               onGenerate={(prompt) => generateMastodonImage(prompt, result.text)}
@@ -492,12 +501,27 @@ export default function MastodonPost(): React.JSX.Element {
 
           {(fields.niche || fields.userInput.trim()) && (
             <HashtagSuggester
+              onSelectionChange={setKeptTags}
               draft={(result?.text ?? '').trim() || fields.userInput}
               postText={result?.text ?? ''}
               niche={fields.niche}
               platform="mastodon"
               charLimit={policy.maxCharacters}
             />
+          )}
+
+          {/* --- keep the finished thing ------------------------------------- */}
+          {result && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+              <SaveCompositionButton
+                tool="Social"
+                title={`Mastodon post · ${fields.niche || 'untitled'}`}
+                subtitle="Mastodon post"
+                postText={result.text}
+                tags={keptTags}
+                imageUrl={keptImage?.url ?? ''}
+              />
+            </div>
           )}
         </>
       )}

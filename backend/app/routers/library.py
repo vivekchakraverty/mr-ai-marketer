@@ -12,6 +12,11 @@ class SaveRequest(BaseModel):
     subtitle: str = ""
     content: str = ""
     outputPath: str | None = None
+    #: An /outputs URL for a picture this app generated, to file alongside the text.
+    #: A URL rather than a path because that is what the renderer holds; it is resolved
+    #: here through the same containment check the share links use, so a caller cannot
+    #: name a file outside the outputs tree.
+    imageUrl: str | None = None
 
 
 @router.get("")
@@ -31,14 +36,27 @@ def save_library_item(body: SaveRequest) -> dict:
     """
     title = body.title.strip()
     content = body.content.strip()
-    if not content and not body.outputPath:
+
+    output_path = body.outputPath
+    if body.imageUrl:
+        from ..services import share_links
+
+        resolved = share_links.path_from_outputs_url(body.imageUrl)
+        if resolved is None:
+            raise HTTPException(
+                status_code=400,
+                detail="That image is not one this app generated, so it cannot be saved.",
+            )
+        output_path = str(resolved)
+
+    if not content and not output_path:
         raise HTTPException(status_code=400, detail="Nothing to save.")
     item = db.add_item(
         tool=body.tool.strip() or "Note",
         title=title or "Untitled",
         subtitle=body.subtitle.strip(),
         content=content or None,
-        output_path=body.outputPath,
+        output_path=output_path,
     )
     return {"item": item, "libraryId": item["id"]}
 

@@ -8,6 +8,7 @@ import {
   listSocialNiches,
   markSocialPublished,
   saveSocialNiche,
+  type SocialGeneratedImage,
   type SocialGenerateResponse,
   type SocialNiche,
   type SocialStatus
@@ -16,6 +17,7 @@ import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, textInput } from '../styles/styleKit'
 import PostImagePanel from '../components/PostImagePanel'
+import SaveCompositionButton from '../components/SaveCompositionButton'
 import BrandVoiceSelect from '../components/BrandVoiceSelect'
 import NichePanel from '../components/NichePanel'
 import HashtagSuggester from '../components/HashtagSuggester'
@@ -41,6 +43,12 @@ export default function SocialPost(): React.JSX.Element {
   const goCreate = useAppStore((s) => s.goCreate)
   const goSettings = useAppStore((s) => s.goSettings)
   const sendToEngage = useAppStore((s) => s.sendToEngage)
+
+  // What the two panels below currently hold, so one button can keep the finished
+  // post — words, tags and picture — as a single Library entry instead of three
+  // unrelated ones.
+  const [keptImage, setKeptImage] = useState<SocialGeneratedImage | null>(null)
+  const [keptTags, setKeptTags] = useState<string[]>([])
 
   const [status, setStatus] = useState<SocialStatus | null>(null)
   const [niches, setNiches] = useState<SocialNiche[]>([])
@@ -377,6 +385,7 @@ export default function SocialPost(): React.JSX.Element {
           </div>
 
           <PostImagePanel
+            onImage={setKeptImage}
             postText={result.text}
             onSuggest={() => suggestSocialImagePrompt(result.text, fields.niche, PLATFORM)}
             onGenerate={(prompt) =>
@@ -495,12 +504,27 @@ export default function SocialPost(): React.JSX.Element {
       {/* --- hashtag suggester ------------------------------------------- */}
       {(fields.niche || fields.userInput.trim()) && (
         <HashtagSuggester
+          onSelectionChange={setKeptTags}
           draft={(result?.text ?? '').trim() || fields.userInput}
           postText={result?.text ?? ''}
           niche={fields.niche}
           platform={PLATFORM}
           charLimit={CHAR_LIMIT}
         />
+      )}
+
+      {/* --- keep the finished thing ------------------------------------- */}
+      {result && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+          <SaveCompositionButton
+            tool="Social"
+            title={`Bluesky post · ${fields.niche || 'untitled'}`}
+            subtitle="Bluesky post"
+            postText={result.text}
+            tags={keptTags}
+            imageUrl={keptImage?.url ?? ''}
+          />
+        </div>
       )}
     </div>
   )

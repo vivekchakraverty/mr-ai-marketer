@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { suggestHashtags, type HashtagSuggestion, type HashtagSuggestResponse } from '../api/client'
 import { chip, label, primaryButtonSmall, secondaryButtonSmall } from '../styles/styleKit'
 import { useAppStore } from '../state/store'
@@ -22,6 +22,9 @@ interface Props {
   // The full post to optionally copy the tags onto. Usually the same as draft
   // once a post has been generated; empty before then.
   postText?: string
+  // Told which tags are ticked, so the screen can keep them with the post rather than
+  // leaving them on screen only. Optional — the panel is unchanged without it.
+  onSelectionChange?: (tags: string[]) => void
   niche: string
   platform: string
   charLimit?: number | null
@@ -69,7 +72,8 @@ export default function HashtagSuggester({
   postText = '',
   niche,
   platform,
-  charLimit
+  charLimit,
+  onSelectionChange
 }: Props): React.JSX.Element {
   const [data, setData] = useState<HashtagSuggestResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -100,6 +104,13 @@ export default function HashtagSuggester({
     setCopied(which)
     setTimeout(() => setCopied(''), 1600)
   }
+
+  // Same reason as the image panel: reported from one place so a tag being un-ticked is
+  // as visible to the caller as one being ticked.
+  useEffect(() => {
+    onSelectionChange?.(selected)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected])
 
   const tagString = selected.map((t) => `#${t}`).join(' ')
   const combined = postText.trim() ? `${postText.trim()}\n\n${tagString}` : tagString

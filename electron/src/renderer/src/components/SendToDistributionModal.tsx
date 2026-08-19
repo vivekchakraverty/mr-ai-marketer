@@ -5,6 +5,28 @@ import BackendImage from './BackendImage'
 import { PLATFORM_SETUP_GUIDES } from '../state/platformSetupGuides'
 import { label, primaryButton, secondaryButtonSmall, tag, textInput, textarea } from '../styles/styleKit'
 
+/** Per-channel post limits, for the ones that actually enforce one.
+ *
+ * A channel missing here has no limit worth counting against — Facebook's is 63k, Reddit's
+ * body is 40k, email has none — and listing a number nobody can reach would only add noise.
+ *
+ * Mastodon's 500 is the default a server ships with, not a rule: instances routinely raise
+ * it, and this modal does not know which one you are posting to. That is the reason the
+ * count below warns rather than blocks — a hard stop built on a number this screen is only
+ * guessing at would refuse posts the server would have accepted.
+ */
+const CHANNEL_LIMITS: Record<string, number> = {
+  bluesky: 300,
+  // `twitter`, not `x`: that is the key the channel is registered under, and a limit
+  // filed under a name nothing selects would simply never apply.
+  twitter: 280,
+  mastodon: 500,
+  instagram: 2200,
+  discord: 2000,
+  'discord-conversation': 2000,
+  linkedin: 3000
+}
+
 interface Props {
   libraryItemId: string
   title: string
@@ -87,6 +109,15 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
   const imageChannels = selected.filter((c) =>
     ['bluesky', 'mastodon', 'linkedin', 'discord', 'instagram'].includes(c)
   )
+  // The limits in play for what is currently ticked, and which of them this text breaks.
+  const limited = selected
+    .filter((c) => CHANNEL_LIMITS[c])
+    .map((c) => ({ channel: c, limit: CHANNEL_LIMITS[c], label: PLATFORM_SETUP_GUIDES[c]?.label ?? c }))
+  const tightestLimit = limited.length
+    ? limited.reduce((a, b) => (b.limit < a.limit ? b : a))
+    : null
+  const tooLongFor = limited.filter((x) => text.length > x.limit).map((x) => x.channel)
+
   const needsEmail = selected.includes('email')
   const needsReddit = selected.includes('reddit')
 
@@ -212,7 +243,32 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
             </div>
 
             <label style={label}>Post text</label>
-            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={5} style={{ ...textarea, marginBottom: 14 }} />
+            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={5} style={{ ...textarea, marginBottom: 6 }} />
+
+            {/* Counted against every selected channel at once, because that is the thing
+                this screen does that a single composer does not: one body of text going to
+                networks whose limits disagree. A bare number would leave the reader to
+                remember which of them is 280 and which is 300. */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: 12,
+                marginBottom: 14,
+                font: "700 11.5px 'Quicksand'",
+                color: tooLongFor.length ? 'var(--danger-ink)' : 'var(--ink-faint)'
+              }}
+            >
+              <span>
+                {text.length.toLocaleString()} character{text.length === 1 ? '' : 's'}
+                {tightestLimit ? ` · ${tightestLimit.label} allows ${tightestLimit.limit}` : ''}
+              </span>
+              {tooLongFor.length > 0 && (
+                <span style={{ textAlign: 'right' }}>
+                  Too long for {tooLongFor.map((c) => PLATFORM_SETUP_GUIDES[c]?.label ?? c).join(', ')}
+                </span>
+              )}
+            </div>
 
             {needsChannelId && (
               <div style={{ marginBottom: 14 }}>

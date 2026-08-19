@@ -164,6 +164,9 @@ export function saveToLibrary(input: {
   subtitle?: string
   content?: string
   outputPath?: string
+  /** An /outputs URL for a generated image to file alongside the text. Resolved to a real
+   *  path by the backend, which refuses anything outside its own outputs tree. */
+  imageUrl?: string
 }): Promise<{ libraryId: string }> {
   return postJson('/library', input)
 }

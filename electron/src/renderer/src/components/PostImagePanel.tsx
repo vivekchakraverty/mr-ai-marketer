@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ImagePromptSuggestion, SocialGeneratedImage } from '../api/client'
 import BackendImage from '../components/BackendImage'
 import { label, primaryButtonSmall, secondaryButtonSmall, textarea } from '../styles/styleKit'
@@ -28,9 +28,12 @@ interface Props {
   onSuggest: () => Promise<ImagePromptSuggestion>
   /** Draws the approved prompt. */
   onGenerate: (prompt: string) => Promise<SocialGeneratedImage>
+  /** Told what was drawn, so the screen can offer to keep it with the post it belongs to.
+   *  Optional: this panel works exactly as before without it. */
+  onImage?: (image: SocialGeneratedImage | null) => void
 }
 
-export default function PostImagePanel({ postText, onSuggest, onGenerate }: Props): React.JSX.Element {
+export default function PostImagePanel({ postText, onSuggest, onGenerate, onImage }: Props): React.JSX.Element {
   const [prompt, setPrompt] = useState('')
   const [suggestion, setSuggestion] = useState<ImagePromptSuggestion | null>(null)
   const [image, setImage] = useState<SocialGeneratedImage | null>(null)
@@ -56,6 +59,16 @@ export default function PostImagePanel({ postText, onSuggest, onGenerate }: Prop
       setSuggesting(false)
     }
   }
+
+  // Reported from one place rather than at each setImage call: the picture is cleared on
+  // a new suggestion and on any edit to the prompt, and a caller told about the drawing but
+  // not the clearing would offer to save an image that is no longer on screen.
+  useEffect(() => {
+    onImage?.(image)
+    // onImage is not a dependency on purpose — a caller passing an inline arrow would
+    // otherwise re-fire this on every render of theirs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [image])
 
   async function handleGenerate(): Promise<void> {
     if (!approved) return
