@@ -1,3 +1,4 @@
+import os
 import secrets
 
 from fastapi import FastAPI, HTTPException, Request
@@ -133,6 +134,15 @@ def on_startup() -> None:
         print("[auth] MRAIM_API_TOKEN is not set — this API will answer ANY local caller, "
               "including any web page open in a browser. Expected for `uvicorn app.main:app` "
               "during development; a packaged app always sets it.")
+    # The container that posts on the user's behalf cannot reach 127.0.0.1 here, so a
+    # second listener carries signed image links to it — bound to the WSL adapter only,
+    # and only when the app supplies that address. See services/share_server.py.
+    share_host = os.environ.get("MRAIM_SHARE_HOST", "").strip()
+    if share_host:
+        from .services import share_server
+
+        share_server.start(share_host, int(os.environ.get("MRAIM_SHARE_PORT", "8756")))
+
     db.init_db()
     guest_post.initialize()
     marketing_plan.initialize()

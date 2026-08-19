@@ -1,6 +1,7 @@
 import { app } from 'electron'
+import { API_TOKEN, BACKEND_URL } from './backend'
 import { randomBytes } from 'crypto'
-import { existsSync, mkdirSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import {
   dockerCommand,
@@ -8,7 +9,8 @@ import {
   ensureDaemonRunning,
   toWslPath,
   startWslKeepAlive,
-  stopWslKeepAlive
+  stopWslKeepAlive,
+  wslHostAddress
 } from './dockerRuntime'
 
 export const ACTIVEPIECES_PORT = 8081
@@ -54,6 +56,27 @@ function ensureSecrets(): void {
   const dataDirWsl = toWslPath(dataDir())
   const content = `AP_ENCRYPTION_KEY=${encryptionKey}\nAP_JWT_SECRET=${jwtSecret}\nAP_DATA_DIR=${dataDirWsl}\n`
   writeFileSync(envPath, content, 'utf-8')
+}
+
+/** Refresh WSL_HOST_IP in the env file. Every launch, not once.
+ *
+ * ensureSecrets() writes its file exactly once because the encryption key MUST stay stable
+ * or stored channel credentials stop decrypting. This value is the opposite: the WSL
+ * adapter's address is reassigned whenever the VM restarts, so a value cached from a
+ * previous boot points the container at nothing. Kept in the same file so compose still
+ * takes a single --env-file.
+ */
+async function refreshHostAddress(): Promise<void> {
+  const envPath = secretsEnvPath()
+  if (!existsSync(envPath)) return
+  const address = await wslHostAddress()
+  const lines = readFileSync(envPath, 'utf-8')
+    .split(/\r?\n/)
+    .filter((line) => line.trim() && !line.startsWith('WSL_HOST_IP='))
+  // No address found: leave the key unset so compose falls back to the value in the compose
+  // file rather than pinning the container to an empty host, which fails to start entirely.
+  if (address) lines.push(`WSL_HOST_IP=${address}`)
+  writeFileSync(envPath, lines.join('\n') + '\n', 'utf-8')
 }
 
 function composeArgs(subcommand: string[]): string[] {
@@ -102,9 +125,28 @@ async function removeStaleRecreateBackups(): Promise<string[]> {
   return stale
 }
 
+/** Tell the backend which address to serve signed image links on.
+ *
+ * Best effort: if this fails the engine still posts, it just cannot attach an image the app
+ * generated locally — and the composer says so rather than failing at send time. Not worth
+ * blocking a working engine over.
+ */
+async function announceShareHost(host: string): Promise<void> {
+  try {
+    await fetch(`${BACKEND_URL}/distribution/share-host`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-mraim-token': API_TOKEN },
+      body: JSON.stringify({ host })
+    })
+  } catch {
+    // Backend not up yet, or refused. Attaching a local image stays unavailable.
+  }
+}
+
 export async function startActivepieces(): Promise<void> {
   startWslKeepAlive() // keep the WSL2 VM from idling itself out from under the container
   ensureSecrets()
+  await refreshHostAddress()
   dataDir() // ensure it exists before Docker tries to bind-mount it
   let result = await dockerCommand(composeArgs(['up', '-d']))
 
@@ -117,6 +159,7 @@ export async function startActivepieces(): Promise<void> {
     throw new Error(`Failed to start the distribution engine: ${result.stderr.slice(0, 500)}`)
   }
   await waitForActivepiecesHealth()
+  await announceShareHost(await wslHostAddress())
 }
 
 /** True once the engine has been set up on this machine — the secrets file is written
@@ -169,6 +212,9 @@ export async function startActivepiecesIfConfigured(): Promise<AutoStartOutcome>
 
 export async function stopActivepieces(): Promise<void> {
   await dockerCommand(composeArgs(['down']))
+  // Close the share socket with the engine that needed it. Nothing else fetches those
+  // links, and a listener with no reader is just surface area.
+  await announceShareHost('')
   stopWslKeepAlive()
 }
 

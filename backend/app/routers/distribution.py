@@ -546,6 +546,36 @@ def _shareable_image_url(image_url: str, scheduled_at: Optional[str]) -> str:
     return share_links.url_for(path, ENGINE_HOST_BASE, ttl)
 
 
+class ShareHostRequest(BaseModel):
+    #: The WSL adapter address the container reaches this machine on. Empty stops the
+    #: listener, which is what should happen when the engine is shut down.
+    host: str
+
+
+@router.post("/share-host")
+def set_share_host(body: ShareHostRequest) -> dict:
+    """Open (or close) the share listener on the address the engine can reach us at.
+
+    An endpoint rather than an environment variable because the address is only knowable by
+    asking WSL, and asking costs a `wsl.exe` round trip that also *starts* the VM. Doing that
+    at backend boot would make every launch slower and spin up WSL for people who never open
+    Distribute. The app already knows the address by the time it starts the engine, so it
+    hands it over then.
+
+    Behind the session token like everything else here, so only this app can ask for a socket
+    to be opened.
+    """
+    from ..services import share_server
+
+    host = body.host.strip()
+    if not host:
+        share_server.stop()
+        return {"listening": False, "host": ""}
+
+    ok = share_server.start(host, int(os.environ.get("MRAIM_SHARE_PORT", "8756")))
+    return {"listening": ok, "host": host if ok else ""}
+
+
 def _payload_for(body: SendRequest) -> dict:
     payload = {"text": body.text}
     if body.imageUrl:

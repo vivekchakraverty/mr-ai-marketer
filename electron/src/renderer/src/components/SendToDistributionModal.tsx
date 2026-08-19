@@ -80,8 +80,9 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
   // Activepieces piece registry: bluesky imageUrls, mastodon media, linkedin imageUrl,
   // discord files, instagram photo. Anything else silently ignores the attachment, so it
   // is named here rather than implied.
-  // A /outputs URL names a file on this machine; the engine is in a container that
-  // cannot reach it yet. A pasted public URL is fine.
+  // A /outputs URL names a file on this machine. The engine runs in a container that
+  // reaches it through a signed, expiring link served on the WSL adapter address — see
+  // backend services/share_server.py. Nothing to refuse here any more.
   const isLocalImage = imageUrl.startsWith('/outputs/')
   const imageChannels = selected.filter((c) =>
     ['bluesky', 'mastodon', 'linkedin', 'discord', 'instagram'].includes(c)
@@ -95,8 +96,6 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
     if (needsChannelId && !channelId.trim()) return 'Discord channel ID is required.'
     if (needsPageId && !pageId.trim()) return 'Page ID is required.'
     if (needsImageUrl && !imageUrl.trim()) return 'Instagram needs an image URL.'
-    if (isLocalImage)
-      return 'That image lives on this machine and the posting engine cannot fetch it yet. Paste a public image URL, or clear the image.'
     if (needsEmail && (!to.trim() || !from.trim())) return 'Email needs both To and From addresses.'
     if (needsReddit && (!subreddit.trim() || !redditTitle.trim())) return 'Reddit needs a subreddit and a post title.'
     if (schedule) {
@@ -270,7 +269,7 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
                 <div
                   style={{
                     font: "600 11.5px/1.5 'Quicksand'",
-                    color: isLocalImage ? 'var(--danger-ink)' : 'var(--ink-faint)',
+                    color: 'var(--ink-faint)',
                     marginTop: 5
                   }}
                 >
@@ -278,7 +277,7 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
                       runs in its own container and the backend only listens on loopback.
                       Saying so beats a flow that fails with a download error. */}
                   {isLocalImage
-                    ? 'Images generated here cannot be attached yet — the posting engine cannot reach this machine. Paste a public image URL instead, or send as text.'
+                    ? `Sent as a private link that expires. Will be attached on ${imageChannels.join(', ') || 'no selected channel'}.`
                     : imageUrl
                       ? `Will be attached on ${imageChannels.join(', ') || 'no selected channel'}.`
                       : 'Posts go out as text only unless you add one.'}

@@ -130,6 +130,25 @@ export async function ensureDaemonRunning(timeoutMs = 30000): Promise<void> {
   throw new Error('Docker daemon did not become ready in time.')
 }
 
+
+/**
+ * The address the Windows host answers on from inside the WSL VM, or '' if unavailable.
+ *
+ * This is the VM's default gateway, which is the Windows side of the `vEthernet (WSL)`
+ * adapter. It is assigned per boot, so it cannot be hardcoded — and it is emphatically NOT
+ * `host-gateway`, the answer Docker Desktop would give: on a bare Docker Engine inside WSL2
+ * that resolves to the VM's own bridge (172.17.0.1), which answers nothing.
+ *
+ * Measured on a real install: gateway 172.30.240.1, matching the Windows adapter exactly,
+ * and a Windows port bound there was reachable from inside the VM with no firewall rule.
+ */
+export async function wslHostAddress(): Promise<string> {
+  const result = await runInDistro(['sh', '-c', 'ip route show default'])
+  if (result.code !== 0) return ''
+  const match = /default\s+via\s+(\d+\.\d+\.\d+\.\d+)/.exec(result.stdout)
+  return match ? match[1] : ''
+}
+
 export function dockerCommand(args: string[]): Promise<RunResult> {
   return runInDistro(['docker', ...args])
 }
