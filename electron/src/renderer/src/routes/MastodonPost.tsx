@@ -291,7 +291,6 @@ export default function MastodonPost(): React.JSX.Element {
             {status.reachable ? (
               <>
                 {status.title} · {status.maxCharacters} character limit
-                {status.provider ? ` · ${status.provider}/${status.model.split('/').pop()}` : ''}
               </>
             ) : (
               <span style={{ color: 'var(--danger-ink)' }}>{status.detail || 'Could not reach that server.'}</span>

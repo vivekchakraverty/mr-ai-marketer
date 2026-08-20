@@ -8,7 +8,7 @@ import {
 } from '../api/client'
 import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
-import { PLAN_INDUSTRY_OPTIONS, PLAN_MODEL_OPTIONS } from '../state/types'
+import { PLAN_INDUSTRY_OPTIONS, PLAN_MODEL_OPTIONS, planModelLabel } from '../state/types'
 import BrandForge from '../components/BrandForge'
 import InfluencerDb from '../components/InfluencerDb'
 import KeywordSurfer from '../components/KeywordSurfer'
@@ -316,8 +316,10 @@ export default function Research(): React.JSX.Element {
           <div>
             <label style={label}>Model</label>
             <select value={fields.model} onChange={(e) => setPlanField('model', e.target.value)} style={select}>
-              {models.map((o) => (
-                <option key={o}>{o}</option>
+              {models.map((o, i) => (
+                <option key={o} value={o}>
+                  {planModelLabel(o, i)}
+                </option>
               ))}
             </select>
           </div>

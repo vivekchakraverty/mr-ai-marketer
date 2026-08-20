@@ -336,9 +336,6 @@ export default function TumblrPost(): React.JSX.Element {
                 <div style={secondaryButtonSmall} onClick={() => void handleGenerate(true)}>
                   Try again
                 </div>
-                <div style={{ font: "600 11.5px 'Quicksand'", color: 'var(--ink-faint)', marginLeft: 'auto' }}>
-                  {result.model}
-                </div>
               </div>
 
               {/* Closing the loop. Until a draft is linked to a real post, the tool can

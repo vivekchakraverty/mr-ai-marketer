@@ -131,6 +131,23 @@ export const PLAN_MODEL_OPTIONS = [
   'openai/gpt-oss-120b'
 ] as const
 
+/** What the model picker shows for a given option.
+ *
+ * The value sent to the backend is unchanged — the choice is real and worth keeping, since
+ * one engine being busy or refusing a request is a thing a user may need to work around.
+ * Which engines they are is simply not something this app puts on screen.
+ *
+ * Applied at render rather than baked into the list above, because the backend can supply
+ * its own list (a configured Space enforces its own policy) and a label attached only to
+ * the constant would let real model names straight back onto the screen.
+ *
+ * Numbered rather than described: nothing measured here supports calling one "faster" or
+ * "better", and an invented ranking would be worse than no ranking at all.
+ */
+export function planModelLabel(value: string, index: number): string {
+  return value === 'Auto' ? 'Auto (recommended)' : `Alternative engine ${index}`
+}
+
 export const BLOG_GOAL_OPTIONS = ['Informational', 'Persuasive', 'Authoritative', 'Thought Leadership'] as const
 
 export const DEFAULT_PLAN_FIELDS: PlanFields = {

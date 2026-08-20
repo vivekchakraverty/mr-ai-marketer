@@ -270,7 +270,7 @@ export default function SocialPost(): React.JSX.Element {
           </div>
           {status && (
             <div style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-faint)', marginLeft: 'auto' }}>
-              {status.provider}/{status.model.split('/').pop()} · {status.posts} posts watched
+              {status.posts.toLocaleString()} posts watched
             </div>
           )}
         </div>
