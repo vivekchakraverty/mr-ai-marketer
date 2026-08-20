@@ -14,8 +14,9 @@ and the panel heuristics that are easy to diverge from by accident.
 HEADER_TERMS = ['keyword ideas', 'search volume', 'similar keywords', 'keyword surfer', 'similarity', 'content ideas']
 
 # Runs in each frame. Returns a raw snapshot: candidate rows, the panel text, any inline
-# metrics from the Surfer-enhanced search bar, and diagnostics.
-CAPTURE_JS = r"""({ headerTerms }) => {
+# metrics from the Surfer-enhanced search bar, CPC fields from the records the extension
+# already loaded into the Google-origin cache, and diagnostics.
+CAPTURE_JS = r"""async ({ headerTerms, query, country }) => {
     const normalize = (value) => String(value || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
     const visible = (element) => {
       if (!(element instanceof Element)) return false;
@@ -128,6 +129,108 @@ CAPTURE_JS = r"""({ headerTerms }) => {
     ].map((element) => normalize(element.innerText || element.textContent || '')).filter(Boolean);
     const countryLabels = supportedCountryNames.filter((name) => rootText.toLowerCase().includes(name.toLowerCase()));
 
+    // Keyword Surfer 6.3 stopped rendering CPC in the ideas table even though every
+    // record it just loaded still contains `cpc`. The extension keeps those records in
+    // its localforage IndexedDB cache on the Google origin. Read only the metrics for the
+    // query and the rows visible in this snapshot; the DOM remains the authority for what
+    // belongs to this result, so an old cached search can never introduce extra ideas.
+    const readCachedKeywordMetrics = async () => {
+      if (!query || !globalThis.indexedDB || typeof indexedDB.databases !== 'function') return [];
+      try {
+        const databases = await indexedDB.databases();
+        if (!databases.some((database) => database.name === 'localforage')) return [];
+
+        const database = await new Promise((resolve, reject) => {
+          const request = indexedDB.open('localforage');
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+          // Never create or migrate the extension's storage while merely reading it.
+          request.onupgradeneeded = () => {
+            request.transaction?.abort();
+            reject(new Error('Keyword Surfer cache is not initialized'));
+          };
+        });
+
+        const wanted = new Set([
+          normalize(query).toLowerCase(),
+          ...rows.flatMap((row) => row.texts.map((text) => normalize(text).toLowerCase())),
+        ]);
+        const found = new Map();
+        const expectedCountry = normalize(country).toLowerCase();
+        const asNumber = (value) => {
+          if (value === null || value === undefined || value === '') return null;
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? parsed : null;
+        };
+        const addMetric = (keyword, value, metricCountry, rank) => {
+          const cleanKeyword = normalize(keyword);
+          const key = cleanKeyword.toLowerCase();
+          const cleanCountry = normalize(metricCountry).toLowerCase();
+          if (!cleanKeyword || !wanted.has(key)) return;
+          if (expectedCountry && cleanCountry && cleanCountry !== expectedCountry) return;
+
+          const candidate = {
+            keyword: cleanKeyword,
+            volume: asNumber(value?.search_volume),
+            cpc: asNumber(value?.cpc),
+            country: cleanCountry || expectedCountry || null,
+            rank,
+          };
+          const previous = found.get(key);
+          if (
+            !previous ||
+            candidate.rank > previous.rank ||
+            (previous.cpc === null && candidate.cpc !== null)
+          ) {
+            found.set(key, candidate);
+          }
+        };
+
+        for (const storeName of [...database.objectStoreNames]) {
+          await new Promise((resolve, reject) => {
+            const transaction = database.transaction(storeName, 'readonly');
+            const request = transaction.objectStore(storeName).openCursor();
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+              const cursor = request.result;
+              if (!cursor) return;
+
+              const cacheKey = String(cursor.key || '');
+              const lowerKey = cacheKey.toLowerCase();
+              const suffixAt = lowerKey.lastIndexOf('-{"country":"');
+              const separatorAt = cacheKey.indexOf(':');
+              if (
+                lowerKey.includes('surfer-db-cache-keywords-') &&
+                separatorAt >= 0 &&
+                suffixAt > separatorAt
+              ) {
+                const seedKeyword = cacheKey.slice(separatorAt + 1, suffixAt);
+                const keyCountry = lowerKey.slice(suffixAt).match(/-\{"country":"([a-z]{2})"\}$/)?.[1] || '';
+                const value = cursor.value;
+                if (value && typeof value === 'object') {
+                  addMetric(seedKeyword, value, keyCountry, 2);
+                  for (const similar of Array.isArray(value.similar_keywords) ? value.similar_keywords : []) {
+                    addMetric(similar?.keyword, similar, similar?.country || keyCountry, 1);
+                  }
+                }
+              }
+              cursor.continue();
+            };
+            transaction.oncomplete = () => resolve();
+            transaction.onerror = () => reject(transaction.error);
+            transaction.onabort = () => reject(transaction.error);
+          });
+        }
+        database.close();
+        return [...found.values()].map(({ rank, ...metric }) => metric);
+      } catch (_) {
+        // DOM collection still works on browsers without the cache or while the extension
+        // is writing it. A later poll will try again once that transaction has settled.
+        return [];
+      }
+    };
+    const cachedKeywordMetrics = await readCachedKeywordMetrics();
+
     const rootSelector = root
       ? `${root.tagName.toLowerCase()}${root.id ? `#${root.id}` : ''}${
           typeof root.className === 'string' && root.className
@@ -143,6 +246,7 @@ CAPTURE_JS = r"""({ headerTerms }) => {
       markerCount: candidates.length,
       countryLabels,
       mainKeywordMetrics,
+      cachedKeywordMetrics,
       rows,
       frameUrl: location.href,
       capturedAt: new Date().toISOString(),

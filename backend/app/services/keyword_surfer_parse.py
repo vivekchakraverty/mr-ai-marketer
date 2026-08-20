@@ -8,11 +8,14 @@ it can be tested without a browser.
 The parsing is deliberately shape-driven rather than selector-driven: it reads whatever
 visible text the extension rendered and works out which token is a keyword, which is a
 volume, which is a price. Surfer ships UI changes regularly, and a parser pinned to its
-class names is a parser that breaks on their next release.
+class names is a parser that breaks on their next release. Newer Surfer versions omit CPC
+from rendered idea rows; that missing field is restored from the record Surfer has already
+loaded into its browser cache, while the DOM remains authoritative for row membership.
 """
 from __future__ import annotations
 
 import re
+import math
 from datetime import datetime, timezone
 
 from .keyword_surfer_js import HEADER_TERMS
@@ -173,6 +176,44 @@ def parse_row(row: dict) -> dict | None:
     }
 
 
+def _parse_cached_metric(metric: dict) -> dict | None:
+    """Normalize one metric from Keyword Surfer's already-loaded browser cache.
+
+    Surfer 6.3 still loads CPC for each idea but no longer renders that column. Cache data
+    only fills fields absent from the rendered row; it never decides which rows exist.
+    """
+    keyword = normalize_text(metric.get("keyword"))
+    if not keyword:
+        return None
+
+    volume = parse_compact_number(metric.get("volume"))
+    raw_cpc = metric.get("cpc")
+    cpc = None
+    display = None
+    if raw_cpc not in (None, "") and not isinstance(raw_cpc, bool):
+        currency = parse_currency(raw_cpc)
+        if currency:
+            cpc = currency["amount"]
+            display = currency["display"]
+        else:
+            try:
+                candidate = float(str(raw_cpc).replace(",", ""))
+                if math.isfinite(candidate) and candidate >= 0:
+                    cpc = candidate
+                    display = f"${candidate:.2f}"
+            except (TypeError, ValueError):
+                pass
+
+    if volume is None and cpc is None:
+        return None
+    return {
+        "keyword": keyword,
+        "volume": volume,
+        "cpc": cpc,
+        "cpcDisplay": display,
+    }
+
+
 def _metric_following_label(root_text: str, labels: list[str]) -> int | None:
     escaped = "|".join(re.escape(label) for label in labels)
     expression = re.compile(
@@ -186,6 +227,24 @@ def parse_snapshot(snapshot: dict, query: str) -> dict:
     """The panel snapshot as one result: the query's own figures plus its suggestions."""
     query_key = normalize_keyword(query)
     parsed_rows = [r for r in (parse_row(row) for row in (snapshot.get("rows") or [])) if r]
+    cached_rows = [
+        r
+        for r in (_parse_cached_metric(metric) for metric in (snapshot.get("cachedKeywordMetrics") or []))
+        if r
+    ]
+    cached_by_keyword = {normalize_keyword(row["keyword"]): row for row in cached_rows}
+
+    # The extension's rendered row remains authoritative. Its cache only restores metrics
+    # that the current UI omitted, most notably CPC in Keyword Surfer 6.3.
+    for row in parsed_rows:
+        cached = cached_by_keyword.get(normalize_keyword(row["keyword"]))
+        if not cached:
+            continue
+        if row["volume"] is None:
+            row["volume"] = cached["volume"]
+        if row["cpc"] is None:
+            row["cpc"] = cached["cpc"]
+            row["cpcDisplay"] = cached["cpcDisplay"]
 
     by_keyword: dict[str, dict] = {}
     for row in parsed_rows:
@@ -204,6 +263,7 @@ def parse_snapshot(snapshot: dict, query: str) -> dict:
         }
 
     exact = by_keyword.pop(query_key, None)
+    cached_exact = cached_by_keyword.get(query_key)
 
     root_text = normalize_text(snapshot.get("rootText") or "")
     inline_metrics = [t for t in (normalize_text(m) for m in (snapshot.get("mainKeywordMetrics") or [])) if t]
@@ -216,6 +276,8 @@ def parse_snapshot(snapshot: dict, query: str) -> dict:
             inline_cpc = None
 
     query_volume = (exact or {}).get("volume")
+    if query_volume is None:
+        query_volume = (cached_exact or {}).get("volume")
     if query_volume is None:
         query_volume = inline_volume
     if query_volume is None:
@@ -235,8 +297,12 @@ def parse_snapshot(snapshot: dict, query: str) -> dict:
 
     cpc = (exact or {}).get("cpc")
     if cpc is None:
+        cpc = (cached_exact or {}).get("cpc")
+    if cpc is None:
         cpc = inline_cpc
     cpc_display = (exact or {}).get("cpcDisplay")
+    if cpc_display is None:
+        cpc_display = (cached_exact or {}).get("cpcDisplay")
     if cpc_display is None and inline_cpc is not None:
         cpc_display = inline_metrics[1]
 
@@ -255,6 +321,7 @@ def parse_snapshot(snapshot: dict, query: str) -> dict:
             "markerCount": snapshot.get("markerCount") or 0,
             "candidateRows": len(snapshot.get("rows") or []),
             "parsedRows": len(parsed_rows),
+            "cachedMetrics": len(cached_rows),
             "capturedAt": snapshot.get("capturedAt") or datetime.now(timezone.utc).isoformat(),
             "frameUrls": snapshot.get("frameUrls") or ([snapshot["frameUrl"]] if snapshot.get("frameUrl") else []),
             "mainKeywordMetrics": inline_metrics,

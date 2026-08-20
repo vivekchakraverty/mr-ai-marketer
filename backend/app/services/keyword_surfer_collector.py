@@ -9,8 +9,10 @@ it.
 
 So this does the opposite. It opens a window, keeps a dedicated profile so the answer is
 remembered, and when Google asks for a check it **stops and waits for the person** instead
-of pretending to be one. That is also why the extension's own UI is read rather than its
-private API: what the user could see for themselves is what gets collected.
+of pretending to be one. The extension's rendered UI remains the authority for which rows
+belong to a result. For fields its newer UI hides (currently idea CPC), the collector reads
+the same records the extension has already loaded into its browser cache; it never calls
+the extension's private API itself.
 
 Everything runs on one dedicated thread. Playwright's sync objects belong to the thread
 that made them, and the browser has to outlive the request that opened it, so a thread that
@@ -133,10 +135,20 @@ def capture_snapshot(page) -> dict:
         reverse=True,
     )
 
+    try:
+        page_url = page.url or ""
+    except Exception:  # noqa: BLE001 - a navigation can replace the page mid-read
+        page_url = ""
+    capture_args = {
+        "headerTerms": HEADER_TERMS,
+        "query": _query_from_google_url(page_url),
+        "country": _country_code_from_google_url(page_url),
+    }
+
     snapshots = []
     for frame in frames:
         try:
-            snapshots.append(frame.evaluate(CAPTURE_JS, {"headerTerms": HEADER_TERMS}))
+            snapshots.append(frame.evaluate(CAPTURE_JS, capture_args))
         except Exception:  # noqa: BLE001 — a frame can vanish while the extension redraws
             continue
 
@@ -151,6 +163,7 @@ def capture_snapshot(page) -> dict:
             "markerCount": 0,
             "countryLabels": [],
             "mainKeywordMetrics": [],
+            "cachedKeywordMetrics": [],
             "rows": [],
             "frameUrls": [f.url for f in frames],
             "capturedAt": _now(),
@@ -179,6 +192,15 @@ def capture_snapshot(page) -> dict:
 
     root_texts = list(dict.fromkeys([s.get("rootText") for s in matching if s.get("rootText")]))
     inline = next((s.get("mainKeywordMetrics") for s in matching if s.get("mainKeywordMetrics")), [])
+    cached_metrics = []
+    seen_cached = set()
+    for snapshot in snapshots:
+        for metric in (snapshot or {}).get("cachedKeywordMetrics") or []:
+            key = normalize_text(metric.get("keyword")).casefold()
+            if not key or key in seen_cached:
+                continue
+            seen_cached.add(key)
+            cached_metrics.append(metric)
     country_labels = list(dict.fromkeys([c for s in matching for c in (s.get("countryLabels") or [])]))
 
     best.update(
@@ -187,6 +209,7 @@ def capture_snapshot(page) -> dict:
             "markerCount": sum(s.get("markerCount") or 0 for s in matching),
             "countryLabels": country_labels,
             "mainKeywordMetrics": inline,
+            "cachedKeywordMetrics": cached_metrics,
             "rows": rows[:400],
             "frameUrls": [s.get("frameUrl") for s in snapshots if s],
         }
@@ -432,14 +455,19 @@ def _query_from_google_url(url: str) -> str:
     return normalize_text((query.get("q") or [""])[0])
 
 
-def _region_from_google_url(url: str) -> str:
-    """The country Google was asked for (`gl`), as the readable name this app uses."""
+def _country_code_from_google_url(url: str) -> str:
+    """The normalized Google `gl` country code in a web-results URL, if present."""
     from urllib.parse import parse_qs, urlparse
 
     try:
-        code = (parse_qs(urlparse(url).query or "").get("gl") or [""])[0]
+        return normalize_text((parse_qs(urlparse(url).query or "").get("gl") or [""])[0]).lower()
     except ValueError:
         return ""
+
+
+def _region_from_google_url(url: str) -> str:
+    """The country Google was asked for (`gl`), as the readable name this app uses."""
+    code = _country_code_from_google_url(url)
     return country_by_code(code)["name"] if code else ""
 
 

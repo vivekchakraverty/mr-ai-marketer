@@ -123,3 +123,51 @@ def test_rows_without_any_metric_are_discarded():
         "seed",
     )
     assert [row["keyword"] for row in parsed["suggestions"]] == ["real keyword"]
+
+
+def test_restores_cpc_from_surfer_cache_when_current_ideas_table_omits_it():
+    """Surfer 6.3 renders Keyword/Overlap/Volume but keeps CPC in its loaded record."""
+    parsed = parse_snapshot(
+        {
+            "rootFound": True,
+            "rootText": "Keyword ideas Keyword Overlap Volume",
+            "rows": [
+                {"texts": ["define allegory", "50%", "60,500"]},
+                {"texts": ["meaning of allegory", "50%", "60,500"]},
+            ],
+            "cachedKeywordMetrics": [
+                {"keyword": "define allegory", "volume": 60_500, "cpc": 1.84, "country": "us"},
+                {"keyword": "meaning of allegory", "volume": 60_500, "cpc": 0, "country": "us"},
+                # An old cached row must not appear unless it is present in this DOM snapshot.
+                {"keyword": "unrelated old search", "volume": 9_900, "cpc": 9.99, "country": "us"},
+            ],
+        },
+        "allegorical sci-fi novel",
+    )
+
+    assert [row["keyword"] for row in parsed["suggestions"]] == [
+        "define allegory",
+        "meaning of allegory",
+    ]
+    assert parsed["suggestions"][0]["cpc"] == 1.84
+    assert parsed["suggestions"][0]["cpcDisplay"] == "$1.84"
+    assert parsed["suggestions"][1]["cpc"] == 0
+    assert parsed["suggestions"][1]["cpcDisplay"] == "$0.00"
+
+
+def test_restores_exact_keyword_metrics_from_surfer_cache():
+    parsed = parse_snapshot(
+        {
+            "rootFound": True,
+            "rootText": "Keyword ideas Keyword Overlap Volume",
+            "rows": [{"texts": ["related idea", "42%", "1,000"]}],
+            "cachedKeywordMetrics": [
+                {"keyword": "seed keyword", "volume": 720, "cpc": 2.4, "country": "us"},
+            ],
+        },
+        "seed keyword",
+    )
+
+    assert parsed["volume"] == 720
+    assert parsed["cpc"] == 2.4
+    assert parsed["cpcDisplay"] == "$2.40"
