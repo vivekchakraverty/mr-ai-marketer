@@ -1,6 +1,6 @@
 {
   "name": "mr-ai-marketer",
-  "version": "0.6.9",
+  "version": "0.7.0",
   "description": "Mr. AI Marketer — desktop marketing studio",
   "main": "./out/main/index.js",
   "//desktopName": "Root level, not build.linux — app-builder-lib reads it from package.json metadata (LinuxTargetHelper), and linux.syncDesktopName is the flag that makes it take effect. Electron uses it as app_id/WM_CLASS so Linux desktops associate running windows with the .desktop entry.",

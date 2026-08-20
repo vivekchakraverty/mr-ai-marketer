@@ -26,6 +26,36 @@ import {
 
 export type LibraryFilter = 'All' | 'Plans' | 'Brand' | 'Blogs' | 'Tutorials' | 'Guest' | 'Docs'
 
+/** A finished post on its way to the composer that will send it.
+ *
+ * Carries the picture and the tags, not just the words. The three pieces are chosen
+ * together on the creator screen, and handing over only the text meant re-picking an image
+ * and re-ticking tags in a second place — with nothing to tell you which ones you had.
+ */
+export interface EngageHandoff {
+  text: string
+  /** Chosen tags, without their leading '#'. Appended to the text on arrival. */
+  tags: string[]
+  /** An /outputs URL for a generated image, ready for the composer's picker. */
+  imageUrl: string
+  /** Which composer should receive it — a Mastodon draft is not a Bluesky one. */
+  network: 'bluesky' | 'mastodon' | 'tumblr'
+}
+
+/** The handoff's text with its chosen tags appended, the way they would be published.
+ *
+ * One helper rather than three: the composers would otherwise each decide how to join them,
+ * and a post that gains its tags differently depending on which screen sent it is a bug
+ * waiting to be reported as "the hashtags moved".
+ */
+export function withTags(draft: EngageHandoff): string {
+  const tags = draft.tags.map((t) => (t.startsWith('#') ? t : `#${t}`)).join(' ')
+  const body = draft.text.trim()
+  return tags ? `${body}
+
+${tags}` : body
+}
+
 interface AppState {
   route: Route
   tool: Tool
@@ -114,13 +144,13 @@ interface AppState {
   // Handoff from a composer tool to Engage's Bluesky post box. Write-once: Engage
   // takes it on arrival, so coming back later does not silently repopulate a box
   // the user already emptied.
-  engageDraft: string | null
-  sendToEngage: (text: string) => void
+  engageDraft: EngageHandoff | null
+  sendToEngage: (draft: EngageHandoff | string) => void
   // Reads and clears in one step, and returns null if it was already taken.
   // The atomicity is load-bearing: StrictMode runs an effect body twice against
   // the same closure, so a read-then-clear pair appended the draft twice. Taking
   // it makes the second pass a no-op.
-  takeEngageDraft: () => string | null
+  takeEngageDraft: () => EngageHandoff | null
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -244,7 +274,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Navigating is part of the action, not a separate step the caller has to
   // remember — "send to Engage" that leaves you on the previous screen is a
   // clipboard button with extra ceremony.
-  sendToEngage: (text) => set({ engageDraft: text, route: 'engage', tool: null, readerItem: null }),
+  sendToEngage: (draft) =>
+    set({
+      // A bare string still works: several callers hand over just the words, and making
+      // them all build an object to say "no image, no tags" would be ceremony.
+      engageDraft:
+        typeof draft === 'string'
+          ? { text: draft, tags: [], imageUrl: '', network: 'bluesky' }
+          : draft,
+      route: 'engage',
+      tool: null,
+      readerItem: null
+    }),
   takeEngageDraft: () => {
     const draft = get().engageDraft
     if (draft !== null) set({ engageDraft: null })

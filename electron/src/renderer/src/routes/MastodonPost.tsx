@@ -28,6 +28,7 @@ import HashtagSuggester from '../components/HashtagSuggester'
 import PostingTimePanel from '../components/PostingTimePanel'
 import PostImagePanel from '../components/PostImagePanel'
 import SaveCompositionButton from '../components/SaveCompositionButton'
+import SendToEngageButton from '../components/SendToEngageButton'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import SaveButton from '../components/SaveButton'
 
@@ -512,7 +513,14 @@ export default function MastodonPost(): React.JSX.Element {
           {/* --- keep the finished thing ------------------------------------- */}
           {result && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-              <SaveCompositionButton
+              <SendToEngageButton
+            network="mastodon"
+            label="Mastodon"
+            postText={result.text}
+            tags={keptTags}
+            imageUrl={keptImage?.url ?? ''}
+          />
+          <SaveCompositionButton
                 tool="Social"
                 title={`Mastodon post · ${fields.niche || 'untitled'}`}
                 subtitle="Mastodon post"

@@ -29,7 +29,7 @@ import PostMedia from '../components/PostMedia'
 import AttachImagePicker from '../components/AttachImagePicker'
 import SuggestedFollows, { type SuggestionRow } from '../components/SuggestedFollows'
 import ScreenBackdrop from '../components/ScreenBackdrop'
-import { useAppStore } from '../state/store'
+import { useAppStore, withTags, type EngageHandoff } from '../state/store'
 import { primaryButtonSmall, secondaryButtonSmall, segGroup, segItem, sectionEyebrow, textarea } from '../styles/styleKit'
 import SaveButton from '../components/SaveButton'
 
@@ -364,6 +364,8 @@ export default function Engage(): React.JSX.Element {
   const [posts, setPosts] = useState<FeedPost[]>([])
   const [postText, setPostText] = useState('')
   const [postImage, setPostImage] = useState({ url: '', alt: '' })
+  // Held for the Mastodon/Tumblr composers, which mount below and take it from here.
+  const [handoff, setHandoff] = useState<EngageHandoff | null>(null)
   const [loading, setLoading] = useState(false)
   const [posting, setPosting] = useState(false)
   async function loadSuggestions(query = ''): Promise<void> {
@@ -402,8 +404,16 @@ export default function Engage(): React.JSX.Element {
     // atomic take makes that pass a no-op instead of appending the post again.
     const draft = takeEngageDraft()
     if (!draft) return
-    setNetwork('bluesky')
-    setPostText((current) => (current.trim() ? `${current.trimEnd()}\n\n${draft}` : draft))
+    setNetwork(draft.network)
+    // Mastodon and Tumblr compose inside their own components; only the Bluesky box lives
+    // on this screen, so the other two are handed the draft to read themselves.
+    if (draft.network !== 'bluesky') {
+      setHandoff(draft)
+      return
+    }
+    const body = withTags(draft)
+    setPostText((current) => (current.trim() ? `${current.trimEnd()}\n\n${body}` : body))
+    if (draft.imageUrl) setPostImage({ url: draft.imageUrl, alt: '' })
   }, [engageDraft, takeEngageDraft])
 
   // Only asked for once the Bluesky side is actually being looked at — opening
@@ -560,9 +570,9 @@ export default function Engage(): React.JSX.Element {
         ))}
       </div>
 
-      {network === 'mastodon' && <MastodonEngage />}
+      {network === 'mastodon' && <MastodonEngage handoff={handoff} onHandoffTaken={() => setHandoff(null)} />}
 
-      {network === 'tumblr' && <TumblrEngage />}
+      {network === 'tumblr' && <TumblrEngage handoff={handoff} onHandoffTaken={() => setHandoff(null)} />}
 
       {network === 'bluesky' && status && !status.configured && (
         <div

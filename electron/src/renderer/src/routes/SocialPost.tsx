@@ -18,6 +18,7 @@ import { useAppStore } from '../state/store'
 import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, textInput } from '../styles/styleKit'
 import PostImagePanel from '../components/PostImagePanel'
 import SaveCompositionButton from '../components/SaveCompositionButton'
+import SendToEngageButton from '../components/SendToEngageButton'
 import BrandVoiceSelect from '../components/BrandVoiceSelect'
 import NichePanel from '../components/NichePanel'
 import HashtagSuggester from '../components/HashtagSuggester'
@@ -42,7 +43,6 @@ export default function SocialPost(): React.JSX.Element {
   const setSocialField = useAppStore((s) => s.setSocialField)
   const goCreate = useAppStore((s) => s.goCreate)
   const goSettings = useAppStore((s) => s.goSettings)
-  const sendToEngage = useAppStore((s) => s.sendToEngage)
 
   // What the two panels below currently hold, so one button can keep the finished
   // post — words, tags and picture — as a single Library entry instead of three
@@ -368,13 +368,6 @@ export default function SocialPost(): React.JSX.Element {
                 {copied ? 'Copied ✓' : 'Copy'}
               </div>
               <div
-                style={secondaryButtonSmall}
-                title="Open Engage with this post in the Bluesky box, ready to send"
-                onClick={() => sendToEngage(result.text)}
-              >
-                Send to Engage →
-              </div>
-              <div
                 style={{ ...secondaryButtonSmall, opacity: loading ? 0.6 : 1 }}
                 title="Write a different post for the same request"
                 onClick={loading ? undefined : () => void handleGenerate(true)}
@@ -516,6 +509,13 @@ export default function SocialPost(): React.JSX.Element {
       {/* --- keep the finished thing ------------------------------------- */}
       {result && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+          <SendToEngageButton
+            network="bluesky"
+            label="Bluesky"
+            postText={result.text}
+            tags={keptTags}
+            imageUrl={keptImage?.url ?? ''}
+          />
           <SaveCompositionButton
             tool="Social"
             title={`Bluesky post · ${fields.niche || 'untitled'}`}

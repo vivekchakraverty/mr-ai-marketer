@@ -18,6 +18,7 @@ import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, text
 import BrandVoiceSelect from '../components/BrandVoiceSelect'
 import PostImagePanel from '../components/PostImagePanel'
 import SaveCompositionButton from '../components/SaveCompositionButton'
+import SendToEngageButton from '../components/SendToEngageButton'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 
 /**
@@ -444,7 +445,13 @@ export default function TumblrPost(): React.JSX.Element {
         {/* --- keep the finished thing ------------------------------------- */}
         {result && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-            <SaveCompositionButton
+            <SendToEngageButton
+            network="tumblr"
+            label="Tumblr"
+            postText={result.text}
+            imageUrl={keptImage?.url ?? ''}
+          />
+          <SaveCompositionButton
               tool="Social"
               title={`Tumblr post · ${fields.niche || 'untitled'}`}
               subtitle="Tumblr post"

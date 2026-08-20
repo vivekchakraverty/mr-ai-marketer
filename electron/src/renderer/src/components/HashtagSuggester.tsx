@@ -279,7 +279,16 @@ export default function HashtagSuggester({
               <div
                 style={secondaryButtonSmall}
                 title="Open Engage with this in the Bluesky box, ready to send"
-                onClick={() => sendToEngage(combined)}
+                onClick={() =>
+                  sendToEngage({
+                    text: postText.trim() || tagString,
+                    tags: selected,
+                    imageUrl: '',
+                    // Always bluesky: the guard above is what limits this button to a
+                    // Bluesky draft in the first place.
+                    network: 'bluesky'
+                  })
+                }
               >
                 {postText.trim() ? 'Send post + tags to Engage →' : 'Send tags to Engage →'}
               </div>

@@ -29,7 +29,7 @@ import {
 import PostMedia from './PostMedia'
 import AttachImagePicker from './AttachImagePicker'
 import SuggestedFollows, { type SuggestionRow } from './SuggestedFollows'
-import { useAppStore } from '../state/store'
+import { useAppStore, withTags, type EngageHandoff } from '../state/store'
 import { chip, label, primaryButtonSmall, secondaryButtonSmall, segGroup, segItem, select, textarea, textInput } from '../styles/styleKit'
 
 /**
@@ -475,8 +475,12 @@ function Composer({
   replyTo,
   suggestedVisibility,
   onCancelReply,
-  onSubmit
+  onSubmit,
+  handoff,
+  onHandoffTaken
 }: {
+  handoff?: EngageHandoff | null
+  onHandoffTaken?: () => void
   maxCharacters: number
   visibilities: string[]
   busy: boolean
@@ -499,6 +503,19 @@ function Composer({
   const [visibility, setVisibility] = useState(suggestedVisibility)
   const [language, setLanguage] = useState('')
   const [image, setImage] = useState({ url: '', alt: '' })
+
+  // A post handed over from the Mastodon creator: words, tags and picture together. Taken
+  // once — `onHandoffTaken` clears it upstream, so a re-render cannot append it twice.
+  useEffect(() => {
+    if (!handoff) return
+    const body = withTags(handoff)
+    setText((current) => (current.trim() ? `${current.trimEnd()}
+
+${body}` : body))
+    if (handoff.imageUrl) setImage({ url: handoff.imageUrl, alt: '' })
+    onHandoffTaken?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoff])
   // One key per draft, not per click: a double-submit or a retried timeout then
   // lands on the same post server-side instead of publishing twice.
   const [key, setKey] = useState(() => crypto.randomUUID())
@@ -895,7 +912,15 @@ function StatusCard({
 // The screen
 // ---------------------------------------------------------------------------
 
-export default function MastodonEngage(): React.JSX.Element {
+export default function MastodonEngage({
+  handoff,
+  onHandoffTaken
+}: {
+  /** A post sent over from a creator screen: words, chosen tags and a generated image. */
+  handoff?: EngageHandoff | null
+  /** Called once it has been read, so the parent stops offering it. */
+  onHandoffTaken?: () => void
+} = {}): React.JSX.Element {
   const goSettings = useAppStore((s) => s.goSettings)
 
   const [session, setSession] = useState<MastodonSession | null>(null)
@@ -1401,6 +1426,8 @@ export default function MastodonEngage(): React.JSX.Element {
                 suggestedVisibility="public"
                 onCancelReply={() => setReplyTo(null)}
                 onSubmit={handleCompose}
+                handoff={handoff}
+                onHandoffTaken={onHandoffTaken}
               />
 
               {!showFollows && feed === 'tag' && (

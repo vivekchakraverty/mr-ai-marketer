@@ -23,7 +23,7 @@ import PostMedia from './PostMedia'
 import AttachImagePicker from './AttachImagePicker'
 import SaveButton from './SaveButton'
 import SuggestedFollows, { type SuggestionRow } from './SuggestedFollows'
-import { useAppStore } from '../state/store'
+import { useAppStore, withTags, type EngageHandoff } from '../state/store'
 import { primaryButtonSmall, secondaryButtonSmall, segGroup, segItem, select, textarea, textInput } from '../styles/styleKit'
 
 /**
@@ -442,7 +442,15 @@ function FeedCard({
 // The panel
 // ---------------------------------------------------------------------------
 
-export default function TumblrEngage(): React.JSX.Element {
+export default function TumblrEngage({
+  handoff,
+  onHandoffTaken
+}: {
+  /** A post sent over from a creator screen: words, chosen tags and a generated image. */
+  handoff?: EngageHandoff | null
+  /** Called once it has been read, so the parent stops offering it. */
+  onHandoffTaken?: () => void
+} = {}): React.JSX.Element {
   const goSettings = useAppStore((s) => s.goSettings)
 
   const [session, setSession] = useState<TumblrSession | null>(null)
@@ -461,6 +469,18 @@ export default function TumblrEngage(): React.JSX.Element {
   const [postTags, setPostTags] = useState('')
   const [postState, setPostState] = useState<TumblrPostState>('published')
   const [postImage, setPostImage] = useState({ url: '', alt: '' })
+
+  // A post handed over from the Tumblr creator. Taken once; the parent clears it after.
+  useEffect(() => {
+    if (!handoff) return
+    const body = withTags(handoff)
+    setPostText((current) => (current.trim() ? `${current.trimEnd()}
+
+${body}` : body))
+    if (handoff.imageUrl) setPostImage({ url: handoff.imageUrl, alt: '' })
+    onHandoffTaken?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoff])
 
   useEffect(() => {
     getTumblrSession()
