@@ -189,14 +189,32 @@ def capture_snapshot(page) -> dict:
 
 
 def _is_google_challenge(page) -> bool:
+    """Whether Google is currently asking the person to prove they are one.
+
+    Matching on page text is a trap, and the previous version fell into it: it treated any
+    page containing "not a robot" as a challenge. That phrase turns up in ordinary results —
+    it is the label on every reCAPTCHA checkbox on the web, so any page *about* captchas
+    says it — and once a run believed it was blocked, it sat waiting on a results page that
+    was working perfectly, for the full five-minute timeout.
+
+    So the signals here are ones only an actual interstitial has: Google's /sorry/ URL, its
+    own wording, or the challenge form itself. A results page can quote any of these in a
+    snippet without being one, which is why the text check now also requires the page to be
+    short — an interstitial is a few hundred characters and a results page is thousands.
+    """
     if _CHALLENGE_URL.search(page.url or ""):
         return True
     try:
         return bool(
             page.evaluate(
-                "() => { const t = (document.body?.innerText || '').toLowerCase();"
-                " return t.includes('unusual traffic from your computer network')"
-                " || t.includes('not a robot'); }"
+                "() => {"
+                "  if (document.querySelector('#captcha-form, form#captcha-form,"
+                " iframe[src*=\"recaptcha\"]')) return true;"
+                "  const t = (document.body?.innerText || '').toLowerCase();"
+                "  if (t.length > 1500) return false;"
+                "  return t.includes('unusual traffic from your computer network')"
+                "      || t.includes('our systems have detected unusual traffic');"
+                "}"
             )
         )
     except Exception:  # noqa: BLE001
@@ -857,12 +875,16 @@ class CollectorSession:
             "num": "10",
             "pws": "0",  # no personalisation, so two machines see comparable figures
         }
+        target = "https://www.google.com/search?" + urlencode(params)
+        # Claimed before navigating, so the idle watcher never re-reads it. Once a run
+        # finishes, its last results page is still on screen — and the watcher, seeing a
+        # results page it has not recorded, filed it a second time as a search "you ran
+        # yourself" and replaced the finished run with that. Measured: a one-keyword run
+        # ended reporting "Collected 1 search you ran in the collector window".
+        self._seen_manual_urls.add(target)
+
         try:
-            page.goto(
-                "https://www.google.com/search?" + urlencode(params),
-                wait_until="domcontentloaded",
-                timeout=45_000,
-            )
+            page.goto(target, wait_until="domcontentloaded", timeout=45_000)
         except Exception as err:  # noqa: BLE001
             _append_result(run, {
                 "query": keyword,
@@ -884,10 +906,31 @@ class CollectorSession:
             _save_run(run)
 
             deadline = _monotonic() + _ATTENTION_TIMEOUT_S
-            while _monotonic() < deadline and not run.cancel_requested and _is_google_challenge(page):
+            # Remembered, because the check below cannot ask the page again: a page that
+            # still reads as a challenge while serving real numbers is the whole failure
+            # being fixed, and re-testing it here would throw the escape straight away.
+            resolved_by_data = False
+            while _monotonic() < deadline and not run.cancel_requested:
+                if not _is_google_challenge(page):
+                    break
+                # Readable data ends the wait too, whatever the page says about robots.
+                # What this loop actually needs to know is "can I collect yet?", and asking
+                # that directly cannot be fooled by wording — the old condition could sit
+                # out the full timeout beside a panel full of the numbers it was waiting for.
+                try:
+                    probe = parse_snapshot(capture_snapshot(page), keyword)
+                    if probe["loaded"] and (probe["volume"] is not None or probe["suggestions"]):
+                        log.info("[surfer] data appeared while waiting on the check — carrying on")
+                        resolved_by_data = True
+                        break
+                except Exception:  # noqa: BLE001 — mid-navigation; the next tick retries
+                    pass
                 _sleep_cancellable(run, 1)
+
             run.status = "running"
-            if _is_google_challenge(page):
+            run.message = f"Reading {keyword!r}..."
+            _save_run(run)
+            if not resolved_by_data and _is_google_challenge(page):
                 _append_result(run, {
                     "query": keyword,
                     "status": "google_challenge",
