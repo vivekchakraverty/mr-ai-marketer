@@ -38,9 +38,26 @@ from .. import config
 
 log = logging.getLogger(__name__)
 
-# Small, ungated, and served by HF's inference providers. Overridable because
-# provider catalogues change and a token's access varies; see the module docstring.
-DEFAULT_PROMPT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+# Candidates, tried in order, because pinning one model made this fail for a reason the
+# model itself had nothing to do with. Measured against a real account:
+#
+#   Qwen/Qwen2.5-7B-Instruct → "not supported by any provider you have enabled"
+#
+# Hugging Face routes a request to whichever provider serves that model AND is enabled on
+# the caller's account. Qwen2.5-7B has exactly one live provider; a user without that one
+# enabled gets a hard refusal, and this screen quietly dropped to its template every time
+# while the post generators — on a model with three live providers — worked fine.
+#
+# So the order is: small and cheap first (this is one paragraph of art direction, not an
+# essay), then the model the post generators already prove works on this app's accounts.
+PROMPT_MODELS = (
+    "Qwen/Qwen3-4B-Instruct-2507",
+    "Qwen/Qwen3-Next-80B-A3B-Instruct",
+    "Qwen/Qwen2.5-7B-Instruct",
+)
+
+#: What the note and logs call this when no override is set.
+DEFAULT_PROMPT_MODEL = PROMPT_MODELS[0]
 
 # One paragraph of art direction is ~120 tokens. The cap is a cost guard, not a
 # quality one: a model that wants to write an essay here has misunderstood the task.
@@ -117,6 +134,13 @@ def _model_name() -> str:
     return (os.environ.get("IMAGE_PROMPT_MODEL") or "").strip() or DEFAULT_PROMPT_MODEL
 
 
+def _candidate_models() -> tuple[str, ...]:
+    """The models to try. An explicit override pins exactly one, deliberately —
+    someone naming a model wants that model, not a silent substitution."""
+    override = (os.environ.get("IMAGE_PROMPT_MODEL") or "").strip()
+    return (override,) if override else PROMPT_MODELS
+
+
 def suggest(post_text: str, niche: str, platform: str, hf_token: str) -> Suggestion:
     """Ask a small model for an image direction. Never raises — falls back instead."""
     fallback = template_prompt(post_text, niche, platform)
@@ -130,33 +154,52 @@ def suggest(post_text: str, niche: str, platform: str, hf_token: str) -> Suggest
             note="Connect your Hugging Face account in Settings for a written suggestion.",
         )
 
-    try:
-        from huggingface_hub import InferenceClient
+    messages = [
+        {"role": "system", "content": _SYSTEM},
+        {
+            "role": "user",
+            "content": (
+                f"Platform: {platform}\n"
+                f"Audience niche: {niche or 'general'}\n\n"
+                f"Post:\n{text[:1800]}"
+            ),
+        },
+    ]
 
-        client = InferenceClient(api_key=hf_token.strip(), timeout=PROMPT_TIMEOUT_SECONDS)
-        completion = client.chat_completion(
-            model=_model_name(),
-            messages=[
-                {"role": "system", "content": _SYSTEM},
-                {
-                    "role": "user",
-                    "content": (
-                        f"Platform: {platform}\n"
-                        f"Audience niche: {niche or 'general'}\n\n"
-                        f"Post:\n{text[:1800]}"
-                    ),
-                },
-            ],
-            max_tokens=MAX_PROMPT_TOKENS,
-            temperature=0.8,
+    written = ""
+    last_error = ""
+    for model in _candidate_models():
+        try:
+            from huggingface_hub import InferenceClient
+
+            client = InferenceClient(api_key=hf_token.strip(), timeout=PROMPT_TIMEOUT_SECONDS)
+            completion = client.chat_completion(
+                model=model,
+                messages=messages,
+                max_tokens=MAX_PROMPT_TOKENS,
+                temperature=0.8,
+            )
+            written = (completion.choices[0].message.content or "").strip()
+            if written:
+                break
+        except Exception as err:  # noqa: BLE001 — try the next candidate, then the template
+            last_error = str(err)
+            log.info("[image-prompt] %s unavailable: %s", model, last_error[:200])
+
+    if not written:
+        # The provider refusal names the one thing the user can act on — that no provider
+        # they have enabled serves the model — so it is passed through rather than replaced
+        # with a generic "could not reach", which sent people looking for a network fault
+        # that was never there.
+        detail = (
+            "no provider enabled on your Hugging Face account serves it"
+            if "not supported by any provider" in last_error
+            else "it could not be reached"
         )
-        written = (completion.choices[0].message.content or "").strip()
-    except Exception as err:  # noqa: BLE001 — any failure means "use the template"
-        log.info("[image-prompt] %s unavailable, using the template: %s", _model_name(), str(err)[:160])
         return Suggestion(
             prompt=fallback,
             source="template",
-            note=f"Could not reach {_model_name()}, so this is the standard direction. Edit it freely.",
+            note=f"Wrote the standard direction instead — {detail}. Edit it freely.",
         )
 
     # A model that returned nothing useful is the same as one that failed.
