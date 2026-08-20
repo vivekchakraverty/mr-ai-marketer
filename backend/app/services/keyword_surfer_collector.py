@@ -18,13 +18,16 @@ owns the browser and takes commands off a queue is the shape that fits.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import queue
 import re
+import sys
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -239,6 +242,54 @@ class Run:
             # on disk rather than in every poll response.
             "results": [{k: v for k, v in r.items() if k != "diagnostics"} for r in self.results],
         }
+
+
+@contextmanager
+def _proactor_event_loop_policy():
+    """Guarantee Playwright gets a loop that can spawn its driver process.
+
+    Playwright's sync API calls asyncio.new_event_loop(), which honours the *global* policy.
+    On Windows a SelectorEventLoop cannot start subprocesses at all — asyncio raises a bare
+    NotImplementedError with no message — so if anything in this process has installed the
+    selector policy, the collector browser can never open. Reproduced directly: identical
+    code launches under the proactor policy and raises NotImplementedError under the
+    selector one.
+
+    The Modal SDK installs it, at import time and unconditionally on Windows:
+
+        modal/_utils/async_utils.py:
+            if sys.platform == "win32":
+                # quick workaround for deadlocks on shutdown
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    Modal is imported lazily, so the policy flips the first time anything Modal-backed runs
+    — Brand Studio, or generating an image on your own GPU — and stays flipped for the life
+    of the process. That is why the collector opens on a fresh app and stops opening after
+    an afternoon's work, with nothing in between that looks related.
+
+    Fixing it here rather than upstream or by import order: Modal is entitled to the loop it
+    wants, and load-bearing behaviour that depends on which features someone happened to use
+    first is not something to leave standing.
+
+    Restored immediately, and the window is only as long as it takes Playwright to build its
+    loop — whatever wanted the selector policy gets it back, and the loop Playwright already
+    holds is unaffected by the restore.
+    """
+    if sys.platform != "win32":
+        yield
+        return
+
+    previous = asyncio.get_event_loop_policy()
+    if isinstance(previous, asyncio.WindowsProactorEventLoopPolicy):
+        yield
+        return
+
+    log.info("[surfer] temporarily selecting the proactor event loop so Playwright can start")
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    try:
+        yield
+    finally:
+        asyncio.set_event_loop_policy(previous)
 
 
 def _release_stale_profile_lock(profile: Path) -> None:
@@ -543,7 +594,12 @@ class CollectorSession:
         _release_stale_profile_lock(profile)
 
         try:
-            with sync_playwright() as p:
+            # .start() rather than `with`, so the policy override below wraps only the
+            # moment Playwright builds its loop and not the whole session.
+            manager = sync_playwright()
+            with _proactor_event_loop_policy():
+                p = manager.start()
+            try:
                 # Via chromium_launch, not p.chromium: a packaged install ships no
                 # browser of its own and falls back to the machine's Edge/Chrome. The
                 # profile below is this app's, on every path.
@@ -573,6 +629,11 @@ class CollectorSession:
                         context.close()
                     except Exception:  # noqa: BLE001 - the user may have closed it already
                         pass
+            finally:
+                # stop() lives on the Playwright object the manager hands back, not on the
+                # manager itself — calling it on the manager raises AttributeError inside
+                # the teardown, which would mask whatever actually ended the session.
+                p.stop()
         except chromium_launch.NoChromiumAvailable as err:
             # Already phrased for a person, and naming the exception class in front of it
             # only buries the one sentence that says what to do about it.
