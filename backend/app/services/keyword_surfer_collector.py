@@ -35,7 +35,13 @@ from pathlib import Path
 from .. import config
 from . import chromium_launch
 from .keyword_surfer import SurferUnavailable, ensure_extension
-from .keyword_surfer_js import CAPTURE_JS, FOCUS_MODE_JS, HEADER_TERMS
+from .keyword_surfer_js import (
+    CAPTURE_JS,
+    EXPAND_PAGE_SIZE_JS,
+    FOCUS_MODE_JS,
+    HEADER_TERMS,
+    NEXT_PAGE_JS,
+)
 from .keyword_surfer_parse import normalize_text, parse_snapshot
 
 log = logging.getLogger(__name__)
@@ -186,6 +192,74 @@ def capture_snapshot(page) -> dict:
         }
     )
     return best
+
+
+#: How many pages of ideas to walk before stopping. At the panel's largest page size this
+#: is far more than any query produces; it exists so a pager that never reports its last
+#: page cannot spin forever.
+MAX_IDEA_PAGES = 20
+
+
+def _in_every_frame(page, script: str):
+    """Run a script wherever the panel happens to live, and return the first real answer.
+
+    Keyword Surfer renders into the page in some versions and into an extension frame in
+    others — capture_snapshot already deals with that by trying every frame, and anything
+    that drives the panel has to do the same.
+    """
+    for frame in page.frames:
+        try:
+            result = frame.evaluate(script)
+        except Exception:  # noqa: BLE001 — a frame can vanish mid-redraw
+            continue
+        if result:
+            return result
+    return None
+
+
+def capture_paged(page, max_rows: int = 400) -> dict:
+    """Snapshot the panel across all of its pages, not just the one on screen.
+
+    The ideas table is paged at five, so reading the DOM once collected five of forty-four
+    and reported `complete`. This widens the page size first — one control, one redraw, most
+    of the table — and only then walks the pager for whatever is left.
+
+    Merging is by the same row key capture_snapshot dedupes with, so a page that redraws
+    without actually advancing adds nothing rather than duplicating everything.
+    """
+    expanded = _in_every_frame(page, EXPAND_PAGE_SIZE_JS)
+    if expanded and expanded.get("changed"):
+        log.info("[surfer] ideas per page set to %s (from %s)", expanded["value"], expanded["options"])
+        page.wait_for_timeout(700)
+
+    snapshot = capture_snapshot(page)
+    rows = list(snapshot.get("rows") or [])
+    seen = {"␟".join(r.get("texts") or []) for r in rows}
+
+    for _ in range(MAX_IDEA_PAGES):
+        if len(rows) >= max_rows:
+            break
+        step = _in_every_frame(page, NEXT_PAGE_JS)
+        if not step or not step.get("clicked"):
+            break
+        page.wait_for_timeout(700)
+
+        added = 0
+        for row in capture_snapshot(page).get("rows") or []:
+            key = "␟".join(row.get("texts") or [])
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(row)
+            added += 1
+        # A pager that clicked but changed nothing is at its end, whatever it reported.
+        if added == 0:
+            break
+
+    if len(rows) != len(snapshot.get("rows") or []):
+        log.info("[surfer] collected %d idea rows across the pager", len(rows))
+    snapshot["rows"] = rows[:max_rows]
+    return snapshot
 
 
 def _is_google_challenge(page) -> bool:
@@ -515,6 +589,8 @@ class CollectorSession:
         # the URL set stops the same results page being recorded on every idle tick.
         self._manual: Run | None = None
         self._seen_manual_urls: set[str] = set()
+        #: Search terms a run performed, so the idle watcher leaves those pages alone.
+        self._claimed_queries: set[str] = set()
         self._last_watch_log: tuple[str, str] | None = None
         self._watch_started = False
         self._state = {
@@ -737,6 +813,9 @@ class CollectorSession:
             return
 
         keyword = _query_from_google_url(url)
+        if keyword and keyword.casefold() in self._claimed_queries:
+            # A run searched for this; its own reader owns the page.
+            return
         if not keyword:
             self._watch_log(url, "not a Google web-results page — nothing to collect here")
             return
@@ -876,12 +955,11 @@ class CollectorSession:
             "pws": "0",  # no personalisation, so two machines see comparable figures
         }
         target = "https://www.google.com/search?" + urlencode(params)
-        # Claimed before navigating, so the idle watcher never re-reads it. Once a run
-        # finishes, its last results page is still on screen — and the watcher, seeing a
-        # results page it has not recorded, filed it a second time as a search "you ran
-        # yourself" and replaced the finished run with that. Measured: a one-keyword run
-        # ended reporting "Collected 1 search you ran in the collector window".
-        self._seen_manual_urls.add(target)
+        # Claimed by SEARCH TERM, not by URL. Claiming the URL was the obvious move and does
+        # not work: Google appends its own `sei` parameter on the way in, so the page the
+        # watcher sees is never the address we asked for. Measured — the watcher captured
+        # the run's own page anyway and replaced the finished run with it.
+        self._claimed_queries.add(keyword.casefold())
 
         try:
             page.goto(target, wait_until="domcontentloaded", timeout=45_000)
@@ -956,6 +1034,15 @@ class CollectorSession:
             _sleep_cancellable(run, 1)
         if parsed is None:
             parsed = parse_snapshot(capture_snapshot(page), keyword)
+
+        # The poll above reads one page, because it is asking "has anything appeared yet".
+        # Now that something has, take the whole table — the pager is the difference between
+        # five ideas and all of them.
+        if parsed["loaded"] and (parsed["volume"] is not None or parsed["suggestions"]):
+            try:
+                parsed = parse_snapshot(capture_paged(page, run.max_suggestions * 4), keyword)
+            except Exception as err:  # noqa: BLE001 — keep the single-page read we already have
+                log.info("[surfer] could not page the ideas table, keeping page one: %s", err)
 
         if not parsed["diagnostics"]["rootFound"]:
             status = "extension_not_detected"

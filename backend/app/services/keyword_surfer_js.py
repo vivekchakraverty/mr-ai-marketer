@@ -76,11 +76,19 @@ CAPTURE_JS = r"""({ headerTerms }) => {
     const rows = [];
     const seenRows = new Set();
 
+    // The pager is not a keyword. Its page-size control reads as a row of numbers — the
+    // options 2, 5, 10, 20 run together into "251020" — and once the table is walked rather
+    // than read once, that control is inside the captured region. It arrived in results as
+    // an idea called "per page" with a search volume of 251,020.
+    const controlPattern = /per\s*page|\d+\s*[-–]\s*\d+\s+of\s+\d+/i;
+
     for (const element of scopeElements) {
       const rect = element.getBoundingClientRect();
       if (rect.height > 320 || rect.width < 120) continue;
+      if (element.querySelector('select, option')) continue;
       const text = normalize(element.innerText || element.textContent || '');
       if (text.length < 3 || text.length > 500 || !metricPattern.test(text)) continue;
+      if (controlPattern.test(text)) continue;
 
       const childTexts = [...element.children]
         .filter(visible)
@@ -410,3 +418,65 @@ FOCUS_MODE_JS = r"""(function focusModeBootstrap() {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
   else start();
 })()"""
+
+
+# ---------------------------------------------------------------------------
+# Paging the ideas table
+#
+# Keyword Surfer shows its keyword ideas five at a time behind a pager — "1-5 of 44" — so
+# the DOM only ever holds one page of them. Reading the page as-is therefore collected five
+# ideas out of forty-four and looked complete, which is worse than looking broken.
+#
+# Both helpers are written against what the panel *is* rather than against class names: a
+# browser extension's markup is not an API and its next release can rename everything. The
+# page-size control is "the select whose options are all numbers"; the next button is "the
+# clickable thing beside the 1-5 of 44 text that is not the previous one".
+
+EXPAND_PAGE_SIZE_JS = r"""() => {
+  const selects = [...document.querySelectorAll('select')];
+  for (const select of selects) {
+    const options = [...select.options].map((o) => o.value.trim());
+    if (options.length < 2 || !options.every((v) => /^\d+$/.test(v))) continue;
+    const largest = options.reduce((a, b) => (Number(b) > Number(a) ? b : a));
+    if (select.value === largest) return { changed: false, value: largest, options };
+    select.value = largest;
+    // Both events: frameworks listen for one or the other, and a value set without an
+    // event is a value the panel never hears about.
+    select.dispatchEvent(new Event('input', { bubbles: true }));
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return { changed: true, value: largest, options };
+  }
+  return { changed: false, value: null, options: [] };
+}"""
+
+#: Clicks the pager's "next" control. Returns false when there is no next page to go to,
+#: which is how the caller knows to stop.
+NEXT_PAGE_JS = r"""() => {
+  const RANGE = /(\d+)\s*[-–]\s*(\d+)\s+of\s+(\d+)/i;
+  const holders = [...document.querySelectorAll('*')].filter((el) => {
+    if (el.children.length > 12) return false;
+    const t = (el.innerText || '').trim();
+    return t.length < 200 && RANGE.test(t);
+  });
+  if (!holders.length) return { clicked: false, reason: 'no pager' };
+
+  // The innermost element still carrying the range text — outer ones are whole panels.
+  const holder = holders[holders.length - 1];
+  const match = RANGE.exec(holder.innerText || '');
+  const [, , to, total] = match.map(Number);
+  if (to >= total) return { clicked: false, reason: 'last page', to, total };
+
+  let scope = holder;
+  for (let i = 0; i < 4 && scope.parentElement; i++) {
+    const buttons = [...scope.querySelectorAll('button, [role="button"]')].filter(
+      (b) => !b.disabled && b.getAttribute('aria-disabled') !== 'true' && b.offsetParent !== null
+    );
+    // Two controls means previous then next; the last one advances.
+    if (buttons.length >= 1) {
+      buttons[buttons.length - 1].click();
+      return { clicked: true, to, total };
+    }
+    scope = scope.parentElement;
+  }
+  return { clicked: false, reason: 'no button', to, total };
+}"""
