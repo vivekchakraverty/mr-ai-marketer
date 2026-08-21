@@ -23,6 +23,11 @@ interface Props {
   tags?: string[]
   /** An /outputs URL for the generated image, if one was drawn and kept. */
   imageUrl?: string
+  /** A YouTube link to embed with the post. */
+  videoUrl?: string
+  /** An /outputs URL for an uploaded video, and its alt text. */
+  videoFileUrl?: string
+  videoFileAlt?: string
   /** Shown on the button, e.g. "Bluesky". */
   label?: string
 }
@@ -32,6 +37,9 @@ export default function SendToEngageButton({
   postText,
   tags = [],
   imageUrl = '',
+  videoUrl = '',
+  videoFileUrl = '',
+  videoFileAlt = '',
   label
 }: Props): React.JSX.Element | null {
   const sendToEngage = useAppStore((s) => s.sendToEngage)
@@ -39,7 +47,8 @@ export default function SendToEngageButton({
 
   const carried = [
     tags.length ? `${tags.length} tag${tags.length === 1 ? '' : 's'}` : '',
-    imageUrl ? 'image' : ''
+    imageUrl ? 'image' : '',
+    videoFileUrl ? 'video file' : videoUrl.trim() ? 'video' : ''
   ].filter(Boolean)
 
   return (
@@ -61,7 +70,17 @@ export default function SendToEngageButton({
           ? `Opens the ${label ?? network} composer with the post, ${carried.join(' and ')}`
           : `Opens the ${label ?? network} composer with this post`
       }
-      onClick={() => sendToEngage({ text: postText, tags, imageUrl, network })}
+      onClick={() =>
+        sendToEngage({
+          text: postText,
+          tags,
+          imageUrl,
+          videoUrl: videoUrl.trim(),
+          videoFileUrl,
+          videoFileAlt,
+          network
+        })
+      }
     >
       Send to Engage{carried.length ? ` (with ${carried.join(' + ')})` : ''} →
     </div>

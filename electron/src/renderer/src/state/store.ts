@@ -38,6 +38,13 @@ export interface EngageHandoff {
   tags: string[]
   /** An /outputs URL for a generated image, ready for the composer's picker. */
   imageUrl: string
+  /** A YouTube link to embed. What each network does with it differs — see
+   *  VideoEmbedInput — but the composer is where that is decided, not here. */
+  videoUrl: string
+  /** An /outputs URL for a video the person uploaded, and its alt text. Distinct from
+   *  videoUrl: one is a link to somebody else's video, this is a file being published. */
+  videoFileUrl: string
+  videoFileAlt: string
   /** Which composer should receive it — a Mastodon draft is not a Bluesky one. */
   network: 'bluesky' | 'mastodon' | 'tumblr'
 }
@@ -280,7 +287,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       // them all build an object to say "no image, no tags" would be ceremony.
       engageDraft:
         typeof draft === 'string'
-          ? { text: draft, tags: [], imageUrl: '', network: 'bluesky' }
+          ? {
+              text: draft,
+              tags: [],
+              imageUrl: '',
+              videoUrl: '',
+              videoFileUrl: '',
+              videoFileAlt: '',
+              network: 'bluesky'
+            }
           : draft,
       route: 'engage',
       tool: null,

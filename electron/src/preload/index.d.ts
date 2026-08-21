@@ -24,6 +24,9 @@ export interface MrAiMarketerApi {
   openFile: (path: string) => Promise<string>
   /** Ask the user where to put these bytes. Resolves false if they cancelled. */
   saveBytes: (suggestedName: string, data: Uint8Array) => Promise<boolean>
+  /** Opens a file dialog and copies the chosen video where the backend can read it.
+   *  Resolves to null if the person cancelled. */
+  chooseVideo: () => Promise<{ url: string; name: string; bytes: number } | null>
   openExternal: (url: string) => Promise<void>
   update: {
     check: () => Promise<UpdateState>

@@ -120,6 +120,13 @@ class ComposeRequest(TumblrRequest):
     #: A /outputs URL for an image this app generated. Empty posts text only.
     imageUrl: str = ""
     imageAlt: str = ""
+    #: A YouTube link. NPF carries a real video block for third-party providers, so this is
+    #: the one network of the three where the post genuinely contains a player.
+    videoUrl: str = ""
+    #: An /outputs URL for a video the user uploaded. Sent as multipart, like an image, and
+    #: referenced from an NPF video block by identifier.
+    videoFileUrl: str = ""
+    videoFileAlt: str = ""
 
 
 class ReblogRequest(TumblrRequest):
@@ -792,8 +799,40 @@ def compose(body: ComposeRequest) -> ActionOut:
     if tags:
         payload["tags"] = tags
 
+    if body.videoUrl.strip():
+        # A real embed: NPF takes a third-party URL in a video block and Tumblr resolves it
+        # into an inline player. Placed first for the same reason the image is — block order
+        # is what the reader sees, and a player below the caption reads as a footnote.
+        from ..services import youtube_embed
+
+        try:
+            video = youtube_embed.describe(body.videoUrl)
+        except youtube_embed.NotYouTube as err:
+            raise HTTPException(status_code=400, detail=str(err)) from None
+        content.insert(0, {"type": "video", "url": video.url})
+
     attachment: tuple[str, bytes] | None = None
-    if body.imageUrl.strip():
+    if body.videoFileUrl.strip():
+        # One multipart file per post here, so an uploaded video and a generated image are
+        # alternatives rather than companions — and the video wins, being the deliberate
+        # upload. NPF references it from a video block by the same identifier the image
+        # branch uses for its own part.
+        from ..services import video_attach
+
+        try:
+            attachment = video_attach.attachment_bytes(
+                body.videoFileUrl, video_attach.TUMBLR_MAX_BYTES, "Tumblr"
+            )
+        except video_attach.VideoUnusable as err:
+            raise HTTPException(status_code=400, detail=str(err)) from None
+        block: dict[str, Any] = {
+            "type": "video",
+            "media": [{"type": video_attach.mime_for(attachment[0]), "identifier": _IMAGE_PART}],
+        }
+        if body.videoFileAlt.strip():
+            block["alt_text"] = body.videoFileAlt.strip()[:1000]
+        content.insert(0, block)
+    elif body.imageUrl.strip():
         try:
             attachment = image_prompt.attachment_bytes(body.imageUrl)
         except image_prompt.ImageRenderError as err:

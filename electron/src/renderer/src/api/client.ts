@@ -1646,11 +1646,19 @@ export async function composeMastodonStatus(post: {
   /** An /outputs URL for an image this app generated. Empty posts text only. */
   imageUrl?: string
   imageAlt?: string
+  /** A YouTube link. Mastodon has no embed field — the server builds a card from the URL. */
+  videoUrl?: string
+  /** An /outputs URL for an uploaded video, sent up the instance's media endpoint. */
+  videoFileUrl?: string
+  videoFileAlt?: string
 }): Promise<MastodonActionResult> {
   return postJson('/mastodon-engage/compose', {
     ...(await mastodonAuth()),
     imageUrl: post.imageUrl ?? '',
     imageAlt: post.imageAlt ?? '',
+    videoUrl: post.videoUrl ?? '',
+    videoFileUrl: post.videoFileUrl ?? '',
+    videoFileAlt: post.videoFileAlt ?? '',
     text: post.text,
     visibility: post.visibility,
     spoilerText: post.spoilerText ?? '',
@@ -1875,6 +1883,11 @@ export async function composeTumblrPost(opts: {
   /** An /outputs URL for an image this app generated. Empty posts text only. */
   imageUrl?: string
   imageAlt?: string
+  /** A YouTube link. NPF carries a real video block, so this becomes a player. */
+  videoUrl?: string
+  /** An /outputs URL for an uploaded video, sent as multipart like an image. */
+  videoFileUrl?: string
+  videoFileAlt?: string
 }): Promise<TumblrActionResult> {
   return postJson('/tumblr-engage/compose', {
     ...(await tumblrAuth()),
@@ -1883,7 +1896,10 @@ export async function composeTumblrPost(opts: {
     tags: opts.tags ?? '',
     state: opts.state ?? 'published',
     imageUrl: opts.imageUrl ?? '',
-    imageAlt: opts.imageAlt ?? ''
+    imageAlt: opts.imageAlt ?? '',
+    videoUrl: opts.videoUrl ?? '',
+    videoFileUrl: opts.videoFileUrl ?? '',
+    videoFileAlt: opts.videoFileAlt ?? ''
   })
 }
 
@@ -2102,9 +2118,18 @@ export function getEngageNotifications(limit = 30): Promise<FeedResponse> {
 
 export function createEngagePost(
   text: string,
-  image: { url: string; alt: string } = { url: '', alt: '' }
+  image: { url: string; alt: string } = { url: '', alt: '' },
+  videoUrl = '',
+  videoFile: { url: string; alt: string } = { url: '', alt: '' }
 ): Promise<EngageActionResponse> {
-  return postJson('/engage/post', { text, imageUrl: image.url, imageAlt: image.alt })
+  return postJson('/engage/post', {
+    text,
+    imageUrl: image.url,
+    imageAlt: image.alt,
+    videoUrl,
+    videoFileUrl: videoFile.url,
+    videoFileAlt: videoFile.alt
+  })
 }
 
 export function replyEngagePost(uri: string, cid: string, text: string): Promise<EngageActionResponse> {

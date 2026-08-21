@@ -19,6 +19,8 @@ import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, text
 import PostImagePanel from '../components/PostImagePanel'
 import SaveCompositionButton from '../components/SaveCompositionButton'
 import SendToEngageButton from '../components/SendToEngageButton'
+import VideoEmbedInput from '../components/VideoEmbedInput'
+import UploadVideoButton, { type ChosenVideo } from '../components/UploadVideoButton'
 import BrandVoiceSelect from '../components/BrandVoiceSelect'
 import NichePanel from '../components/NichePanel'
 import HashtagSuggester from '../components/HashtagSuggester'
@@ -48,6 +50,9 @@ export default function SocialPost(): React.JSX.Element {
   // post — words, tags and picture — as a single Library entry instead of three
   // unrelated ones.
   const [keptImage, setKeptImage] = useState<SocialGeneratedImage | null>(null)
+  const [videoUrl, setVideoUrl] = useState('')
+  const [videoFile, setVideoFile] = useState<ChosenVideo | null>(null)
+  const [videoFileAlt, setVideoFileAlt] = useState('')
   const [keptTags, setKeptTags] = useState<string[]>([])
 
   const [status, setStatus] = useState<SocialStatus | null>(null)
@@ -509,12 +514,27 @@ export default function SocialPost(): React.JSX.Element {
       {/* --- keep the finished thing ------------------------------------- */}
       {result && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+          <VideoEmbedInput
+            network="bluesky"
+            value={videoUrl}
+            onChange={setVideoUrl}
+          />
+          <UploadVideoButton
+            network="bluesky"
+            value={videoFile}
+            onChange={setVideoFile}
+            alt={videoFileAlt}
+            onAltChange={setVideoFileAlt}
+          />
           <SendToEngageButton
             network="bluesky"
             label="Bluesky"
             postText={result.text}
             tags={keptTags}
             imageUrl={keptImage?.url ?? ''}
+            videoUrl={videoUrl}
+            videoFileUrl={videoFile?.url ?? ''}
+            videoFileAlt={videoFileAlt}
           />
           <SaveCompositionButton
             tool="Social"
@@ -523,6 +543,7 @@ export default function SocialPost(): React.JSX.Element {
             postText={result.text}
             tags={keptTags}
             imageUrl={keptImage?.url ?? ''}
+            videoUrl={videoUrl}
           />
         </div>
       )}

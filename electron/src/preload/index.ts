@@ -32,6 +32,10 @@ const api = {
   /** Ask the user where to put these bytes. Resolves false if they cancelled. */
   saveBytes: (suggestedName: string, data: Uint8Array): Promise<boolean> =>
     ipcRenderer.invoke('dialog:save-bytes', suggestedName, data),
+  /** Opens a file dialog and copies the chosen video where the backend can read it.
+   *  Returns null if the person cancelled. */
+  chooseVideo: (): Promise<{ url: string; name: string; bytes: number } | null> =>
+    ipcRenderer.invoke('video:choose'),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:open-external', url),
   update: {
     check: (): Promise<UpdateState> => ipcRenderer.invoke('update:check'),

@@ -27,6 +27,7 @@ import MastodonEngage from '../components/MastodonEngage'
 import TumblrEngage from '../components/TumblrEngage'
 import PostMedia from '../components/PostMedia'
 import AttachImagePicker from '../components/AttachImagePicker'
+import VideoEmbedInput from '../components/VideoEmbedInput'
 import SuggestedFollows, { type SuggestionRow } from '../components/SuggestedFollows'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import { useAppStore, withTags, type EngageHandoff } from '../state/store'
@@ -364,6 +365,8 @@ export default function Engage(): React.JSX.Element {
   const [posts, setPosts] = useState<FeedPost[]>([])
   const [postText, setPostText] = useState('')
   const [postImage, setPostImage] = useState({ url: '', alt: '' })
+  const [postVideo, setPostVideo] = useState('')
+  const [postVideoFile, setPostVideoFile] = useState({ url: '', alt: '' })
   // Held for the Mastodon/Tumblr composers, which mount below and take it from here.
   const [handoff, setHandoff] = useState<EngageHandoff | null>(null)
   const [loading, setLoading] = useState(false)
@@ -414,6 +417,9 @@ export default function Engage(): React.JSX.Element {
     const body = withTags(draft)
     setPostText((current) => (current.trim() ? `${current.trimEnd()}\n\n${body}` : body))
     if (draft.imageUrl) setPostImage({ url: draft.imageUrl, alt: '' })
+    if (draft.videoUrl) setPostVideo(draft.videoUrl)
+    if (draft.videoFileUrl)
+      setPostVideoFile({ url: draft.videoFileUrl, alt: draft.videoFileAlt })
   }, [engageDraft, takeEngageDraft])
 
   // Only asked for once the Bluesky side is actually being looked at — opening
@@ -481,9 +487,11 @@ export default function Engage(): React.JSX.Element {
     setPosting(true)
     setError('')
     try {
-      const result = await createEngagePost(postText, postImage)
+      const result = await createEngagePost(postText, postImage, postVideo, postVideoFile)
       setPostText('')
       setPostImage({ url: '', alt: '' })
+      setPostVideo('')
+      setPostVideoFile({ url: '', alt: '' })
       if (result.post) setPosts((current) => [result.post as FeedPost, ...current])
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -613,6 +621,12 @@ export default function Engage(): React.JSX.Element {
               url={postImage.url}
               alt={postImage.alt}
               onChange={setPostImage}
+              disabled={posting}
+            />
+            <VideoEmbedInput
+              network="bluesky"
+              value={postVideo}
+              onChange={setPostVideo}
               disabled={posting}
             />
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>

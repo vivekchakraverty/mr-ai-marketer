@@ -29,6 +29,8 @@ import PostingTimePanel from '../components/PostingTimePanel'
 import PostImagePanel from '../components/PostImagePanel'
 import SaveCompositionButton from '../components/SaveCompositionButton'
 import SendToEngageButton from '../components/SendToEngageButton'
+import VideoEmbedInput from '../components/VideoEmbedInput'
+import UploadVideoButton, { type ChosenVideo } from '../components/UploadVideoButton'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 import SaveButton from '../components/SaveButton'
 
@@ -52,6 +54,9 @@ export default function MastodonPost(): React.JSX.Element {
   // post — words, tags and picture — as a single Library entry instead of three
   // unrelated ones.
   const [keptImage, setKeptImage] = useState<SocialGeneratedImage | null>(null)
+  const [videoUrl, setVideoUrl] = useState('')
+  const [videoFile, setVideoFile] = useState<ChosenVideo | null>(null)
+  const [videoFileAlt, setVideoFileAlt] = useState('')
   const [keptTags, setKeptTags] = useState<string[]>([])
 
   const [status, setStatus] = useState<MastodonStatus | null>(null)
@@ -513,12 +518,27 @@ export default function MastodonPost(): React.JSX.Element {
           {/* --- keep the finished thing ------------------------------------- */}
           {result && (
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-              <SendToEngageButton
+              <VideoEmbedInput
+            network="mastodon"
+            value={videoUrl}
+            onChange={setVideoUrl}
+          />
+          <UploadVideoButton
+            network="mastodon"
+            value={videoFile}
+            onChange={setVideoFile}
+            alt={videoFileAlt}
+            onAltChange={setVideoFileAlt}
+          />
+          <SendToEngageButton
             network="mastodon"
             label="Mastodon"
             postText={result.text}
             tags={keptTags}
             imageUrl={keptImage?.url ?? ''}
+            videoUrl={videoUrl}
+            videoFileUrl={videoFile?.url ?? ''}
+            videoFileAlt={videoFileAlt}
           />
           <SaveCompositionButton
                 tool="Social"

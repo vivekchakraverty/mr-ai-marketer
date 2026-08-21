@@ -1,6 +1,7 @@
 import { app, shell, BrowserWindow, dialog, ipcMain } from 'electron'
-import { writeFile } from 'fs/promises'
-import { join } from 'path'
+import { copyFile, mkdir, stat, writeFile } from 'fs/promises'
+import { basename, join } from 'path'
+import { randomUUID } from 'crypto'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { startBackend, stopBackend, waitForBackendHealth, API_TOKEN, BACKEND_URL } from './backend'
 import { getHfToken, getSettings, setHfToken, setSettings, type SettingsPatch } from './settingsStore'
@@ -224,6 +225,38 @@ app.whenReady().then(async () => {
       return true
     }
   )
+  // Pick a video and put it somewhere the backend is already allowed to read.
+  //
+  // The copy is the point. The backend reads attachments only from its own outputs tree —
+  // that containment check is what stops a compose request naming any file on the machine —
+  // so handing it a raw path from a dialog would mean widening that rule for every caller.
+  // Copying the chosen file in keeps one rule and one code path, at the cost of some disk.
+  ipcMain.handle('video:choose', async () => {
+    const owner = BrowserWindow.getFocusedWindow()
+    const options: Electron.OpenDialogOptions = {
+      title: 'Choose a video to post',
+      properties: ['openFile'],
+      filters: [{ name: 'Video', extensions: ['mp4', 'mov', 'm4v', 'webm'] }]
+    }
+    const picked = await (owner ? dialog.showOpenDialog(owner, options) : dialog.showOpenDialog(options))
+    if (picked.canceled || picked.filePaths.length === 0) return null
+
+    const source = picked.filePaths[0]
+    const stats = await stat(source)
+    const name = basename(source)
+    // A folder per pick, so two videos with the same name cannot overwrite each other.
+    const folder = join(app.getPath('userData'), 'outputs', 'uploads', randomUUID())
+    await mkdir(folder, { recursive: true })
+    const destination = join(folder, name)
+    await copyFile(source, destination)
+
+    return {
+      url: `/outputs/uploads/${basename(folder)}/${encodeURIComponent(name)}`,
+      name,
+      bytes: stats.size
+    }
+  })
+
   ipcMain.handle('shell:open-external', (_event, url: string) => shell.openExternal(url))
   ipcMain.handle('update:check', () => checkForUpdate())
   ipcMain.handle('update:download', () => downloadUpdate())

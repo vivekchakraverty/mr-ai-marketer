@@ -21,6 +21,7 @@ import {
 } from '../api/client'
 import PostMedia from './PostMedia'
 import AttachImagePicker from './AttachImagePicker'
+import VideoEmbedInput from './VideoEmbedInput'
 import SaveButton from './SaveButton'
 import SuggestedFollows, { type SuggestionRow } from './SuggestedFollows'
 import { useAppStore, withTags, type EngageHandoff } from '../state/store'
@@ -469,6 +470,8 @@ export default function TumblrEngage({
   const [postTags, setPostTags] = useState('')
   const [postState, setPostState] = useState<TumblrPostState>('published')
   const [postImage, setPostImage] = useState({ url: '', alt: '' })
+  const [postVideo, setPostVideo] = useState('')
+  const [postVideoFile, setPostVideoFile] = useState({ url: '', alt: '' })
 
   // A post handed over from the Tumblr creator. Taken once; the parent clears it after.
   useEffect(() => {
@@ -478,6 +481,9 @@ export default function TumblrEngage({
 
 ${body}` : body))
     if (handoff.imageUrl) setPostImage({ url: handoff.imageUrl, alt: '' })
+    if (handoff.videoUrl) setPostVideo(handoff.videoUrl)
+    if (handoff.videoFileUrl)
+      setPostVideoFile({ url: handoff.videoFileUrl, alt: handoff.videoFileAlt })
     onHandoffTaken?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handoff])
@@ -579,12 +585,17 @@ ${body}` : body))
         tags: postTags,
         state: postState,
         imageUrl: postImage.url,
-        imageAlt: postImage.alt
+        imageAlt: postImage.alt,
+        videoUrl: postVideo,
+        videoFileUrl: postVideoFile.url,
+        videoFileAlt: postVideoFile.alt
       })
       setPostText('')
       setPostTitle('')
       setPostTags('')
       setPostImage({ url: '', alt: '' })
+      setPostVideo('')
+      setPostVideoFile({ url: '', alt: '' })
       if (result.post && tab === 'dashboard') setPosts((current) => [result.post as TumblrPost, ...current])
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -731,6 +742,12 @@ ${body}` : body))
           alt={postImage.alt}
           onChange={setPostImage}
           hint="posted above your text"
+          disabled={posting}
+        />
+        <VideoEmbedInput
+          network="tumblr"
+          value={postVideo}
+          onChange={setPostVideo}
           disabled={posting}
         />
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>

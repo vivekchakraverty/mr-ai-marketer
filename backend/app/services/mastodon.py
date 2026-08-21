@@ -447,9 +447,15 @@ def upload_media(
     multipart rather than JSON, and folding a files= branch into the shared transport
     would complicate every other caller for one endpoint's sake.
 
-    Uses v2, which answers 202 for anything the server is still processing — a large
-    image is accepted before it is ready. The id is valid immediately either way, and
-    Mastodon holds the status until processing finishes, so there is nothing to poll.
+    Uses v2, which answers 202 for anything the server is still processing. That claim
+    used to end "the id is valid immediately either way, so there is nothing to poll",
+    which is true of images and false of video. Posting a clip the moment the upload
+    returned produced:
+
+        Cannot attach files that have not finished processing. Try again in a moment!
+
+    Video is transcoded server-side and cannot be referenced until that finishes, so a 202
+    is now waited on. Images answer 200 and skip the wait entirely.
 
     Not retried. The shared transport retries writes because they set a state and are
     safe to repeat; an upload appends, and repeating it leaves orphaned attachments on
@@ -477,7 +483,49 @@ def upload_media(
     media_id = str((resp.json() or {}).get("id") or "")
     if not media_id:
         raise MastodonError(f"{host} accepted the image but returned no id for it.")
+    if resp.status_code == 202:
+        _wait_for_media(host, token, media_id)
     return media_id
+
+
+#: How long to wait for a server to finish transcoding before giving up. Generous because
+#: the alternative is a post that loses its video, and mean because the person is watching a
+#: spinner: a minute is longer than any clip small enough to upload should need.
+MEDIA_PROCESSING_TIMEOUT = 60
+MEDIA_POLL_SECONDS = 2
+
+
+def _wait_for_media(host: str, token: str, media_id: str) -> None:
+    """Block until the server has finished processing an upload.
+
+    `GET /api/v1/media/:id` answers 206 while the file is still being transcoded and 200
+    once it can be attached. Polling that is the documented way to know, and the only
+    alternative is posting and being refused.
+    """
+    import time
+
+    deadline = time.monotonic() + MEDIA_PROCESSING_TIMEOUT
+    while time.monotonic() < deadline:
+        try:
+            resp = requests.get(
+                f"https://{host}/api/v1/media/{media_id}",
+                headers={"User-Agent": USER_AGENT, "Authorization": f"Bearer {token}"},
+                timeout=REQUEST_TIMEOUT,
+            )
+        except requests.RequestException:
+            # A blip mid-transcode is not a failure; the next poll settles it.
+            time.sleep(MEDIA_POLL_SECONDS)
+            continue
+        if resp.status_code == 200:
+            return
+        if resp.status_code not in (206, 404):
+            raise MastodonError(_error_detail(resp))
+        time.sleep(MEDIA_POLL_SECONDS)
+
+    raise MastodonError(
+        f"{host} is still processing that video after {MEDIA_PROCESSING_TIMEOUT} seconds. "
+        f"It may be too long or too large for this server — try a shorter clip."
+    )
 
 
 # ---------------------------------------------------------------------------

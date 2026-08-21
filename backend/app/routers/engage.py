@@ -9,12 +9,17 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from atproto import AtUri, models
-from ..services import image_prompt
+from ..services import image_prompt, video_attach
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/engage", tags=["engage"])
 
@@ -136,6 +141,13 @@ class ComposeRequest(BaseModel):
     #: Alt text. Bluesky shows it to screen readers and its own composer nags for it,
     #: so it is offered rather than silently omitted.
     imageAlt: str = ""
+    #: A YouTube link to attach as a card. Takes precedence over an image — a post record
+    #: carries one embed, and this is the one the user pasted deliberately.
+    videoUrl: str = ""
+    #: An /outputs URL for a video the user uploaded. Beats both of the above: it is the
+    #: heaviest thing they can have chosen, so it is the least likely to be an accident.
+    videoFileUrl: str = ""
+    videoFileAlt: str = ""
 
 
 class TargetRequest(BaseModel):
@@ -387,6 +399,66 @@ def _get_post_view(client: Any, uri: str) -> Any:
 
 def _get_feed_post(client: Any, uri: str) -> FeedPost:
     return _post_view_to_feed_post(_get_post_view(client, uri), me_did=_me_did(client))
+
+
+#: How long to give the index before describing a new post from the record instead. Short,
+#: because this is only about how the sent post is displayed back.
+_INDEX_WAIT_SECONDS = 4.0
+_INDEX_POLL_SECONDS = 0.6
+
+
+def _created_feed_post(client: Any, uri: str, text: str) -> FeedPost:
+    """Describe a post that was just created, without ever calling a success a failure.
+
+    Writing the record and reading it back go to two different places. The write goes to the
+    repo and is authoritative the moment it returns; the read goes to the appview, which is
+    an eventually-consistent index and does not always have the post yet. Asking it
+    immediately returned nothing, and the endpoint turned that into:
+
+        404  Post was not found on Bluesky.
+
+    for a post that had in fact gone out — the worst shape of error available here, because
+    the obvious response to it is to post again and end up with two.
+
+    So the index is given a few seconds, and if it still has nothing the post is described
+    from what the write already told us. The counts are all zero because a post this new has
+    no likes, and the text is the text we just sent.
+    """
+    import time
+
+    deadline = time.monotonic() + _INDEX_WAIT_SECONDS
+    while True:
+        try:
+            return _get_feed_post(client, uri)
+        except HTTPException:
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(_INDEX_POLL_SECONDS)
+        except Exception:  # noqa: BLE001
+            # A readback problem is not a posting problem; fall through to the record.
+            break
+
+    log.info("appview has not indexed %s yet; describing it from the record", uri)
+    me = getattr(client, "me", None)
+    handle = getattr(me, "handle", "") or ""
+    return FeedPost(
+        uri=uri,
+        cid="",
+        webUrl=_web_post_url(uri, handle),
+        isPost=True,
+        isOwnPost=True,
+        authorDid=getattr(me, "did", "") or "",
+        authorHandle=handle,
+        authorName=getattr(me, "display_name", None) or handle,
+        authorAvatar=getattr(me, "avatar", None),
+        text=text,
+        createdAt=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        likes=0,
+        reposts=0,
+        replies=0,
+        quotes=0,
+        bookmarks=0,
+    )
 
 
 def _strong_ref(client: Any, uri: str, cid: str | None = None) -> Any:
@@ -680,12 +752,80 @@ def notifications(limit: int = 30) -> FeedResponse:
     return FeedResponse(posts=posts)
 
 
+def _send_with_video(client, text: str, raw_url: str):
+    """Post with a YouTube link card attached.
+
+    The thumbnail is uploaded as a blob because that is the only way a card carries an
+    image; without it the card is a bare title and reads like an accident. A thumbnail that
+    will not fetch is not fatal — the card still goes out.
+    """
+    from atproto import models
+
+    from ..services import youtube_embed
+
+    try:
+        video = youtube_embed.describe(raw_url)
+    except youtube_embed.NotYouTube as err:
+        raise HTTPException(status_code=400, detail=str(err)) from None
+
+    thumb_blob = None
+    raw_thumb = youtube_embed.thumbnail_bytes(video)
+    if raw_thumb:
+        try:
+            thumb_blob = client.upload_blob(raw_thumb).blob
+        except Exception as err:  # noqa: BLE001 — a card without a picture still posts
+            log.info("[engage] could not upload the video thumbnail: %s", str(err)[:160])
+
+    embed = models.AppBskyEmbedExternal.Main(
+        external=models.AppBskyEmbedExternal.External(
+            uri=video.url,
+            title=video.title,
+            description=video.description,
+            thumb=thumb_blob,
+        )
+    )
+    return client.send_post(text, embed=embed)
+
+
 @router.post("/post", response_model=ActionResponse)
 def create_post(body: ComposeRequest) -> ActionResponse:
     try:
         client = _client()
         text = _clean_text(body.text)
-        if body.imageUrl.strip():
+        if body.videoFileUrl.strip():
+            try:
+                filename, content = video_attach.attachment_bytes(
+                    body.videoFileUrl, video_attach.BLUESKY_MAX_BYTES, "Bluesky"
+                )
+            except video_attach.VideoUnusable as err:
+                raise HTTPException(status_code=400, detail=str(err)) from None
+            # send_video, not a hand-built embed: the SDK does the blob upload and the
+            # aspect-ratio handling, and a video record assembled by hand is what renders
+            # as a dead frame in someone else's client.
+            # Without this the embed carries no aspect ratio and the client reserves a
+            # default box, so the timeline reflows when the video loads. Best-effort: None
+            # is the old behaviour, not a failure.
+            shape = video_attach.probe_aspect_ratio(body.videoFileUrl)
+            created = client.send_video(
+                text,
+                video=content,
+                video_alt=body.videoFileAlt.strip() or filename,
+                video_aspect_ratio=(
+                    models.AppBskyEmbedDefs.AspectRatio(width=shape[0], height=shape[1])
+                    if shape
+                    else None
+                ),
+            )
+        elif body.videoUrl.strip():
+            # A link card, which is as close to an embed as the protocol goes: there is no
+            # inline player in app.bsky.embed.*. Clients render this one with the thumbnail
+            # and a play affordance, which is what people mean by "embed the video".
+            #
+            # Checked before the image branch because the two are mutually exclusive in the
+            # record — a post carries one embed — and a video the user explicitly pasted is
+            # the more deliberate of the two.
+            created = _send_with_video(client, text, body.videoUrl)
+        elif body.imageUrl.strip():
             # send_images rather than send_post: the SDK builds the blob upload and the
             # embed together, and a post whose embed was assembled by hand is the kind
             # of thing that renders as a broken card on someone else's client.
@@ -698,7 +838,11 @@ def create_post(body: ComposeRequest) -> ActionResponse:
             )
         else:
             created = client.send_post(text)
-        return ActionResponse(createdUri=created.uri, createdCid=created.cid, post=_get_feed_post(client, created.uri))
+        return ActionResponse(
+            createdUri=created.uri,
+            createdCid=created.cid,
+            post=_created_feed_post(client, created.uri, text),
+        )
     except HTTPException:
         raise
     except Exception as err:  # noqa: BLE001

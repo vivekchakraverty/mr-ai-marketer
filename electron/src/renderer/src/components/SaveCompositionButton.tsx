@@ -34,6 +34,9 @@ interface Props {
   tags?: string[]
   /** An /outputs URL for the generated image, if one was drawn and kept. */
   imageUrl?: string
+  /** A YouTube link chosen for the post. Kept in the text, since the Library holds one
+   *  file per entry and that slot belongs to the picture. */
+  videoUrl?: string
 }
 
 export default function SaveCompositionButton({
@@ -42,7 +45,8 @@ export default function SaveCompositionButton({
   subtitle = '',
   postText,
   tags = [],
-  imageUrl = ''
+  imageUrl = '',
+  videoUrl = ''
 }: Props): React.JSX.Element | null {
   const goLibrary = useAppStore((s) => s.goLibrary)
   const [savedId, setSavedId] = useState('')
@@ -52,19 +56,25 @@ export default function SaveCompositionButton({
   // the button offers to keep the new version rather than claiming the work is already in.
   useEffect(() => {
     setSavedId('')
-  }, [postText, imageUrl, tags.join(' ')])
+  }, [postText, imageUrl, videoUrl, tags.join(' ')])
 
   if (!postText.trim()) return null
 
   // Appended the way they would actually be posted, so what is kept is the finished thing
   // rather than a draft plus a note about which tags were meant to go on it.
   const tagLine = tags.map((t) => (t.startsWith('#') ? t : `#${t}`)).join(' ')
-  const content = tagLine ? `${postText.trim()}\n\n${tagLine}` : postText.trim()
+  const body = tagLine ? `${postText.trim()}\n\n${tagLine}` : postText.trim()
+  // The video lives in the text because an entry carries one file and that slot is the
+  // picture's. Left out, a saved post would lose it silently — the exact fragmentation this
+  // button exists to end.
+  const video = videoUrl.trim()
+  const content = video && !body.includes(video) ? `${body}\n\n${video}` : body
 
   const parts = [
     'post',
     tags.length ? `${tags.length} tag${tags.length === 1 ? '' : 's'}` : '',
-    imageUrl ? 'image' : ''
+    imageUrl ? 'image' : '',
+    video ? 'video' : ''
   ].filter(Boolean)
 
   const base: React.CSSProperties = {

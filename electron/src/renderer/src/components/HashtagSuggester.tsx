@@ -284,6 +284,9 @@ export default function HashtagSuggester({
                     text: postText.trim() || tagString,
                     tags: selected,
                     imageUrl: '',
+                    videoUrl: '',
+                    videoFileUrl: '',
+                    videoFileAlt: '',
                     // Always bluesky: the guard above is what limits this button to a
                     // Bluesky draft in the first place.
                     network: 'bluesky'

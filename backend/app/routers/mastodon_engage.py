@@ -43,7 +43,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..services.genqueue import queue_slot
 from pydantic import BaseModel
 
-from ..services import image_prompt
+from ..services import image_prompt, video_attach
 from ..services import mastodon as masto
 from ..services import mastodon_gate as gate
 from ..services.mastodon import MastodonError
@@ -117,6 +117,14 @@ class ComposeRequest(EngageRequest):
     #: Alt text. Much of the fediverse treats missing alt text as rude, and several
     #: instances' rules ask for it outright, so it is a first-class field here.
     imageAlt: str = ""
+    #: A YouTube link. Mastodon has no embed field at all — the instance fetches links in
+    #: the body and builds its own preview card — so "embedding" here means making sure the
+    #: URL survives into the text, which is what the compose path below does.
+    videoUrl: str = ""
+    #: An /outputs URL for a video the user uploaded. Goes up the same media endpoint the
+    #: images use; the size ceiling is the instance's own published figure.
+    videoFileUrl: str = ""
+    videoFileAlt: str = ""
     # Sent by the composer, stable across retries of the same draft, so a
     # double-submit or a retried timeout cannot publish the same post twice.
     idempotencyKey: str = ""
@@ -1113,6 +1121,18 @@ def compose(body: ComposeRequest) -> ActionOut:
     if not text:
         raise HTTPException(status_code=400, detail="There's nothing to post.")
 
+    if body.videoUrl.strip():
+        # Appended before the count, not after. Mastodon builds its preview card from a URL
+        # in the body, so the link is part of the post rather than metadata beside it — and
+        # a draft that fitted the limit without it can fail with it. Better to say so here
+        # than to have the server reject the whole status.
+        from ..services import youtube_embed
+
+        try:
+            text = youtube_embed.with_link(text, youtube_embed.describe(body.videoUrl))
+        except youtube_embed.NotYouTube as err:
+            raise HTTPException(status_code=400, detail=str(err)) from None
+
     # Checked here as well as by the server: this instance's real limit is already
     # in hand, and "1,340 of 500 characters" is a better answer than a 422.
     total = len(text) + len(body.spoilerText or "")
@@ -1141,7 +1161,26 @@ def compose(body: ComposeRequest) -> ActionOut:
     if body.inReplyToId.strip():
         payload["in_reply_to_id"] = body.inReplyToId.strip()
 
-    if body.imageUrl.strip():
+    if body.videoFileUrl.strip():
+        # Mastodon makes no distinction between a picture and a clip here — both are media
+        # uploaded first and referenced by id — so this is the image path with a different
+        # ceiling, which the instance publishes for itself.
+        try:
+            filename, content = video_attach.attachment_bytes(
+                body.videoFileUrl,
+                video_attach.mastodon_max_bytes(policy.info.video_size_limit_mb),
+                host,
+            )
+        except video_attach.VideoUnusable as err:
+            raise HTTPException(status_code=400, detail=str(err)) from None
+        try:
+            media_id = masto.upload_media(
+                host, token, filename, content, description=body.videoFileAlt.strip()
+            )
+        except MastodonError as err:
+            raise HTTPException(status_code=502, detail=str(err)) from None
+        payload["media_ids"] = [media_id]
+    elif body.imageUrl.strip():
         # Uploaded first and separately: Mastodon takes media on its own endpoint and
         # the status then references the id. A failure here must stop the post rather
         # than quietly publish the words without the picture they were written around.

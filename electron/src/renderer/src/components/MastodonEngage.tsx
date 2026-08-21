@@ -28,6 +28,7 @@ import {
 } from '../api/client'
 import PostMedia from './PostMedia'
 import AttachImagePicker from './AttachImagePicker'
+import VideoEmbedInput from './VideoEmbedInput'
 import SuggestedFollows, { type SuggestionRow } from './SuggestedFollows'
 import { useAppStore, withTags, type EngageHandoff } from '../state/store'
 import { chip, label, primaryButtonSmall, secondaryButtonSmall, segGroup, segItem, select, textarea, textInput } from '../styles/styleKit'
@@ -495,6 +496,9 @@ function Composer({
     idempotencyKey: string
     imageUrl: string
     imageAlt: string
+    videoUrl: string
+    videoFileUrl: string
+    videoFileAlt: string
   }) => Promise<boolean>
 }): React.JSX.Element {
   const [text, setText] = useState('')
@@ -503,6 +507,8 @@ function Composer({
   const [visibility, setVisibility] = useState(suggestedVisibility)
   const [language, setLanguage] = useState('')
   const [image, setImage] = useState({ url: '', alt: '' })
+  const [video, setVideo] = useState('')
+  const [videoFile, setVideoFile] = useState({ url: '', alt: '' })
 
   // A post handed over from the Mastodon creator: words, tags and picture together. Taken
   // once — `onHandoffTaken` clears it upstream, so a re-render cannot append it twice.
@@ -513,6 +519,9 @@ function Composer({
 
 ${body}` : body))
     if (handoff.imageUrl) setImage({ url: handoff.imageUrl, alt: '' })
+    if (handoff.videoUrl) setVideo(handoff.videoUrl)
+    if (handoff.videoFileUrl)
+      setVideoFile({ url: handoff.videoFileUrl, alt: handoff.videoFileAlt })
     onHandoffTaken?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handoff])
@@ -544,13 +553,18 @@ ${body}` : body))
       language,
       idempotencyKey: key,
       imageUrl: image.url,
-      imageAlt: image.alt
+      imageAlt: image.alt,
+      videoUrl: video,
+      videoFileUrl: videoFile.url,
+      videoFileAlt: videoFile.alt
     })
     if (!posted) return
     setText('')
     setSpoiler('')
     setShowSpoiler(false)
     setImage({ url: '', alt: '' })
+    setVideo('')
+    setVideoFile({ url: '', alt: '' })
     setKey(crypto.randomUUID())
   }
 
@@ -608,6 +622,7 @@ ${body}` : body))
         hint="uploaded to your instance"
         disabled={busy}
       />
+      <VideoEmbedInput network="mastodon" value={video} onChange={setVideo} disabled={busy} />
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 10 }}>
         <div style={{ minWidth: 210, flex: '1 1 210px' }}>
@@ -1087,6 +1102,9 @@ export default function MastodonEngage({
     idempotencyKey: string
     imageUrl: string
     imageAlt: string
+    videoUrl: string
+    videoFileUrl: string
+    videoFileAlt: string
   }): Promise<boolean> {
     setPosting(true)
     setError('')

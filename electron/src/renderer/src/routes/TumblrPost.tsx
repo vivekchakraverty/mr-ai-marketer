@@ -19,6 +19,8 @@ import BrandVoiceSelect from '../components/BrandVoiceSelect'
 import PostImagePanel from '../components/PostImagePanel'
 import SaveCompositionButton from '../components/SaveCompositionButton'
 import SendToEngageButton from '../components/SendToEngageButton'
+import VideoEmbedInput from '../components/VideoEmbedInput'
+import UploadVideoButton, { type ChosenVideo } from '../components/UploadVideoButton'
 import ScreenBackdrop from '../components/ScreenBackdrop'
 
 /**
@@ -45,6 +47,9 @@ export default function TumblrPost(): React.JSX.Element {
   // post — words, tags and picture — as a single Library entry instead of three
   // unrelated ones.
   const [keptImage, setKeptImage] = useState<SocialGeneratedImage | null>(null)
+  const [videoUrl, setVideoUrl] = useState('')
+  const [videoFile, setVideoFile] = useState<ChosenVideo | null>(null)
+  const [videoFileAlt, setVideoFileAlt] = useState('')
   // No hashtag panel on this screen — Tumblr's tags are a field on the post itself, not
   // a suggestion list — so the composition here is words plus picture.
 
@@ -445,11 +450,26 @@ export default function TumblrPost(): React.JSX.Element {
         {/* --- keep the finished thing ------------------------------------- */}
         {result && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-            <SendToEngageButton
+            <VideoEmbedInput
+            network="tumblr"
+            value={videoUrl}
+            onChange={setVideoUrl}
+          />
+          <UploadVideoButton
+            network="tumblr"
+            value={videoFile}
+            onChange={setVideoFile}
+            alt={videoFileAlt}
+            onAltChange={setVideoFileAlt}
+          />
+          <SendToEngageButton
             network="tumblr"
             label="Tumblr"
             postText={result.text}
             imageUrl={keptImage?.url ?? ''}
+            videoUrl={videoUrl}
+            videoFileUrl={videoFile?.url ?? ''}
+            videoFileAlt={videoFileAlt}
           />
           <SaveCompositionButton
               tool="Social"
