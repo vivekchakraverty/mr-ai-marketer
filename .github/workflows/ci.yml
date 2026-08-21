@@ -46,10 +46,15 @@ jobs:
       # reaches through app.routers.tumblr_post. Tumblr's API is OAuth 1.0a, so the
       # signing library is a hard import of the service module rather than something
       # only the live path touches.
+      # atproto is imported by app/routers/engage.py, which test_created_post_readback
+      # imports directly to test how a just-created post is described. Most routers that
+      # need a heavy package are simply skipped here (see test_app_imports), but this one
+      # covers a bug where a post that had gone out was reported as a failure — which
+      # invites sending it twice — so it is worth the install to have it actually run.
       - name: Install test dependencies
         run: >
           pip install pytest httpx fastapi "pydantic>=2" pillow
-          modal gradio_client python-docx requests requests-oauthlib
+          modal gradio_client python-docx requests requests-oauthlib atproto
 
       - name: Run tests
         working-directory: backend
