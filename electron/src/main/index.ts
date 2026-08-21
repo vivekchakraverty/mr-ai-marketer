@@ -145,6 +145,30 @@ async function createWindow(): Promise<void> {
   }
 }
 
+/** Give the Tumblr timing watcher the credentials it cannot store for itself.
+ *
+ * Best effort: without them the watcher is simply inert, which is the correct state for an
+ * install that has never connected Tumblr. Nothing else in the app changes.
+ */
+async function handOverTumblrKeys(): Promise<void> {
+  try {
+    const { tumblr } = getSettings()
+    if (!tumblr?.consumerKey?.trim()) return
+    await fetch(`${BACKEND_URL}/tumblr-timing/credentials`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-mraim-token': API_TOKEN },
+      body: JSON.stringify({
+        consumerKey: tumblr.consumerKey,
+        consumerSecret: tumblr.consumerSecret,
+        oauthToken: tumblr.oauthToken,
+        oauthTokenSecret: tumblr.oauthTokenSecret
+      })
+    })
+  } catch {
+    // Backend not up, or Tumblr not set up. The watcher stays inert.
+  }
+}
+
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.vivekchakraverty.mraimarketer')
 
@@ -254,6 +278,11 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error('Backend failed to become healthy:', err)
   }
+
+  // Hand the Tumblr timing watcher its keys, if Tumblr is connected. Per launch, and only
+  // into memory — the backend never writes credentials down, so this is how a background
+  // collection that must survive weeks gets what it needs without anything landing on disk.
+  void handOverTumblrKeys()
 
   await createWindow()
 

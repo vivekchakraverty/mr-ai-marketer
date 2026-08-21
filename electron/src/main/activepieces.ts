@@ -203,6 +203,13 @@ export async function startActivepiecesIfConfigured(): Promise<AutoStartOutcome>
     // Still take the keep-alive: the container may have been left running by a previous
     // session, and without it the WSL2 VM can idle out from under it.
     startWslKeepAlive()
+    // And still announce. The container has `restart: unless-stopped`, so after the first
+    // time it is *usually* already up when the app launches — meaning this branch, not the
+    // one below, is the normal path. Announcing only when we start the engine ourselves
+    // left the share listener closed on almost every launch, and a post with an image
+    // attached went out as text: the engine fetched the link, found nothing listening on
+    // the host, and carried on without the picture.
+    await announceShareHost(await wslHostAddress())
     return 'already-running'
   }
 

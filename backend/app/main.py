@@ -49,6 +49,7 @@ from .routers import (
     tracker,
     tumblr_engage,
     tumblr_post,
+    tumblr_timing,
     tutorial_maker,
 )
 
@@ -170,6 +171,13 @@ def on_startup() -> None:
     # crawl is resumable and keeps growing. Inert when no corpus file is present, so it
     # makes no noise on an install that does not have one.
     tumblr_post.start_scheduler()
+    # The Tumblr timing watcher: catches posts while they are new and measures them again at
+    # fixed ages, because lifetime note counts cannot answer a timing question. Started
+    # unconditionally and inert without credentials and a watch list — a multi-week
+    # collection that needed restarting by hand after every app update would quietly stop.
+    from .services import tumblr_timing as tumblr_timing_service
+
+    tumblr_timing_service.start_scheduler()
     # The Lead Gen Agent's daemon; inert until a campaign is active + credentials set. The
     # Email Writer (app service) is injected as the outreach draft writer, and the mail
     # tracking service is injected the same way for opens/clicks/bounces on its sends.
@@ -248,6 +256,7 @@ app.include_router(engage.router)
 app.include_router(mastodon_engage.router)
 app.include_router(tumblr_engage.router)
 app.include_router(tumblr_post.router)
+app.include_router(tumblr_timing.router)
 app.include_router(bluesky_analytics.router)
 app.include_router(mail.router)
 app.include_router(mail_tracking.router)
