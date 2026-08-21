@@ -32,11 +32,29 @@ class _Client:
 
 @pytest.fixture(autouse=True)
 def _fast(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Nobody should wait real seconds for this."""
+    """Nobody should wait real seconds for this — and the clock has to be fake, not just
+    the sleep.
+
+    The production loop measures elapsed time with `time.monotonic()` and only advances
+    that clock by actually sleeping. Muting `sleep` alone turns the retry loop into a tight
+    busy-loop bounded purely by wall time, so how many reads happen before the deadline
+    depends on how fast the interpreter executes bytecode on the machine running the test —
+    not on anything the test declares. That is exactly what made
+    test_a_post_that_never_indexes_is_still_reported_as_sent flaky: it passed against a
+    slower interpreter and failed on a faster CI runner, where the loop got through more
+    than 10,000 iterations inside the 0.05s window and the "never indexes" case indexed.
+
+    A fake clock that only moves when `sleep` is called reproduces the real relationship
+    between polling and elapsed time without depending on real time passing at all, so the
+    number of reads before giving up is deterministic.
+    """
     import time
 
-    monkeypatch.setattr(time, "sleep", lambda _s: None)
-    monkeypatch.setattr(engage, "_INDEX_WAIT_SECONDS", 0.05)
+    clock = {"t": 0.0}
+    monkeypatch.setattr(time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(time, "sleep", lambda seconds: clock.__setitem__("t", clock["t"] + seconds))
+    monkeypatch.setattr(engage, "_INDEX_WAIT_SECONDS", 2.0)
+    monkeypatch.setattr(engage, "_INDEX_POLL_SECONDS", 0.6)
 
 
 def _wire(monkeypatch: pytest.MonkeyPatch, client: _Client) -> None:
