@@ -236,6 +236,120 @@ class ImageRenderError(RuntimeError):
 #: them, so an accidental 200MB file fails here rather than after a long upload.
 MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
 
+# Activepieces' Bluesky connector checks this decimal-byte limit before it uploads the
+# blob. Aim below it rather than exactly at it so a future encoder/header change cannot
+# turn a prepared image into a boundary failure.
+BLUESKY_MAX_IMAGE_BYTES = 1_000_000
+BLUESKY_TARGET_IMAGE_BYTES = 950_000
+
+
+def _encode_webp(image, *, lossless: bool, quality: int = 90) -> bytes:
+    import io
+
+    buffer = io.BytesIO()
+    image.save(
+        buffer,
+        format="WEBP",
+        lossless=lossless,
+        quality=quality,
+        method=6,
+        # Keep transparent RGB values stable instead of letting the encoder replace
+        # them. This costs little and avoids edge halos when a client composites it.
+        exact=True,
+    )
+    return buffer.getvalue()
+
+
+def prepare_bluesky_image(url: str) -> str:
+    """Return a Bluesky-safe URL for one locally generated image.
+
+    The Library original is never overwritten. Files already accepted by the connector
+    pass through; a larger local image gets a deterministic, metadata-free WebP copy
+    under OUTPUTS_DIR. Public URLs pass through untouched because downloading arbitrary
+    caller-supplied URLs here would turn a size fix into an SSRF primitive.
+    """
+    import hashlib
+    import io
+
+    from PIL import Image, ImageOps, UnidentifiedImageError
+
+    from . import share_links
+
+    source = share_links.path_from_outputs_url(url)
+    if source is None:
+        return url
+    try:
+        if source.stat().st_size <= BLUESKY_MAX_IMAGE_BYTES:
+            return url
+        raw = source.read_bytes()
+    except OSError as err:
+        raise ImageRenderError(
+            f"That image could not be prepared for Bluesky: {err}"
+        ) from err
+
+    digest = hashlib.sha256(raw).hexdigest()[:24]
+    prepared_dir = config.OUTPUTS_DIR / ".distribution-media"
+    prepared = prepared_dir / f"{digest}.bluesky.webp"
+    if prepared.is_file() and prepared.stat().st_size <= BLUESKY_MAX_IMAGE_BYTES:
+        return outputs_url(prepared)
+
+    try:
+        with Image.open(io.BytesIO(raw)) as opened:
+            oriented = ImageOps.exif_transpose(opened)
+            oriented.load()
+            has_alpha = "A" in oriented.getbands() or "transparency" in oriented.info
+            image = oriented.convert("RGBA" if has_alpha else "RGB")
+    except (UnidentifiedImageError, OSError, ValueError) as err:
+        raise ImageRenderError(
+            "That file is too large for Bluesky and is not a readable image, so it "
+            "could not be optimized."
+        ) from err
+
+    candidate = _encode_webp(image, lossless=True, quality=100)
+    if len(candidate) > BLUESKY_TARGET_IMAGE_BYTES:
+        qualities = (95, 92, 90, 88, 85, 82, 78, 72, 65, 55)
+        working = image
+        candidate = b""
+        for _ in range(6):
+            last = b""
+            for quality in qualities:
+                last = _encode_webp(working, lossless=False, quality=quality)
+                if len(last) <= BLUESKY_TARGET_IMAGE_BYTES:
+                    candidate = last
+                    break
+            if candidate:
+                break
+
+            # Extremely noisy images may not fit through quality alone. Scale by the
+            # square root of the byte ratio (pixels grow with area), with a little margin
+            # and a bounded step so each retry makes real progress.
+            ratio = (BLUESKY_TARGET_IMAGE_BYTES / max(1, len(last))) ** 0.5
+            scale = max(0.5, min(0.9, ratio * 0.94))
+            width = max(1, int(working.width * scale))
+            height = max(1, int(working.height * scale))
+            if (width, height) == working.size:
+                break
+            working = working.resize((width, height), Image.Resampling.LANCZOS)
+
+    if not candidate or len(candidate) > BLUESKY_MAX_IMAGE_BYTES:
+        raise ImageRenderError(
+            "That image could not be reduced below Bluesky's 1MB attachment limit."
+        )
+
+    try:
+        prepared_dir.mkdir(parents=True, exist_ok=True)
+        temporary = prepared.with_name(f".{prepared.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary.write_bytes(candidate)
+            temporary.replace(prepared)
+        finally:
+            temporary.unlink(missing_ok=True)
+    except OSError as err:
+        raise ImageRenderError(
+            f"The Bluesky-ready image could not be saved: {err}"
+        ) from err
+    return outputs_url(prepared)
+
 
 def attachment_bytes(url: str) -> tuple[str, bytes]:
     """Read a generated image off disk for uploading. Returns (filename, bytes).

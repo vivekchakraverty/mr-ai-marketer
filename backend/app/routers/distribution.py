@@ -277,7 +277,21 @@ def disconnect_channel(channel: str) -> dict:
 
 # The fields a send request can carry (see SendRequest/_payload_for below). A generated
 # flow binds a piece's props to these by name, so this list is what the mapping UI offers.
-PAYLOAD_FIELDS = ["text", "title", "imageUrl", "channelId", "pageId", "subreddit", "to", "subject", "from"]
+PAYLOAD_FIELDS = [
+    "text",
+    "title",
+    "imageUrl",
+    "imageUrls",
+    "videoUrl",
+    "videoFileAlt",
+    "mediaUrl",
+    "channelId",
+    "pageId",
+    "subreddit",
+    "to",
+    "subject",
+    "from",
+]
 
 # Prop names that conventionally carry the post body, best-guess first. Used only to
 # pre-select a mapping the user can change — a wrong guess costs a dropdown change, and
@@ -495,7 +509,9 @@ class SendRequest(BaseModel):
     text: str
     channelId: Optional[str] = None  # discord, discord-conversation
     pageId: Optional[str] = None  # facebook, instagram
-    imageUrl: Optional[str] = None  # instagram
+    imageUrl: Optional[str] = None  # image-capable social channels
+    videoFileUrl: Optional[str] = None  # staged /outputs video for Bluesky/Mastodon
+    videoFileAlt: Optional[str] = None  # Bluesky; Mastodon's piece has no alt prop
     to: Optional[str] = None  # email
     from_: Optional[str] = Field(default=None, alias="from")  # email
     subject: Optional[str] = None  # email
@@ -507,43 +523,41 @@ class SendRequest(BaseModel):
         populate_by_name = True
 
 
-# How the engine addresses this backend. It runs in its own container, where 127.0.0.1 is
-# the container — `host.docker.internal` is mapped to the host in the compose file so an
-# attached image can actually be fetched. Overridable for a non-Docker deployment.
-ENGINE_HOST_BASE = os.environ.get(
-    "MRAIM_ENGINE_HOST_BASE", "http://host.docker.internal:8756"
-)
-
-# A scheduled send fetches its image when it runs, not when it is queued, so the link has
-# to outlive the wait. This margin is added on top of the delay.
-SHARE_LINK_MARGIN_SECONDS = 6 * 3600
+# How the engine addresses this backend. Electron announces the current WSL gateway each
+# launch; using it directly avoids a container's static hostname mapping going stale when
+# WSL reassigns the adapter. Overridable for a non-Docker deployment.
+ENGINE_HOST_BASE = os.environ.get("MRAIM_ENGINE_HOST_BASE", "").strip()
+_announced_share_host = os.environ.get("MRAIM_SHARE_HOST", "").strip()
 
 
-def _shareable_image_url(image_url: str, scheduled_at: Optional[str]) -> str:
+def _shareable_media_url(media_url: str) -> str:
     """Turn the app's own /outputs URL into one the engine can fetch, if it is ours.
 
-    An image generated in a post creator lives on disk here and is served behind the
+    Media generated or staged in the app lives on disk here and is served behind the
     session token, which a container cannot send — so it is re-issued as a signed,
     expiring link on a path that answers without the token (services/share_links.py).
 
     Anything else is passed through untouched: a user pasting a public URL is naming a
     picture that is already reachable, and rewriting that would be wrong.
     """
-    from ..services import share_links
+    from ..services import share_links, share_server
 
-    path = share_links.path_from_outputs_url(image_url)
+    path = share_links.path_from_outputs_url(media_url) or share_links.path_from_shared_url(media_url)
     if path is None:
-        return image_url
+        return media_url
+    if not share_server.is_listening() or (not ENGINE_HOST_BASE and not _announced_share_host):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Local media sharing is not ready, so the posting engine cannot fetch "
+                "this attachment. Restart the Distribution engine and try again."
+            ),
+        )
 
-    ttl = share_links.DEFAULT_TTL_SECONDS
-    if scheduled_at:
-        try:
-            when = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
-            delay = (when - datetime.now(timezone.utc)).total_seconds()
-            ttl = max(ttl, int(delay) + SHARE_LINK_MARGIN_SECONDS)
-        except ValueError:
-            pass  # unparseable schedules already fall back to sending immediately
-    return share_links.url_for(path, ENGINE_HOST_BASE, ttl)
+    port = int(os.environ.get("MRAIM_SHARE_PORT", "8756"))
+    host = f"[{_announced_share_host}]" if ":" in _announced_share_host else _announced_share_host
+    base = ENGINE_HOST_BASE or f"http://{host}:{port}"
+    return share_links.url_for(path, base)
 
 
 class ShareHostRequest(BaseModel):
@@ -565,21 +579,65 @@ def set_share_host(body: ShareHostRequest) -> dict:
     Behind the session token like everything else here, so only this app can ask for a socket
     to be opened.
     """
+    global _announced_share_host
     from ..services import share_server
 
     host = body.host.strip()
     if not host:
         share_server.stop()
+        _announced_share_host = ""
         return {"listening": False, "host": ""}
 
     ok = share_server.start(host, int(os.environ.get("MRAIM_SHARE_PORT", "8756")))
+    _announced_share_host = host if ok else ""
     return {"listening": ok, "host": host if ok else ""}
 
 
 def _payload_for(body: SendRequest) -> dict:
+    if body.imageUrl and body.videoFileUrl:
+        raise HTTPException(
+            status_code=400,
+            detail="Attach either an image or a video, not both; social posts carry one media embed.",
+        )
+
     payload = {"text": body.text}
     if body.imageUrl:
-        payload["imageUrl"] = _shareable_image_url(body.imageUrl, body.scheduledAt)
+        payload["imageUrl"] = body.imageUrl
+        payload["mediaUrl"] = body.imageUrl
+        if "bluesky" in body.channels:
+            # Bluesky's createPost action takes an ARRAY and enforces a strict decimal
+            # 1MB cap per image. Keep the original scalar for other selected channels,
+            # but give Bluesky its correctly typed, platform-prepared derivative.
+            from ..services import image_prompt
+
+            try:
+                prepared = image_prompt.prepare_bluesky_image(body.imageUrl)
+            except image_prompt.ImageRenderError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from None
+            payload["imageUrls"] = [prepared]
+    if body.videoFileUrl:
+        supported = {"bluesky", "mastodon"}.intersection(body.channels)
+        if not supported:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded video attachments are supported on Bluesky and Mastodon.",
+            )
+        from ..services import video_attach
+
+        max_bytes = (
+            video_attach.MASTODON_DEFAULT_MAX_BYTES
+            if "mastodon" in supported
+            else video_attach.BLUESKY_MAX_BYTES
+        )
+        network = "Mastodon" if "mastodon" in supported else "Bluesky"
+        try:
+            video_attach.attachment_path(body.videoFileUrl, max_bytes, network)
+        except video_attach.VideoUnusable as err:
+            raise HTTPException(status_code=400, detail=str(err)) from None
+        payload["videoUrl"] = body.videoFileUrl
+        payload["mediaUrl"] = body.videoFileUrl
+        if body.videoFileAlt is not None:
+            payload["videoFileAlt"] = body.videoFileAlt.strip()
     for field in ("channelId", "pageId", "to", "subject", "subreddit", "title"):
         value = getattr(body, field)
         if value is not None:
@@ -587,6 +645,51 @@ def _payload_for(body: SendRequest) -> dict:
     if body.from_ is not None:
         payload["from"] = body.from_
     return payload
+
+
+def _materialize_media_payload(payload: dict) -> dict:
+    """Mint fetchable links immediately before a flow runs.
+
+    Scheduled jobs keep canonical ``/outputs`` URLs in SQLite and come through here at
+    execution time. That avoids expiring a signed link while a post waits in the queue
+    (share links are deliberately capped at fourteen days).
+    """
+    materialized = dict(payload)
+    for field in ("imageUrl", "videoUrl", "mediaUrl"):
+        value = materialized.get(field)
+        if isinstance(value, str) and value:
+            materialized[field] = _shareable_media_url(value)
+    image_urls = materialized.get("imageUrls")
+    if isinstance(image_urls, list):
+        materialized["imageUrls"] = [
+            _shareable_media_url(value)
+            for value in image_urls
+            if isinstance(value, str) and value
+        ]
+    return materialized
+
+
+def _upgrade_legacy_media_payload(payload: dict, channel: str) -> dict:
+    """Add the media fields introduced after older scheduled jobs were persisted."""
+    image_url = payload.get("imageUrl")
+    if not isinstance(image_url, str) or not image_url:
+        return payload
+    if channel not in {"bluesky", "mastodon"}:
+        return payload
+
+    from ..services import image_prompt, share_links
+
+    upgraded = dict(payload)
+    path = share_links.path_from_outputs_url(image_url) or share_links.path_from_shared_url(image_url)
+    canonical = image_prompt.outputs_url(path) if path is not None else image_url
+    upgraded["imageUrl"] = canonical
+    upgraded.setdefault("mediaUrl", canonical)
+    if channel == "bluesky" and not upgraded.get("imageUrls"):
+        try:
+            upgraded["imageUrls"] = [image_prompt.prepare_bluesky_image(canonical)]
+        except image_prompt.ImageRenderError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from None
+    return upgraded
 
 
 def _record_run_outcome(job_id: str, run: dict) -> None:
@@ -674,16 +777,30 @@ def _normalize_scheduled_at(raw: Optional[str]) -> Optional[str]:
 
 @router.post("/send")
 def send(body: SendRequest) -> dict:
-    payload = _payload_for(body)
-    scheduled_at = _normalize_scheduled_at(body.scheduledAt)
-    jobs = []
     known_custom = {row["channel"] for row in db.list_custom_channels()}
     for channel in body.channels:
         if channel not in _CHANNELS and channel not in _COMMUNITY_CHANNELS and channel not in known_custom:
             raise HTTPException(status_code=400, detail=f"Unknown channel '{channel}'")
+
+    scheduled_at = _normalize_scheduled_at(body.scheduledAt)
+    canonical_payload = _payload_for(body)
+    payload = (
+        canonical_payload
+        if scheduled_at
+        else _materialize_media_payload(canonical_payload)
+    )
+    jobs = []
+    for channel in body.channels:
         status = "scheduled" if scheduled_at else "sending"
         job = db.add_distribution_job(
-            body.libraryItemId, channel, status, scheduled_at=scheduled_at, payload=json.dumps(payload)
+            body.libraryItemId,
+            channel,
+            status,
+            scheduled_at=scheduled_at,
+            # History keeps durable app-local URLs. The separately materialized payload
+            # is what the flow receives; its signed fetch links are intentionally short-
+            # lived and would otherwise turn an old history entry into a dead URL.
+            payload=json.dumps(canonical_payload),
         )
         if not scheduled_at:
             fire_job(job["id"], channel, payload)
@@ -748,12 +865,45 @@ def _reconcile_job(job: dict) -> None:
         _record_run_outcome(job["id"], run)
 
 
+def _fire_due_scheduled_jobs() -> None:
+    jobs = db.list_due_scheduled_jobs()
+    if not jobs:
+        return
+    try:
+        # The backend scheduler starts before Electron's deliberately backgrounded
+        # container startup. Preflight once so every due job — including text-only and
+        # public-media posts — stays scheduled during that normal cold-start window.
+        activepieces_client.list_flows()
+    except ActivepiecesError as err:
+        log.info("[distribution] posting engine not ready for scheduled jobs: %s", err)
+        return
+
+    for job in jobs:
+        try:
+            stored_payload = json.loads(job["payload"] or "{}")
+            canonical_payload = _upgrade_legacy_media_payload(stored_payload, job["channel"])
+            payload = _materialize_media_payload(canonical_payload)
+        except HTTPException as err:
+            if err.status_code == 503:
+                # Electron announces the WSL-reachable listener just after backend
+                # startup. A post that became due while the app was closed must wait for
+                # that transient readiness window, not become permanently failed on the
+                # scheduler's first tick.
+                log.info("[distribution] media listener not ready for scheduled job %s", job["id"])
+                continue
+            db.update_distribution_job(job["id"], status="failed", error=str(err.detail))
+            continue
+        fields = {"status": "sending"}
+        if canonical_payload != stored_payload:
+            fields["payload"] = json.dumps(canonical_payload)
+        db.update_distribution_job(job["id"], **fields)
+        fire_job(job["id"], job["channel"], payload)
+
+
 def _scheduler_loop() -> None:
     while True:
         try:
-            for job in db.list_due_scheduled_jobs():
-                db.update_distribution_job(job["id"], status="sending")
-                fire_job(job["id"], job["channel"], json.loads(job["payload"] or "{}"))
+            _fire_due_scheduled_jobs()
             # pending_approval is included so queue items self-heal if their run was resolved
             # outside our approve/reject endpoints (or we crashed between resuming the
             # waitpoint and recording the decision) — re-recording a still-PAUSED run's

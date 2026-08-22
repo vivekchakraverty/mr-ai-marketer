@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { fetchDistributionChannels, sendToDistribution, type DistributionJob } from '../api/client'
 import { useAppStore } from '../state/store'
 import BackendImage from './BackendImage'
+import UploadVideoButton, { type ChosenVideo } from './UploadVideoButton'
 import { PLATFORM_SETUP_GUIDES } from '../state/platformSetupGuides'
 import { label, primaryButton, secondaryButtonSmall, tag, textInput, textarea } from '../styles/styleKit'
 
@@ -31,6 +32,7 @@ interface Props {
   libraryItemId: string
   title: string
   defaultText: string
+  defaultImageUrl?: string
   onClose: () => void
 }
 
@@ -44,7 +46,13 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: 'Rejected'
 }
 
-export default function SendToDistributionModal({ libraryItemId, title, defaultText, onClose }: Props): React.JSX.Element {
+export default function SendToDistributionModal({
+  libraryItemId,
+  title,
+  defaultText,
+  defaultImageUrl = '',
+  onClose
+}: Props): React.JSX.Element {
   const [loading, setLoading] = useState(true)
   const [ready, setReady] = useState(false)
   const [connectedChannels, setConnectedChannels] = useState<string[]>([])
@@ -52,7 +60,9 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
   const [text, setText] = useState(defaultText)
   const [channelId, setChannelId] = useState('')
   const [pageId, setPageId] = useState('')
-  const [imageUrl, setImageUrl] = useState('')
+  const [imageUrl, setImageUrl] = useState(defaultImageUrl)
+  const [videoFile, setVideoFile] = useState<ChosenVideo | null>(null)
+  const [videoFileAlt, setVideoFileAlt] = useState('')
   const [to, setTo] = useState('')
   const [from, setFrom] = useState('')
   const [subject, setSubject] = useState(title)
@@ -109,6 +119,16 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
   const imageChannels = selected.filter((c) =>
     ['bluesky', 'mastodon', 'linkedin', 'discord', 'instagram'].includes(c)
   )
+  const supportsImage = imageChannels.length > 0
+  const videoChannels = selected.filter((c) => ['bluesky', 'mastodon'].includes(c))
+  const supportsVideo = videoChannels.length > 0
+  const videoNetwork = selected.includes('mastodon') ? 'mastodon' : 'bluesky'
+  useEffect(() => {
+    if (!supportsVideo) {
+      setVideoFile(null)
+      setVideoFileAlt('')
+    }
+  }, [supportsVideo])
   // The limits in play for what is currently ticked, and which of them this text breaks.
   const limited = selected
     .filter((c) => CHANNEL_LIMITS[c])
@@ -127,6 +147,7 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
     if (needsChannelId && !channelId.trim()) return 'Discord channel ID is required.'
     if (needsPageId && !pageId.trim()) return 'Page ID is required.'
     if (needsImageUrl && !imageUrl.trim()) return 'Instagram needs an image URL.'
+    if (imageUrl.trim() && supportsVideo && videoFile) return 'Attach either an image or a video, not both.'
     if (needsEmail && (!to.trim() || !from.trim())) return 'Email needs both To and From addresses.'
     if (needsReddit && (!subreddit.trim() || !redditTitle.trim())) return 'Reddit needs a subreddit and a post title.'
     if (schedule) {
@@ -151,7 +172,9 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
         text,
         channelId: needsChannelId ? channelId : undefined,
         pageId: needsPageId ? pageId : undefined,
-        imageUrl: imageUrl.trim() || undefined,
+        imageUrl: supportsImage ? imageUrl.trim() || undefined : undefined,
+        videoFileUrl: supportsVideo ? videoFile?.url : undefined,
+        videoFileAlt: supportsVideo && videoFile ? videoFileAlt.trim() : undefined,
         to: needsEmail ? to : undefined,
         from: needsEmail ? from : undefined,
         subject: needsEmail ? subject : undefined,
@@ -293,7 +316,14 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
                       <div
                         key={img.url}
                         title={img.title}
-                        onClick={() => setImageUrl(imageUrl === img.url ? '' : img.url)}
+                        onClick={() => {
+                          const next = imageUrl === img.url ? '' : img.url
+                          setImageUrl(next)
+                          if (next) {
+                            setVideoFile(null)
+                            setVideoFileAlt('')
+                          }
+                        }}
                         style={{
                           width: 74,
                           height: 74,
@@ -318,7 +348,13 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
                 )}
                 <input
                   value={imageUrl}
-                  onChange={(e) => setImageUrl(e.target.value)}
+                  onChange={(e) => {
+                    setImageUrl(e.target.value)
+                    if (e.target.value.trim()) {
+                      setVideoFile(null)
+                      setVideoFileAlt('')
+                    }
+                  }}
                   style={textInput}
                   placeholder="Pick one above, or paste a public image URL"
                 />
@@ -329,15 +365,44 @@ export default function SendToDistributionModal({ libraryItemId, title, defaultT
                     marginTop: 5
                   }}
                 >
-                  {/* An image from this machine cannot be fetched by the engine yet — it
-                      runs in its own container and the backend only listens on loopback.
-                      Saying so beats a flow that fails with a download error. */}
+                  {/* Local media crosses the container boundary through a narrowly bound,
+                      signed share link; the durable history entry keeps the local URL. */}
                   {isLocalImage
                     ? `Sent as a private link that expires. Will be attached on ${imageChannels.join(', ') || 'no selected channel'}.`
                     : imageUrl
                       ? `Will be attached on ${imageChannels.join(', ') || 'no selected channel'}.`
                       : 'Posts go out as text only unless you add one.'}
+                  {selected.includes('bluesky') && imageUrl
+                    ? isLocalImage
+                      ? ' Local images over 1MB are optimized automatically for Bluesky.'
+                      : ' Bluesky requires pasted public images to already be under 1MB.'
+                    : ''}
                 </div>
+                {videoChannels.length > 0 && (
+                  <>
+                    <div style={{ borderTop: '2px dashed var(--border-soft)', marginTop: 12 }} />
+                    <UploadVideoButton
+                      network={videoNetwork}
+                      value={videoFile}
+                      onChange={(video) => {
+                        if (!video || video.url !== videoFile?.url) setVideoFileAlt('')
+                        setVideoFile(video)
+                        if (video) setImageUrl('')
+                      }}
+                      alt={videoFileAlt}
+                      onAltChange={setVideoFileAlt}
+                      disabled={sending}
+                    />
+                    {videoFile && (
+                      <div style={{ font: "600 11.5px/1.5 'Quicksand'", color: 'var(--ink-faint)', marginTop: 4 }}>
+                        Will be attached on {videoChannels.join(', ')}.
+                        {selected.includes('mastodon') && videoFileAlt.trim()
+                          ? ' Alt text is carried by Bluesky; the current Mastodon connector does not expose an alt-text field.'
+                          : ''}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             )}
             {needsEmail && (

@@ -93,7 +93,13 @@ def start(host: str, port: int) -> bool:
     """
     global _server
     if _server is not None:
-        return True
+        current_host, current_port = _server.server_address[:2]
+        if current_host == host and (port == 0 or current_port == port):
+            return True
+        # The WSL adapter address is reassigned when its VM restarts. Re-announcing a
+        # different address must move the listener rather than report success while it
+        # remains pinned to an interface the container can no longer reach.
+        stop()
     try:
         _server = ThreadingHTTPServer((host, port), _Handler)
     except OSError as err:
@@ -108,5 +114,12 @@ def start(host: str, port: int) -> bool:
 def stop() -> None:
     global _server
     if _server is not None:
-        _server.shutdown()
+        server = _server
         _server = None
+        server.shutdown()
+        server.server_close()
+
+
+def is_listening() -> bool:
+    """Whether the signed-link listener currently owns a socket."""
+    return _server is not None

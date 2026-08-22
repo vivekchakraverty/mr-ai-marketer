@@ -76,6 +76,7 @@ export default function Reader(): React.JSX.Element | null {
           libraryItemId={item.id}
           title={item.title}
           defaultText={item.content ?? ''}
+          defaultImageUrl={imageUrl}
           onClose={() => setShowSend(false)}
         />
       )}

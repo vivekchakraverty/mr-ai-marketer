@@ -8,6 +8,7 @@ which makes forging, expiry and path containment the whole story.
 from __future__ import annotations
 
 import time
+from urllib.parse import unquote
 
 import pytest
 
@@ -80,6 +81,36 @@ def test_the_secret_survives_a_restart(outputs):
 def test_outputs_urls_translate_back_to_paths(outputs):
     url = "/outputs/social/run/post-image.png"
     assert share_links.path_from_outputs_url(url) == outputs.resolve()
+
+
+def test_encoded_space_and_unicode_filenames_round_trip(outputs):
+    named = outputs.parent / "my clip café.png"
+    named.write_bytes(b"named image")
+    app_url = "/outputs/social/run/my%20clip%20caf%C3%A9.png"
+
+    assert share_links.path_from_outputs_url(app_url) == named.resolve()
+
+    shared_url = share_links.url_for(named, "http://host.docker.internal:8756")
+    assert "%20" in shared_url and "%C3%A9" in shared_url
+    token = unquote(shared_url.split("/shared/", 1)[1])
+    assert share_links.resolve(token) == named.resolve()
+
+
+def test_an_expired_legacy_shared_url_can_be_reminted_but_not_served(outputs, monkeypatch):
+    now = int(time.time())
+    monkeypatch.setattr(share_links.time, "time", lambda: now)
+    url = share_links.url_for(outputs, "http://old-host:8756", ttl_seconds=60)
+    token = unquote(url.split("/shared/", 1)[1])
+    monkeypatch.setattr(share_links.time, "time", lambda: now + 61)
+
+    assert share_links.resolve(token) is None
+    assert share_links.path_from_shared_url(url) == outputs.resolve()
+
+
+def test_a_forged_legacy_shared_url_is_not_treated_as_local(outputs):
+    url = share_links.url_for(outputs, "http://old-host:8756")
+    forged = url.replace("/shared/", "/shared/x", 1)
+    assert share_links.path_from_shared_url(forged) is None
 
 
 def test_a_traversal_in_an_outputs_url_is_refused(outputs):

@@ -57,8 +57,8 @@ def mime_for(filename: str) -> str:
     return _MIME.get(Path(filename).suffix.lower(), "video/mp4")
 
 
-def attachment_bytes(url: str, max_bytes: int, network: str) -> tuple[str, bytes]:
-    """Read an uploaded video for `network`, or explain why it cannot be posted."""
+def attachment_path(url: str, max_bytes: int, network: str) -> Path:
+    """Validate one staged local video without loading tens of megabytes into memory."""
     from . import share_links
 
     path = share_links.path_from_outputs_url(url)
@@ -84,6 +84,13 @@ def attachment_bytes(url: str, max_bytes: int, network: str) -> tuple[str, bytes
             f"That video is {size / MEGABYTE:.1f}MB and {network} allows "
             f"{max_bytes / MEGABYTE:.0f}MB. Trim it or export it smaller."
         )
+
+    return path
+
+
+def attachment_bytes(url: str, max_bytes: int, network: str) -> tuple[str, bytes]:
+    """Read an uploaded video for `network`, or explain why it cannot be posted."""
+    path = attachment_path(url, max_bytes, network)
 
     return path.name, path.read_bytes()
 

@@ -79,7 +79,7 @@ _cached_flow_ids: dict[str, str] = {}
 # Distribution Layer plan, those deep-link to Activepieces' own connection screen instead
 # of us reimplementing 3 separate OAuth handshakes.
 CUSTOM_AUTH_PIECES = {
-    "bluesky": ("@activepieces/piece-bluesky", "0.1.5"),
+    "bluesky": ("@activepieces/piece-bluesky", "0.1.7"),
     "mastodon": ("@activepieces/piece-mastodon", "0.5.6"),
     "twitter": ("@activepieces/piece-twitter", "0.3.5"),
     "email": ("@activepieces/piece-smtp", "0.4.2"),
@@ -474,10 +474,69 @@ def _publish_flow(flow_id: str) -> None:
     )
 
 
+def _normalize_flow_expression(value: str) -> str:
+    """Collapse Activepieces' persisted form of a trigger reference.
+
+    Importing ``{{trigger.body.text}}`` rewrites it to
+    ``{{trigger['output'].body.text}}`` in the published flow. They mean the same
+    thing, and treating that storage rewrite as drift would republish every built-in
+    flow whenever the Channels page is polled.
+    """
+    return value.replace("{{trigger['output'].", "{{trigger.").replace(
+        '{{trigger["output"].', "{{trigger."
+    )
+
+
+def _template_matches(actual: object, expected: object) -> bool:
+    """Whether ``actual`` contains the template-authored ``expected`` structure.
+
+    Activepieces enriches imported flows with runtime metadata, so full dictionary
+    equality is too strict. Every field authored in the template must still be
+    present and equal, though: a missing media binding or older piece version is
+    exactly the kind of drift this check exists to catch.
+    """
+    if isinstance(expected, dict):
+        return isinstance(actual, dict) and all(
+            key in actual and _template_matches(actual[key], value)
+            for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return (
+            isinstance(actual, list)
+            and len(actual) == len(expected)
+            and all(_template_matches(a, e) for a, e in zip(actual, expected))
+        )
+    if isinstance(expected, str) and isinstance(actual, str):
+        return _normalize_flow_expression(actual) == _normalize_flow_expression(
+            expected
+        )
+    return actual == expected
+
+
+def _flow_matches_spec(flow: dict, spec: dict) -> bool:
+    """Compare a listed flow's published version with one bundled template."""
+    version = flow.get("version") or {}
+    return version.get("displayName") == spec.get("displayName") and _template_matches(
+        version.get("trigger"), spec.get("trigger")
+    )
+
+
+# These bundled flows have an explicit upgrade contract because their media bindings are
+# part of this migration. Other enabled built-ins retain the historical no-op behavior:
+# some older templates use piece-specific file shapes that need their own migration rather
+# than being republished incidentally while fixing Bluesky/Mastodon.
+_REFRESHABLE_BUILTIN_FLOWS = {"bluesky", "mastodon"}
+
+
 def ensure_flows_imported() -> dict[str, str]:
     """Idempotently imports and publishes every *.json flow template in
     resources/activepieces/flows/ (matched by displayName). A flow's webhook only
     responds once it's published (ENABLED) — importing alone leaves it a disabled draft.
+
+    Bluesky and Mastodon enabled flows are skipped only while their published definition
+    still matches the bundled template. This matters across application upgrades: ENABLED
+    means runnable, not current, and older installs otherwise keep obsolete media inputs
+    forever. Other enabled built-ins remain untouched until they have an explicit migration.
 
     Retries a flow whenever it exists but isn't ENABLED yet, rather than treating "the
     flow object exists" as "done": on a very freshly booted container the piece registry
@@ -485,7 +544,7 @@ def ensure_flows_imported() -> dict[str, str]:
     the flow shell was already created — reproduced live. Without this, that half-created
     flow would be silently skipped as "already imported" on every future call, forever.
 
-    Returns {channel: flow_id}; a no-op REST round-trip once all flows are ENABLED."""
+    Returns {channel: flow_id}; matching enabled flows are a no-op."""
     global _cached_flow_ids
     existing = {f["version"]["displayName"]: f for f in list_flows()}
     result: dict[str, str] = {}
@@ -493,7 +552,11 @@ def ensure_flows_imported() -> dict[str, str]:
         channel = path.stem
         spec = json.loads(path.read_text(encoding="utf-8"))
         found = existing.get(spec["displayName"])
-        if found and found["status"] == "ENABLED":
+        if (
+            found
+            and found["status"] == "ENABLED"
+            and (channel not in _REFRESHABLE_BUILTIN_FLOWS or _flow_matches_spec(found, spec))
+        ):
             result[channel] = found["id"]
             continue
         updated = _import_flow(spec, flow_id=found["id"] if found else None)

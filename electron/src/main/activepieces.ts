@@ -66,16 +66,15 @@ function ensureSecrets(): void {
  * previous boot points the container at nothing. Kept in the same file so compose still
  * takes a single --env-file.
  */
-async function refreshHostAddress(): Promise<void> {
+function refreshHostAddress(address: string): void {
   const envPath = secretsEnvPath()
-  if (!existsSync(envPath)) return
-  const address = await wslHostAddress()
+  // A failed probe must not erase the last usable compose value. More importantly, callers
+  // must not interpret an empty probe as an instruction to close a working share listener.
+  if (!address || !existsSync(envPath)) return
   const lines = readFileSync(envPath, 'utf-8')
     .split(/\r?\n/)
     .filter((line) => line.trim() && !line.startsWith('WSL_HOST_IP='))
-  // No address found: leave the key unset so compose falls back to the value in the compose
-  // file rather than pinning the container to an empty host, which fails to start entirely.
-  if (address) lines.push(`WSL_HOST_IP=${address}`)
+  lines.push(`WSL_HOST_IP=${address}`)
   writeFileSync(envPath, lines.join('\n') + '\n', 'utf-8')
 }
 
@@ -131,22 +130,80 @@ async function removeStaleRecreateBackups(): Promise<string[]> {
  * generated locally — and the composer says so rather than failing at send time. Not worth
  * blocking a working engine over.
  */
-async function announceShareHost(host: string): Promise<void> {
-  try {
-    await fetch(`${BACKEND_URL}/distribution/share-host`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-mraim-token': API_TOKEN },
-      body: JSON.stringify({ host })
-    })
-  } catch {
-    // Backend not up yet, or refused. Attaching a local image stays unavailable.
+async function announceShareHost(host: string): Promise<boolean> {
+  let lastError = ''
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(`${BACKEND_URL}/distribution/share-host`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-mraim-token': API_TOKEN },
+        body: JSON.stringify({ host })
+      })
+      const result = response.ok
+        ? ((await response.json()) as { listening?: boolean; host?: string })
+        : null
+      const expected = host ? result?.listening === true && result.host === host : result?.listening === false
+      if (expected) return true
+      lastError = response.ok
+        ? `listener did not bind ${host || 'closed state'}`
+        : `backend returned HTTP ${response.status}`
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)))
   }
+  // Posting text still works, but a generated attachment cannot. Keep that distinction
+  // visible in the process log, and the backend also refuses a local-media send while the
+  // listener is absent instead of recording a misleading text-only success.
+  if (host) console.warn(`[distribution] media-share listener unavailable: ${lastError}`)
+  return false
+}
+
+let desiredShareHost = ''
+let shareHostRetry: ReturnType<typeof setTimeout> | null = null
+const DISCOVERING_SHARE_HOST = '<discover>'
+
+function scheduleShareHostDiscovery(): void {
+  desiredShareHost = DISCOVERING_SHARE_HOST
+  if (shareHostRetry) clearTimeout(shareHostRetry)
+  shareHostRetry = setTimeout(() => {
+    shareHostRetry = null
+    void (async () => {
+      if (desiredShareHost !== DISCOVERING_SHARE_HOST) return
+      const host = await wslHostAddress()
+      if (desiredShareHost !== DISCOVERING_SHARE_HOST) return
+      if (host) {
+        refreshHostAddress(host)
+        await maintainShareHost(host)
+      } else {
+        scheduleShareHostDiscovery()
+      }
+    })()
+  }, 15_000)
+}
+
+async function maintainShareHost(host: string): Promise<boolean> {
+  if (!host) return false
+  desiredShareHost = host
+  if (shareHostRetry) {
+    clearTimeout(shareHostRetry)
+    shareHostRetry = null
+  }
+  const ready = await announceShareHost(host)
+  if (!ready && desiredShareHost === host) {
+    // A backend restart or a briefly busy adapter should heal in-session; scheduled media
+    // waits while this is unavailable. Rediscover as well as retry: WSL may have assigned
+    // a different gateway since the failed attempt.
+    scheduleShareHostDiscovery()
+  }
+  return ready
 }
 
 export async function startActivepieces(): Promise<void> {
   startWslKeepAlive() // keep the WSL2 VM from idling itself out from under the container
   ensureSecrets()
-  await refreshHostAddress()
+  const host = await wslHostAddress()
+  refreshHostAddress(host)
   dataDir() // ensure it exists before Docker tries to bind-mount it
   let result = await dockerCommand(composeArgs(['up', '-d']))
 
@@ -159,7 +216,11 @@ export async function startActivepieces(): Promise<void> {
     throw new Error(`Failed to start the distribution engine: ${result.stderr.slice(0, 500)}`)
   }
   await waitForActivepiecesHealth()
-  await announceShareHost(await wslHostAddress())
+  if (host) await maintainShareHost(host)
+  else {
+    console.warn('[distribution] could not discover the WSL host; retrying media setup in the background')
+    scheduleShareHostDiscovery()
+  }
 }
 
 /** True once the engine has been set up on this machine — the secrets file is written
@@ -209,7 +270,14 @@ export async function startActivepiecesIfConfigured(): Promise<AutoStartOutcome>
     // left the share listener closed on almost every launch, and a post with an image
     // attached went out as text: the engine fetched the link, found nothing listening on
     // the host, and carried on without the picture.
-    await announceShareHost(await wslHostAddress())
+    const host = await wslHostAddress()
+    if (host) {
+      refreshHostAddress(host)
+      await maintainShareHost(host)
+    } else {
+      console.warn('[distribution] could not discover the WSL host; keeping the listener and retrying discovery')
+      scheduleShareHostDiscovery()
+    }
     return 'already-running'
   }
 
@@ -218,6 +286,11 @@ export async function startActivepiecesIfConfigured(): Promise<AutoStartOutcome>
 }
 
 export async function stopActivepieces(): Promise<void> {
+  desiredShareHost = ''
+  if (shareHostRetry) {
+    clearTimeout(shareHostRetry)
+    shareHostRetry = null
+  }
   await dockerCommand(composeArgs(['down']))
   // Close the share socket with the engine that needed it. Nothing else fetches those
   // links, and a listener with no reader is just surface area.

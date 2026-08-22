@@ -26,7 +26,7 @@
         "input": {
           "auth": "{{connections.mastodon}}",
           "status": "{{trigger.body.text}}",
-          "media": "{{trigger.body.imageUrl}}"
+          "media": "{{trigger.body.mediaUrl}}"
         },
         "propertySettings": {}
       }

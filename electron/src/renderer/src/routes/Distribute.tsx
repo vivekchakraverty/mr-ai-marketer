@@ -509,10 +509,24 @@ function JobDetails({ job }: { job: DistributionJob }): React.JSX.Element {
   }
 
   const text = typeof payload.text === 'string' ? payload.text : ''
-  const imageUrl = typeof payload.imageUrl === 'string' ? payload.imageUrl : ''
+  const imageUrls = Array.isArray(payload.imageUrls)
+    ? payload.imageUrls.filter((value): value is string => typeof value === 'string' && Boolean(value))
+    : []
+  // Bluesky receives its prepared, size-safe derivative; every other channel receives
+  // the original scalar media URL. Show the channel's real attachment in history.
+  const imageUrl = job.channel === 'bluesky' && imageUrls[0]
+    ? imageUrls[0]
+    : typeof payload.imageUrl === 'string'
+      ? payload.imageUrl
+      : ''
+  const videoUrl = typeof payload.videoUrl === 'string' ? payload.videoUrl : ''
+  const videoAlt = typeof payload.videoFileAlt === 'string' ? payload.videoFileAlt : ''
   // Everything except the post body, which gets its own block above.
   const extras = Object.entries(payload).filter(
-    ([k, v]) => k !== 'text' && k !== 'imageUrl' && typeof v === 'string' && v
+    ([k, v]) =>
+      !['text', 'imageUrl', 'imageUrls', 'videoUrl', 'videoFileAlt', 'mediaUrl'].includes(k) &&
+      typeof v === 'string' &&
+      v
   )
 
   return (
@@ -561,6 +575,20 @@ function JobDetails({ job }: { job: DistributionJob }): React.JSX.Element {
             />
           ) : (
             <div style={{ font: "600 12.5px 'Quicksand'", color: 'var(--ink-muted)', wordBreak: 'break-all' }}>{imageUrl}</div>
+          )}
+        </div>
+      )}
+
+      {videoUrl && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ font: "700 11px 'Quicksand'", letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink-faint)', marginBottom: 5 }}>
+            Video
+          </div>
+          <div style={{ font: "600 12.5px 'Quicksand'", color: 'var(--ink-muted)', wordBreak: 'break-all' }}>{videoUrl}</div>
+          {videoAlt && (
+            <div style={{ font: "600 12px/1.5 'Quicksand'", color: 'var(--ink-faint)', marginTop: 4 }}>
+              Alt text: {videoAlt}
+            </div>
           )}
         </div>
       )}

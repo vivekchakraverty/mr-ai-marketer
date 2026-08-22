@@ -26,7 +26,9 @@
         "input": {
           "auth": "{{connections.bluesky}}",
           "text": "{{trigger.body.text}}",
-          "imageUrls": "{{trigger.body.imageUrl}}"
+          "imageUrls": "{{trigger.body.imageUrls}}",
+          "videoUrl": "{{trigger.body.videoUrl}}",
+          "videoAltText": "{{trigger.body.videoFileAlt}}"
         },
         "propertySettings": {}
       }

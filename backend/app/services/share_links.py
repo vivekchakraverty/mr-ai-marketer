@@ -1,7 +1,7 @@
 """Short-lived, unguessable URLs for one generated file, readable without the app token.
 
 WHY THIS EXISTS. The Distribute engine (Activepieces) posts on the user's behalf, and to
-attach an image it needs a URL it can fetch *itself*. Everything this app generates lives
+attach media it needs a URL it can fetch *itself*. Everything this app generates lives
 under OUTPUTS_DIR and is served from `/outputs`, which sits behind the same session token
 as the rest of the API — the renderer sends that header, a container has no way to. So the
 image needs a second door: narrow, temporary, and openable exactly once per file.
@@ -15,9 +15,8 @@ a restart cannot strand a scheduled send. The secret is persisted (unlike the se
 token, which is minted per launch) precisely because a post scheduled for Thursday has to
 still be fetchable on Thursday.
 
-THE EXPIRY IS THE POINT. A leaked link is a leaked image for minutes, not forever, and the
-window is chosen by the caller from what it actually needs — a send scheduled three days
-out asks for three days plus a margin, an immediate one asks for the default.
+THE EXPIRY IS THE POINT. A leaked link is leaked media for minutes, not forever. Scheduled
+jobs retain their canonical local path and mint this temporary URL only when they fire.
 """
 
 from __future__ import annotations
@@ -28,6 +27,7 @@ import logging
 import secrets
 import time
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 from .. import config
 
@@ -112,7 +112,8 @@ def resolve(token: str) -> Path | None:
 
 def url_for(path: Path, base: str, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> str:
     """A full URL another process can fetch. `base` decides who can reach it."""
-    return f"{base.rstrip('/')}/shared/{token_for(path, ttl_seconds)}"
+    token = token_for(path, ttl_seconds)
+    return f"{base.rstrip('/')}/shared/{quote(token, safe='/.')}"
 
 
 def path_from_outputs_url(url: str) -> Path | None:
@@ -124,7 +125,32 @@ def path_from_outputs_url(url: str) -> Path | None:
     marker = "/outputs/"
     if marker not in url:
         return None
-    relpath = url.split(marker, 1)[1].split("?", 1)[0]
+    relpath = unquote(url.split(marker, 1)[1].split("?", 1)[0])
     candidate = (config.OUTPUTS_DIR / relpath).resolve()
     root = config.OUTPUTS_DIR.resolve()
+    return candidate if candidate.is_file() and root in candidate.parents else None
+
+
+def path_from_shared_url(url: str) -> Path | None:
+    """Recover the local file named by one of our signed links, even after expiry.
+
+    This is only for migrating app-owned job payloads before minting a fresh link. The
+    unauthenticated HTTP handler still uses :func:`resolve`, which always enforces expiry.
+    Signature and output-tree containment remain mandatory here, so a lookalike public URL
+    cannot turn into a local file read.
+    """
+    marker = "/shared/"
+    if marker not in url:
+        return None
+    token = unquote(url.split(marker, 1)[1].split("?", 1)[0])
+    try:
+        expires_raw, signature, relpath = token.split(".", 2)
+        expires = int(expires_raw)
+    except (ValueError, AttributeError):
+        return None
+    if not hmac.compare_digest(signature, _sign(relpath, expires)):
+        return None
+
+    root = config.OUTPUTS_DIR.resolve()
+    candidate = (root / relpath).resolve()
     return candidate if candidate.is_file() and root in candidate.parents else None

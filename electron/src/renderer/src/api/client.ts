@@ -750,6 +750,8 @@ export interface SendToDistributionRequest {
   channelId?: string
   pageId?: string
   imageUrl?: string
+  videoFileUrl?: string
+  videoFileAlt?: string
   to?: string
   from?: string
   subject?: string
