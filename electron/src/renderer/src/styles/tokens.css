@@ -138,6 +138,11 @@ textarea::placeholder {
   color: var(--ink-fainter);
 }
 
+.cancel-scheduled-post-button:focus-visible {
+  outline: 2px solid var(--danger-ink);
+  outline-offset: 2px;
+}
+
 select {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%232B2420' stroke-width='2' fill='none' stroke-linecap='round'/></svg>");
   background-repeat: no-repeat;

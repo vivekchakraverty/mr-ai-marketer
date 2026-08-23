@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   approveDistributionItem,
+  cancelScheduledDistributionJob,
   deleteCustomChannel,
   fetchCataloguePiece,
   fetchDistributionChannels,
@@ -37,6 +38,7 @@ const STATUS_LABEL: Record<string, string> = {
   sending: 'Sending…',
   sent: 'Sent',
   scheduled: 'Scheduled',
+  cancelled: 'Cancelled',
   pending_approval: 'Waiting on approval',
   failed: 'Failed',
   approved: 'Approved',
@@ -51,6 +53,13 @@ function formatDate(iso: string): string {
   const diffHr = Math.floor(diffMin / 60)
   if (diffHr < 24) return `${diffHr}h ago`
   return d.toLocaleDateString()
+}
+
+function formatScheduledDate(iso: string): string {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime())
+    ? iso
+    : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 function ChannelCard({
@@ -127,6 +136,9 @@ export default function Distribute(): React.JSX.Element {
   // Which history row is open. One at a time: these are read to answer a specific
   // question ("what went out?", "why did that fail?"), not browsed side by side.
   const [expandedJob, setExpandedJob] = useState<string | null>(null)
+  const [cancellingJob, setCancellingJob] = useState<string | null>(null)
+  const [cancelError, setCancelError] = useState('')
+  const historyRefreshSequence = useRef(0)
   const [customChannels, setCustomChannels] = useState<CustomChannelStatus[]>([])
   const [addOpen, setAddOpen] = useState(false)
   // The connect form for a user-added channel is generated from its piece's own auth
@@ -196,11 +208,14 @@ export default function Distribute(): React.JSX.Element {
     let cancelled = false
 
     async function refresh(): Promise<void> {
+      const requestSequence = ++historyRefreshSequence.current
       try {
         const [queueResult, jobsResult] = await Promise.all([fetchDistributionQueue(), fetchDistributionJobs()])
         if (!cancelled) {
           setQueue(queueResult.jobs)
-          setJobs(jobsResult.jobs)
+          // A successful cancellation increments the sequence so an older GET that was
+          // already in flight cannot briefly put its stale Scheduled row back on screen.
+          if (requestSequence === historyRefreshSequence.current) setJobs(jobsResult.jobs)
         }
       } catch {
         // Distribution engine likely isn't set up yet — the inbox and history just stay empty.
@@ -228,6 +243,30 @@ export default function Distribute(): React.JSX.Element {
 
   function handleResolved(jobId: string): void {
     setQueue((current) => current.filter((job) => job.id !== jobId))
+  }
+
+  async function handleCancelScheduled(job: DistributionJob): Promise<void> {
+    if (cancellingJob) return
+    const label =
+      PLATFORM_SETUP_GUIDES[job.channel]?.label ??
+      customChannels.find((channel) => channel.channel === job.channel)?.label ??
+      job.channel
+    const timing = job.scheduled_at
+      ? ` scheduled for ${formatScheduledDate(job.scheduled_at)}`
+      : ''
+    if (!window.confirm(`Cancel the ${label} post${timing}? It will not be published.`)) return
+
+    setCancellingJob(job.id)
+    setCancelError('')
+    try {
+      const cancelled = await cancelScheduledDistributionJob(job.id)
+      historyRefreshSequence.current += 1
+      setJobs((current) => current.map((item) => (item.id === cancelled.id ? cancelled : item)))
+    } catch (err) {
+      setCancelError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCancellingJob(null)
+    }
   }
 
   const connectedByChannel = new Set(
@@ -392,6 +431,11 @@ export default function Distribute(): React.JSX.Element {
 
       <div style={{ marginBottom: 14 }}>
         <div style={{ font: "700 18px 'Kalam'", color: 'var(--ink)' }}>Send history</div>
+        {cancelError && (
+          <div role="alert" style={{ font: "700 12.5px 'Quicksand'", color: '#a34a3a', marginTop: 5 }}>
+            {cancelError}
+          </div>
+        )}
       </div>
 
       {loaded && recentJobs.length === 0 && (
@@ -413,6 +457,15 @@ export default function Distribute(): React.JSX.Element {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {recentJobs.map((job) => {
             const open = expandedJob === job.id
+            const channelLabel =
+              PLATFORM_SETUP_GUIDES[job.channel]?.label ??
+              customChannels.find((c) => c.channel === job.channel)?.label ??
+              job.channel
+            const cancelling = cancellingJob === job.id
+            const rowTimestamp =
+              job.status === 'scheduled' && job.scheduled_at
+                ? `Scheduled ${formatScheduledDate(job.scheduled_at)}`
+                : formatDate(job.updated_at)
             return (
               <div
                 key={job.id}
@@ -447,16 +500,46 @@ export default function Distribute(): React.JSX.Element {
                     >
                       ›
                     </span>
-                    <span style={tag}>
-                      {PLATFORM_SETUP_GUIDES[job.channel]?.label ??
-                        customChannels.find((c) => c.channel === job.channel)?.label ??
-                        job.channel}
-                    </span>
+                    <span style={tag}>{channelLabel}</span>
                     <span style={{ font: "700 12.5px 'Quicksand'", color: job.status === 'failed' ? '#a34a3a' : 'var(--ink-muted)' }}>
                       {STATUS_LABEL[job.status] ?? job.status}
                     </span>
                   </div>
-                  <span style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-faint)' }}>{formatDate(job.updated_at)}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-faint)', whiteSpace: 'nowrap' }}>
+                      {rowTimestamp}
+                    </span>
+                    {job.status === 'scheduled' && (
+                      <button
+                        type="button"
+                        className="cancel-scheduled-post-button"
+                        aria-label={cancelling ? `Cancelling scheduled ${channelLabel} post` : `Cancel scheduled ${channelLabel} post`}
+                        aria-busy={cancelling}
+                        title={cancelling ? 'Cancelling scheduled post…' : 'Cancel scheduled post'}
+                        disabled={Boolean(cancellingJob)}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          void handleCancelScheduled(job)
+                        }}
+                        style={{
+                          width: 24,
+                          height: 24,
+                          display: 'grid',
+                          placeItems: 'center',
+                          padding: 0,
+                          border: 0,
+                          borderRadius: 8,
+                          background: 'transparent',
+                          color: 'var(--danger-ink)',
+                          font: "700 18px/1 'Quicksand'",
+                          cursor: cancellingJob ? 'wait' : 'pointer',
+                          opacity: cancellingJob && !cancelling ? 0.4 : 1
+                        }}
+                      >
+                        {cancelling ? '…' : '×'}
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {open && <JobDetails job={job} />}
               </div>
@@ -595,7 +678,7 @@ function JobDetails({ job }: { job: DistributionJob }): React.JSX.Element {
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 18px', font: "600 12px 'Quicksand'", color: 'var(--ink-muted)' }}>
         <span>Queued {formatDate(job.created_at)}</span>
-        {job.scheduled_at && <span>Scheduled for {formatDate(job.scheduled_at)}</span>}
+        {job.scheduled_at && <span>Scheduled for {formatScheduledDate(job.scheduled_at)}</span>}
         {job.updated_at !== job.created_at && <span>Last change {formatDate(job.updated_at)}</span>}
         {extras.map(([k, v]) => (
           <span key={k}>

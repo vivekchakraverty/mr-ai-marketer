@@ -389,6 +389,76 @@ def list_due_scheduled_jobs() -> list[dict]:
         return [dict(row) for row in rows]
 
 
+def cancel_scheduled_distribution_job(job_id: str) -> Optional[dict]:
+    """Cancel a job only while the scheduler still considers it pending.
+
+    The status predicate makes cancellation atomic with
+    :func:`claim_scheduled_distribution_job`: whichever update wins decides whether the
+    post is cancelled or sent.  A plain read followed by ``update_distribution_job``
+    would leave a window where the UI reports success while the scheduler publishes the
+    same post.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        cursor = conn.execute(
+            "UPDATE distribution_jobs SET status = 'cancelled', updated_at = ? "
+            "WHERE id = ? AND status = 'scheduled'",
+            (now, job_id),
+        )
+        if cursor.rowcount == 0:
+            return None
+        row = conn.execute(
+            "SELECT * FROM distribution_jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def claim_scheduled_distribution_job(
+    job_id: str, *, payload: Optional[str] = None
+) -> Optional[dict]:
+    """Atomically move one pending scheduled job into the sending state.
+
+    ``list_due_scheduled_jobs`` is only a snapshot.  The job may be cancelled while its
+    media is being prepared, so the scheduler must claim it with a conditional update
+    immediately before triggering the external flow.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    params = {"id": job_id, "updated_at": now}
+    sets = ["status = 'sending'", "updated_at = :updated_at"]
+    if payload is not None:
+        sets.append("payload = :payload")
+        params["payload"] = payload
+    with _connect() as conn:
+        cursor = conn.execute(
+            f"UPDATE distribution_jobs SET {', '.join(sets)} "
+            "WHERE id = :id AND status = 'scheduled'",
+            params,
+        )
+        if cursor.rowcount == 0:
+            return None
+        row = conn.execute(
+            "SELECT * FROM distribution_jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def fail_scheduled_distribution_job(job_id: str, error: str) -> Optional[dict]:
+    """Record preparation failure without overwriting a concurrent cancellation."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        cursor = conn.execute(
+            "UPDATE distribution_jobs SET status = 'failed', error = ?, updated_at = ? "
+            "WHERE id = ? AND status = 'scheduled'",
+            (error, now, job_id),
+        )
+        if cursor.rowcount == 0:
+            return None
+        row = conn.execute(
+            "SELECT * FROM distribution_jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def update_distribution_job(job_id: str, **fields) -> Optional[dict]:
     if not fields:
         return get_distribution_job(job_id)

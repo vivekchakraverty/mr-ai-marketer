@@ -814,6 +814,25 @@ def list_jobs(status: Optional[str] = None) -> dict:
     return {"jobs": db.list_distribution_jobs(status=status)}
 
 
+@router.post("/jobs/{job_id}/cancel")
+def cancel_scheduled_job(job_id: str) -> dict:
+    cancelled = db.cancel_scheduled_distribution_job(job_id)
+    if cancelled:
+        return cancelled
+
+    # Treat a retry after a lost response as success.  This keeps the action idempotent
+    # without suggesting that a job already claimed by the scheduler can still be stopped.
+    job = db.get_distribution_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="No distribution job with that id")
+    if job["status"] == "cancelled":
+        return job
+    raise HTTPException(
+        status_code=409,
+        detail="This post is no longer scheduled, so it cannot be cancelled.",
+    )
+
+
 @router.get("/queue")
 def list_queue() -> dict:
     return {"jobs": db.list_distribution_jobs(status="pending_approval")}
@@ -891,13 +910,21 @@ def _fire_due_scheduled_jobs() -> None:
                 # scheduler's first tick.
                 log.info("[distribution] media listener not ready for scheduled job %s", job["id"])
                 continue
-            db.update_distribution_job(job["id"], status="failed", error=str(err.detail))
+            db.fail_scheduled_distribution_job(job["id"], str(err.detail))
             continue
-        fields = {"status": "sending"}
-        if canonical_payload != stored_payload:
-            fields["payload"] = json.dumps(canonical_payload)
-        db.update_distribution_job(job["id"], **fields)
-        fire_job(job["id"], job["channel"], payload)
+        stored_upgrade = (
+            json.dumps(canonical_payload)
+            if canonical_payload != stored_payload
+            else None
+        )
+        claimed = db.claim_scheduled_distribution_job(
+            job["id"], payload=stored_upgrade
+        )
+        if not claimed:
+            # The due-job list is a snapshot.  Cancellation may have won while media was
+            # being prepared; in that case the conditional claim deliberately does nothing.
+            continue
+        fire_job(claimed["id"], claimed["channel"], payload)
 
 
 def _scheduler_loop() -> None:

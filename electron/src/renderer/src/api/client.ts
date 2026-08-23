@@ -743,6 +743,10 @@ export function fetchDistributionJobs(status?: string): Promise<{ jobs: Distribu
   return getJson(`/distribution/jobs${status ? `?status=${status}` : ''}`)
 }
 
+export function cancelScheduledDistributionJob(jobId: string): Promise<DistributionJob> {
+  return postJson(`/distribution/jobs/${jobId}/cancel`, {})
+}
+
 export interface SendToDistributionRequest {
   libraryItemId: string
   channels: string[]
