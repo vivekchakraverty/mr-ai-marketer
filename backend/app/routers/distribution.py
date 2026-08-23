@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import db
-from ..services import activepieces_client
+from ..services import activepieces_client, mastodon_delivery
 from ..services.activepieces_client import ActivepiecesError
 
 router = APIRouter(prefix="/distribution", tags=["distribution"])
@@ -256,6 +256,11 @@ def connect_channel(channel: str, body: ConnectionRequest) -> dict:
     try:
         value = _resolve_placeholders(channel, body.value)
         activepieces_client.create_connection(channel, body.type, value, piece=piece)
+        if channel == "mastodon":
+            mastodon_delivery.set_credentials(
+                str(value.get("base_url") or ""),
+                str(value.get("access_token") or ""),
+            )
     except ActivepiecesError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
     return {"connected": True}
@@ -272,7 +277,24 @@ def disconnect_channel(channel: str) -> dict:
         activepieces_client.delete_connection(external_id)
     except ActivepiecesError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
+    if channel == "mastodon":
+        mastodon_delivery.set_credentials()
     return {"connected": False}
+
+
+class MastodonCredentialsRequest(BaseModel):
+    """The active account Electron decrypted from its OS-protected settings store."""
+
+    instance: str = ""
+    accessToken: str = ""
+
+
+@router.post("/mastodon-credentials")
+def set_mastodon_credentials(body: MastodonCredentialsRequest) -> dict:
+    """Hand Mastodon credentials to the scheduler for this app process only."""
+    return {
+        "ready": mastodon_delivery.set_credentials(body.instance, body.accessToken)
+    }
 
 
 # The fields a send request can carry (see SendRequest/_payload_for below). A generated
@@ -544,6 +566,16 @@ def _shareable_media_url(media_url: str) -> str:
 
     path = share_links.path_from_outputs_url(media_url) or share_links.path_from_shared_url(media_url)
     if path is None:
+        # An app-owned URL is never meaningful to Activepieces as a relative path.  If
+        # its file has disappeared, fail the send explicitly instead of handing the
+        # connector ``/outputs/...``.  Activepieces' File processor catches that fetch
+        # error and substitutes null, which makes image-capable actions report success
+        # after publishing a misleading text-only post.
+        if media_url.startswith("/outputs/"):
+            raise HTTPException(
+                status_code=400,
+                detail="The attached media file no longer exists. Attach it again and retry.",
+            )
         return media_url
     if not share_server.is_listening() or (not ENGINE_HOST_BASE and not _announced_share_host):
         raise HTTPException(
@@ -638,6 +670,11 @@ def _payload_for(body: SendRequest) -> dict:
         payload["mediaUrl"] = body.videoFileUrl
         if body.videoFileAlt is not None:
             payload["videoFileAlt"] = body.videoFileAlt.strip()
+    # Activepieces evaluates a missing webhook property as an empty string.  Bluesky's
+    # action strictly requires an array even when the post carries video instead of images,
+    # so make the empty shape explicit for every Bluesky send.
+    if "bluesky" in body.channels:
+        payload.setdefault("imageUrls", [])
     for field in ("channelId", "pageId", "to", "subject", "subreddit", "title"):
         value = getattr(body, field)
         if value is not None:
@@ -671,6 +708,8 @@ def _materialize_media_payload(payload: dict) -> dict:
 
 def _upgrade_legacy_media_payload(payload: dict, channel: str) -> dict:
     """Add the media fields introduced after older scheduled jobs were persisted."""
+    if channel == "bluesky" and "imageUrls" not in payload:
+        payload = {**payload, "imageUrls": []}
     image_url = payload.get("imageUrl")
     if not isinstance(image_url, str) or not image_url:
         return payload
@@ -722,18 +761,60 @@ def _record_run_outcome(job_id: str, run: dict) -> None:
         db.update_distribution_job(job_id, status=status.lower(), activepieces_run_id=run["id"])
 
 
+_DELIVERY_JOB_FIELD = "_mraimDeliveryJobId"
+
+
+def _matching_flow_run(runs: list[dict], job_id: str) -> dict | None:
+    """Return the run whose webhook body carries this delivery's unique marker."""
+    for summary in runs:
+        try:
+            run = (
+                summary
+                if summary.get("steps") is not None
+                else activepieces_client.get_flow_run(summary["id"])
+            )
+        except (ActivepiecesError, KeyError):
+            continue
+        trigger = ((run.get("steps") or {}).get("trigger") or {}).get("output") or {}
+        body = trigger.get("body") if isinstance(trigger, dict) else None
+        if isinstance(body, dict) and body.get(_DELIVERY_JOB_FIELD) == job_id:
+            return run
+    return None
+
+
 def fire_job(job_id: str, channel: str, payload: dict) -> None:
     """Triggers a channel's webhook and records the resulting run on the job row.
     The webhook call itself is fire-and-forget (Activepieces runs the flow async and
     returns an empty body), so we poll flow-runs briefly afterward to pick up the run
     id and its outcome so far — community channels reach PAUSED well within this window
     since there's no external API call before the approval gate."""
+    if channel == "mastodon" and mastodon_delivery.carries_media(payload):
+        try:
+            created = mastodon_delivery.publish(payload, idempotency_key=job_id)
+        except Exception as err:  # noqa: BLE001 - converted to a durable job failure here
+            db.update_distribution_job(job_id, status="failed", error=str(err))
+            return
+        status_id = str(created.get("id") or "")
+        db.update_distribution_job(
+            job_id,
+            status="sent",
+            activepieces_run_id=f"mastodon:{status_id}" if status_id else None,
+        )
+        return
+
     # A generous buffer against clock skew between this process and the Activepieces
     # container — their clocks can drift after a WSL2 VM suspend/resume, and missing the
     # just-fired run here is worse than the rare case of it picking up an older one too.
     since = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat().replace("+00:00", "Z")
     try:
-        activepieces_client.trigger_webhook(channel, payload)
+        # This is the last boundary before Activepieces.  Keep media materialization here
+        # even though current send/scheduler callers prepare it earlier: the live failure
+        # that prompted this guard reached the webhook with an existing ``/outputs`` file,
+        # and Activepieces silently converted that unfetchable relative File URL to null.
+        # Re-materializing an already-signed URL is safe and refreshes its short expiry.
+        delivery_payload = _materialize_media_payload(payload)
+        delivery_payload[_DELIVERY_JOB_FIELD] = job_id
+        activepieces_client.trigger_webhook(channel, delivery_payload)
 
         flow_id = activepieces_client.get_flow_id(channel)
         run = None
@@ -741,9 +822,13 @@ def fire_job(job_id: str, channel: str, payload: dict) -> None:
             time.sleep(1)
             runs = activepieces_client.list_flow_runs_since(flow_id, since) if flow_id else []
             if runs:
-                run = runs[0]  # newest first
+                run = _matching_flow_run(runs, job_id)
+            if run:
                 if run["status"] not in ("QUEUED", "RUNNING"):
                     break
+    except HTTPException as err:
+        db.update_distribution_job(job_id, status="failed", error=str(err.detail))
+        return
     except ActivepiecesError as err:
         db.update_distribution_job(job_id, status="failed", error=str(err))
         return
@@ -784,11 +869,6 @@ def send(body: SendRequest) -> dict:
 
     scheduled_at = _normalize_scheduled_at(body.scheduledAt)
     canonical_payload = _payload_for(body)
-    payload = (
-        canonical_payload
-        if scheduled_at
-        else _materialize_media_payload(canonical_payload)
-    )
     jobs = []
     for channel in body.channels:
         status = "scheduled" if scheduled_at else "sending"
@@ -803,6 +883,11 @@ def send(body: SendRequest) -> dict:
             payload=json.dumps(canonical_payload),
         )
         if not scheduled_at:
+            payload = (
+                canonical_payload
+                if channel == "mastodon" and mastodon_delivery.carries_media(canonical_payload)
+                else _materialize_media_payload(canonical_payload)
+            )
             fire_job(job["id"], channel, payload)
             job = db.get_distribution_job(job["id"])
         jobs.append(job)
@@ -888,20 +973,40 @@ def _fire_due_scheduled_jobs() -> None:
     jobs = db.list_due_scheduled_jobs()
     if not jobs:
         return
+    needs_engine = any(
+        not (
+            job["channel"] == "mastodon"
+            and mastodon_delivery.carries_media(json.loads(job["payload"] or "{}"))
+        )
+        for job in jobs
+    )
+    engine_ready = True
     try:
         # The backend scheduler starts before Electron's deliberately backgrounded
         # container startup. Preflight once so every due job — including text-only and
         # public-media posts — stays scheduled during that normal cold-start window.
-        activepieces_client.list_flows()
+        if needs_engine:
+            activepieces_client.list_flows()
     except ActivepiecesError as err:
         log.info("[distribution] posting engine not ready for scheduled jobs: %s", err)
-        return
+        engine_ready = False
 
     for job in jobs:
         try:
             stored_payload = json.loads(job["payload"] or "{}")
             canonical_payload = _upgrade_legacy_media_payload(stored_payload, job["channel"])
-            payload = _materialize_media_payload(canonical_payload)
+            native_mastodon = (
+                job["channel"] == "mastodon"
+                and mastodon_delivery.carries_media(canonical_payload)
+            )
+            if native_mastodon and not mastodon_delivery.has_credentials():
+                # Electron hands the OS-decrypted token over just after backend startup.
+                # A due post must wait through that small launch window, not be claimed and
+                # permanently failed before the credential arrives.
+                continue
+            if not native_mastodon and not engine_ready:
+                continue
+            payload = canonical_payload if native_mastodon else _materialize_media_payload(canonical_payload)
         except HTTPException as err:
             if err.status_code == 503:
                 # Electron announces the WSL-reachable listener just after backend

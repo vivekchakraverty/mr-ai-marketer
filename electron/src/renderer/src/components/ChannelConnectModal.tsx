@@ -169,6 +169,33 @@ export default function ChannelConnectModal({
         else payload[f.key] = raw
       }
       await connectChannel(channel, guide.authKind as 'CUSTOM_AUTH' | 'SECRET_TEXT', payload)
+      if (channel === 'mastodon') {
+        // Distribution can be connected with credentials typed here rather than in
+        // Settings. Keep that account in Electron's encrypted store as the source of truth
+        // so scheduled media still has a credential after the next app restart.
+        const current = await window.api.settings.getAll()
+        const instance = String(payload.base_url ?? '')
+          .trim()
+          .replace(/^https?:\/\//, '')
+          .split('/')[0]
+          .replace(/\.$/, '')
+          .toLowerCase()
+        const accessToken = String(payload.access_token ?? '').trim()
+        const accounts = (current.mastodonAccounts ?? []).filter(
+          (account) =>
+            account.instance
+              .trim()
+              .replace(/^https?:\/\//, '')
+              .split('/')[0]
+              .replace(/\.$/, '')
+              .toLowerCase() !== instance
+        )
+        await window.api.settings.setAll({
+          mastodonInstance: instance,
+          mastodonAccessToken: accessToken,
+          mastodonAccounts: [...accounts, { instance, accessToken }]
+        })
+      }
       onChanged()
       onClose()
     } catch (err) {

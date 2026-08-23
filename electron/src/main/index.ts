@@ -4,7 +4,15 @@ import { basename, join } from 'path'
 import { randomUUID } from 'crypto'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { startBackend, stopBackend, waitForBackendHealth, API_TOKEN, BACKEND_URL } from './backend'
-import { getHfToken, getSettings, setHfToken, setSettings, type SettingsPatch } from './settingsStore'
+import {
+  getHfToken,
+  getSettings,
+  mastodonTokenFor,
+  normaliseInstance,
+  setHfToken,
+  setSettings,
+  type SettingsPatch
+} from './settingsStore'
 import { bootstrap, detectStatus, RebootRequiredError } from './dockerRuntime'
 import {
   isActivepiecesRunning,
@@ -170,6 +178,27 @@ async function handOverTumblrKeys(): Promise<void> {
   }
 }
 
+/** Give Distribution's native media path the active Mastodon account for this launch.
+ *
+ * The token remains encrypted at rest by Electron safeStorage.  The Python scheduler keeps
+ * this copy in memory only, which lets a post scheduled for later upload its attachment
+ * without teaching Activepieces or the backend database how to persist the credential.
+ */
+async function handOverMastodonKeys(): Promise<void> {
+  try {
+    const settings = getSettings()
+    const instance = normaliseInstance(settings.mastodonInstance)
+    const accessToken = mastodonTokenFor(instance)
+    await fetch(`${BACKEND_URL}/distribution/mastodon-credentials`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-mraim-token': API_TOKEN },
+      body: JSON.stringify({ instance, accessToken })
+    })
+  } catch {
+    // No configured account (or backend unavailable) leaves native media delivery inert.
+  }
+}
+
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.vivekchakraverty.mraimarketer')
 
@@ -201,7 +230,17 @@ app.whenReady().then(async () => {
     setHfToken(token)
   })
   ipcMain.handle('settings:get-all', () => getSettings())
-  ipcMain.handle('settings:set-all', (_event, partial: SettingsPatch) => setSettings(partial))
+  ipcMain.handle('settings:set-all', (_event, partial: SettingsPatch) => {
+    const updated = setSettings(partial)
+    if (
+      'mastodonInstance' in partial ||
+      'mastodonAccessToken' in partial ||
+      'mastodonAccounts' in partial
+    ) {
+      void handOverMastodonKeys()
+    }
+    return updated
+  })
   ipcMain.handle('shell:open-file', (_event, path: string) => shell.openPath(path))
 
   /**
@@ -316,6 +355,7 @@ app.whenReady().then(async () => {
   // into memory — the backend never writes credentials down, so this is how a background
   // collection that must survive weeks gets what it needs without anything landing on disk.
   void handOverTumblrKeys()
+  void handOverMastodonKeys()
 
   await createWindow()
 

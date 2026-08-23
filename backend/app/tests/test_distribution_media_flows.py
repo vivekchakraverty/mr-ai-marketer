@@ -17,7 +17,12 @@ import pytest
 
 from app import config
 from app.routers import distribution
-from app.services import activepieces_client, image_prompt, share_server
+from app.services import (
+    activepieces_client,
+    image_prompt,
+    mastodon_delivery,
+    share_server,
+)
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -134,7 +139,7 @@ def test_stale_enabled_unrelated_flow_is_not_incidentally_migrated(tmp_path, mon
     assert activepieces_client.ensure_flows_imported() == {"discord": "flow-discord"}
 
 
-def test_bluesky_template_binds_the_array_payload():
+def test_social_templates_bind_the_connector_specific_media_shapes():
     spec = json.loads(_BLUESKY_TEMPLATE.read_text(encoding="utf-8"))
     action_input = spec["trigger"]["nextAction"]["settings"]["input"]
     assert action_input["imageUrls"] == "{{trigger.body.imageUrls}}"
@@ -143,7 +148,108 @@ def test_bluesky_template_binds_the_array_payload():
 
     mastodon = json.loads(_MASTODON_TEMPLATE.read_text(encoding="utf-8"))
     mastodon_input = mastodon["trigger"]["nextAction"]["settings"]["input"]
+    # Mastodon's action declares a single Activepieces File property, whose dynamic
+    # value is a fetchable URL. It is deliberately scalar, unlike Bluesky's image array.
     assert mastodon_input["media"] == "{{trigger.body.mediaUrl}}"
+
+
+def test_fire_job_materializes_media_at_the_webhook_boundary(monkeypatch):
+    delivered: list[tuple[str, dict]] = []
+    shared: list[str] = []
+
+    def share(url: str) -> str:
+        shared.append(url)
+        return "http://engine-host/shared/signed-image.png"
+
+    monkeypatch.setattr(distribution, "_shareable_media_url", share)
+    monkeypatch.setattr(
+        distribution.activepieces_client,
+        "trigger_webhook",
+        lambda channel, payload: delivered.append((channel, payload)),
+    )
+    monkeypatch.setattr(
+        distribution.activepieces_client, "get_flow_id", lambda _channel: "flow-bluesky"
+    )
+    monkeypatch.setattr(
+        distribution.activepieces_client,
+        "list_flow_runs_since",
+        lambda *_args, **_kwargs: [
+            {
+                "id": "run-1",
+                "status": "SUCCEEDED",
+                "steps": {
+                    "trigger": {
+                        "output": {
+                            "body": {
+                                distribution._DELIVERY_JOB_FIELD: "job-1"
+                            }
+                        }
+                    }
+                },
+            }
+        ],
+    )
+    monkeypatch.setattr(distribution.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(distribution, "_record_run_outcome", lambda *_args: None)
+
+    canonical = {
+        "text": "hello",
+        "imageUrl": "/outputs/mastodon/run/post-image.png",
+        "mediaUrl": "/outputs/mastodon/run/post-image.png",
+        "imageUrls": ["/outputs/mastodon/run/post-image.png"],
+    }
+    distribution.fire_job("job-1", "bluesky", canonical)
+
+    assert shared == [
+        "/outputs/mastodon/run/post-image.png",
+        "/outputs/mastodon/run/post-image.png",
+        "/outputs/mastodon/run/post-image.png",
+    ]
+    assert delivered == [
+        (
+            "bluesky",
+            {
+                **canonical,
+                "imageUrl": "http://engine-host/shared/signed-image.png",
+                "mediaUrl": "http://engine-host/shared/signed-image.png",
+                "imageUrls": ["http://engine-host/shared/signed-image.png"],
+                distribution._DELIVERY_JOB_FIELD: "job-1",
+            },
+        )
+    ]
+
+
+def test_fire_job_fails_instead_of_sending_unfetchable_media(monkeypatch):
+    updates: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        distribution,
+        "_materialize_media_payload",
+        lambda _payload: (_ for _ in ()).throw(
+            distribution.HTTPException(status_code=400, detail="attachment is gone")
+        ),
+    )
+    monkeypatch.setattr(
+        distribution.activepieces_client,
+        "trigger_webhook",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("unfetchable media reached Activepieces")
+        ),
+    )
+    monkeypatch.setattr(
+        distribution.db,
+        "update_distribution_job",
+        lambda job_id, **fields: updates.append((job_id, fields)),
+    )
+
+    distribution.fire_job(
+        "job-1",
+        "mastodon",
+        {"text": "hello", "mediaUrl": "/outputs/missing.png"},
+    )
+
+    assert updates == [
+        ("job-1", {"status": "failed", "error": "attachment is gone"})
+    ]
 
 
 def test_distribution_payload_carries_scalar_and_bluesky_array_shapes():
@@ -253,6 +359,15 @@ def test_announced_wsl_host_is_used_directly_for_local_media(tmp_path, monkeypat
     assert "host.docker.internal" not in shared
 
 
+def test_missing_local_media_is_rejected_instead_of_becoming_text_only(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(config, "OUTPUTS_DIR", tmp_path / "outputs")
+
+    with pytest.raises(distribution.HTTPException, match="no longer exists"):
+        distribution._shareable_media_url("/outputs/mastodon/missing/post.png")
+
+
 def test_legacy_signed_bluesky_job_gets_canonical_array_and_fresh_link(tmp_path, monkeypatch):
     from app.services import share_links
 
@@ -326,6 +441,76 @@ def test_all_due_jobs_wait_while_posting_engine_starts(monkeypatch):
     distribution._fire_due_scheduled_jobs()
 
 
+def test_due_native_mastodon_media_waits_for_launch_credential(monkeypatch):
+    job = {
+        "id": "scheduled-media",
+        "channel": "mastodon",
+        "payload": '{"text":"hello","imageUrl":"/outputs/post.png"}',
+    }
+    mastodon_delivery.set_credentials()
+    monkeypatch.setattr(distribution.db, "list_due_scheduled_jobs", lambda: [job])
+    monkeypatch.setattr(
+        distribution.db,
+        "claim_scheduled_distribution_job",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("job was claimed before its credential arrived")
+        ),
+    )
+
+    distribution._fire_due_scheduled_jobs()
+
+
+def test_due_native_mastodon_media_does_not_need_posting_engine(monkeypatch):
+    job = {
+        "id": "scheduled-media",
+        "channel": "mastodon",
+        "payload": '{"text":"hello","imageUrl":"/outputs/post.png"}',
+    }
+    fired: list[tuple] = []
+    mastodon_delivery.set_credentials("example.social", "token")
+    monkeypatch.setattr(distribution.db, "list_due_scheduled_jobs", lambda: [job])
+    monkeypatch.setattr(
+        distribution.activepieces_client,
+        "list_flows",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("native Mastodon media preflighted Activepieces")
+        ),
+    )
+    monkeypatch.setattr(
+        distribution,
+        "_materialize_media_payload",
+        lambda _payload: (_ for _ in ()).throw(
+            AssertionError("native Mastodon media was turned into a share URL")
+        ),
+    )
+    monkeypatch.setattr(
+        distribution.db,
+        "claim_scheduled_distribution_job",
+        lambda *_args, **_kwargs: job,
+    )
+    monkeypatch.setattr(
+        distribution,
+        "fire_job",
+        lambda *args: fired.append(args),
+    )
+    try:
+        distribution._fire_due_scheduled_jobs()
+    finally:
+        mastodon_delivery.set_credentials()
+
+    assert fired == [
+        (
+            "scheduled-media",
+            "mastodon",
+            {
+                "text": "hello",
+                "imageUrl": "/outputs/post.png",
+                "mediaUrl": "/outputs/post.png",
+            },
+        )
+    ]
+
+
 def test_local_video_is_validated_and_materialized_for_bluesky_and_mastodon(
     tmp_path, monkeypatch
 ):
@@ -355,7 +540,231 @@ def test_local_video_is_validated_and_materialized_for_bluesky_and_mastodon(
     assert payload["mediaUrl"] == payload["videoUrl"]
     assert payload["videoFileAlt"] == "A short demo"
     assert "imageUrl" not in payload
-    assert "imageUrls" not in payload
+    assert payload["imageUrls"] == []
+
+
+def test_run_correlation_uses_delivery_marker_instead_of_newest_run(monkeypatch):
+    delivered: list[dict] = []
+    updates: list[tuple[str, dict]] = []
+    runs = {
+        "run-other": {
+            "id": "run-other",
+            "status": "SUCCEEDED",
+            "steps": {
+                "trigger": {
+                    "output": {
+                        "body": {distribution._DELIVERY_JOB_FIELD: "other-job"}
+                    }
+                }
+            },
+        },
+        "run-ours": {
+            "id": "run-ours",
+            "status": "SUCCEEDED",
+            "steps": {
+                "trigger": {
+                    "output": {
+                        "body": {distribution._DELIVERY_JOB_FIELD: "job-1"}
+                    }
+                }
+            },
+        },
+    }
+    monkeypatch.setattr(
+        distribution.activepieces_client,
+        "trigger_webhook",
+        lambda _channel, payload: delivered.append(payload),
+    )
+    monkeypatch.setattr(
+        distribution.activepieces_client, "get_flow_id", lambda _channel: "flow"
+    )
+    monkeypatch.setattr(
+        distribution.activepieces_client,
+        "list_flow_runs_since",
+        lambda *_args: [
+            {"id": "run-other", "status": "SUCCEEDED"},
+            {"id": "run-ours", "status": "SUCCEEDED"},
+        ],
+    )
+    monkeypatch.setattr(
+        distribution.activepieces_client,
+        "get_flow_run",
+        lambda run_id: runs[run_id],
+    )
+    monkeypatch.setattr(distribution.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        distribution.db,
+        "update_distribution_job",
+        lambda job_id, **fields: updates.append((job_id, fields)),
+    )
+
+    distribution.fire_job(
+        "job-1", "bluesky", {"text": "hello", "imageUrls": []}
+    )
+
+    assert delivered[0][distribution._DELIVERY_JOB_FIELD] == "job-1"
+    assert updates == [
+        ("job-1", {"status": "sent", "activepieces_run_id": "run-ours"})
+    ]
+
+
+def test_native_mastodon_fire_job_bypasses_activepieces(monkeypatch):
+    updates: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        mastodon_delivery,
+        "publish",
+        lambda _payload, **_kwargs: {
+            "id": "status-1",
+            "media_attachments": [{"id": "media-1", "type": "image"}],
+        },
+    )
+    monkeypatch.setattr(
+        distribution.activepieces_client,
+        "trigger_webhook",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("native Mastodon media reached Activepieces")
+        ),
+    )
+    monkeypatch.setattr(
+        distribution.db,
+        "update_distribution_job",
+        lambda job_id, **fields: updates.append((job_id, fields)),
+    )
+
+    distribution.fire_job(
+        "job-1",
+        "mastodon",
+        {"text": "hello", "imageUrl": "/outputs/post.png"},
+    )
+
+    assert updates == [
+        (
+            "job-1",
+            {"status": "sent", "activepieces_run_id": "mastodon:status-1"},
+        )
+    ]
+
+
+def test_native_mastodon_image_upload_is_attached(monkeypatch):
+    uploaded: list[tuple] = []
+    posted: list[tuple] = []
+    mastodon_delivery.set_credentials("https://example.social", "token")
+    monkeypatch.setattr(
+        mastodon_delivery.image_prompt,
+        "attachment_bytes",
+        lambda _url: ("post.png", b"image"),
+    )
+    monkeypatch.setattr(
+        mastodon_delivery.mastodon,
+        "upload_media",
+        lambda *args, **kwargs: uploaded.append((args, kwargs)) or "media-1",
+    )
+    monkeypatch.setattr(
+        mastodon_delivery.mastodon,
+        "api_post",
+        lambda *args, **kwargs: posted.append((args, kwargs))
+        or {
+            "id": "status-1",
+            "media_attachments": [{"id": "media-1", "type": "image"}],
+        },
+    )
+    try:
+        created = mastodon_delivery.publish(
+            {"text": "hello", "imageUrl": "/outputs/post.png"},
+            idempotency_key="job-1",
+        )
+    finally:
+        mastodon_delivery.set_credentials()
+
+    assert created["media_attachments"][0]["type"] == "image"
+    assert uploaded[0][0][0:4] == (
+        "example.social",
+        "token",
+        "post.png",
+        b"image",
+    )
+    assert posted[0][0][3]["media_ids"] == ["media-1"]
+    assert posted[0][1]["idempotency_key"] == "job-1"
+
+
+def test_native_mastodon_video_upload_is_attached_with_alt_text(monkeypatch):
+    uploaded: list[tuple] = []
+    mastodon_delivery.set_credentials("example.social", "token")
+    monkeypatch.setattr(
+        mastodon_delivery.video_attach,
+        "attachment_bytes",
+        lambda *_args: ("clip.mp4", b"video"),
+    )
+    monkeypatch.setattr(
+        mastodon_delivery.mastodon,
+        "upload_media",
+        lambda *args, **kwargs: uploaded.append((args, kwargs)) or "media-video",
+    )
+    monkeypatch.setattr(
+        mastodon_delivery.mastodon,
+        "api_post",
+        lambda *_args, **_kwargs: {
+            "id": "status-video",
+            "media_attachments": [{"id": "media-video", "type": "video"}],
+        },
+    )
+    try:
+        created = mastodon_delivery.publish(
+            {
+                "text": "hello",
+                "videoUrl": "/outputs/clip.mp4",
+                "videoFileAlt": "A short demo",
+            },
+            idempotency_key="job-video",
+        )
+    finally:
+        mastodon_delivery.set_credentials()
+
+    assert created["media_attachments"][0]["type"] == "video"
+    assert uploaded[0][1]["description"] == "A short demo"
+
+
+def test_native_mastodon_text_only_result_is_deleted_and_failed(monkeypatch):
+    deleted: list[tuple] = []
+    mastodon_delivery.set_credentials("example.social", "token")
+    monkeypatch.setattr(
+        mastodon_delivery.image_prompt,
+        "attachment_bytes",
+        lambda _url: ("post.png", b"image"),
+    )
+    monkeypatch.setattr(
+        mastodon_delivery.mastodon,
+        "upload_media",
+        lambda *_args, **_kwargs: "media-1",
+    )
+    monkeypatch.setattr(
+        mastodon_delivery.mastodon,
+        "api_post",
+        lambda *_args, **_kwargs: {
+            "id": "status-empty",
+            "media_attachments": [],
+        },
+    )
+    monkeypatch.setattr(
+        mastodon_delivery.mastodon,
+        "api_delete",
+        lambda *args: deleted.append(args),
+    )
+    try:
+        with pytest.raises(
+            mastodon_delivery.mastodon.MastodonError,
+            match="without its attachment",
+        ):
+            mastodon_delivery.publish(
+                {"text": "hello", "imageUrl": "/outputs/post.png"},
+                idempotency_key="job-1",
+            )
+    finally:
+        mastodon_delivery.set_credentials()
+
+    assert deleted == [
+        ("example.social", "/api/v1/statuses/status-empty", "token")
+    ]
 
 
 def test_distribution_rejects_image_and_video_together():
