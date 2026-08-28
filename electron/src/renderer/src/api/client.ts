@@ -167,6 +167,9 @@ export function saveToLibrary(input: {
   /** An /outputs URL for a generated image to file alongside the text. Resolved to a real
    *  path by the backend, which refuses anything outside its own outputs tree. */
   imageUrl?: string
+  /** An /outputs URL for an uploaded clip, which shares the row's single file slot with
+   *  the image. Not the YouTube link a composer may also carry. */
+  videoFileUrl?: string
 }): Promise<{ libraryId: string }> {
   return postJson('/library', input)
 }
@@ -183,7 +186,13 @@ export function deleteLibraryItem(id: string): Promise<{ deleted: string }> {
  */
 export function updateLibraryItem(
   id: string,
-  changes: { content?: string; title?: string }
+  changes: {
+    content?: string
+    title?: string
+    subtitle?: string
+    imageUrl?: string
+    videoFileUrl?: string
+  }
 ): Promise<{ item: LibraryItem }> {
   return patchJson(`/library/${id}`, changes)
 }

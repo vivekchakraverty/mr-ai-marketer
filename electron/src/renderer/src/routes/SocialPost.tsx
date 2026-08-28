@@ -537,6 +537,7 @@ export default function SocialPost(): React.JSX.Element {
             videoFileAlt={videoFileAlt}
           />
           <SaveCompositionButton
+            libraryId={result.libraryId}
             tool="Social"
             title={`Bluesky post · ${fields.niche || 'untitled'}`}
             subtitle="Bluesky post"
@@ -544,6 +545,7 @@ export default function SocialPost(): React.JSX.Element {
             tags={keptTags}
             imageUrl={keptImage?.url ?? ''}
             videoUrl={videoUrl}
+            videoFileUrl={videoFile?.url ?? ''}
           />
         </div>
       )}

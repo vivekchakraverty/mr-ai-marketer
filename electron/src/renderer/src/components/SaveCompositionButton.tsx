@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { saveToLibrary } from '../api/client'
+import { saveToLibrary, updateLibraryItem } from '../api/client'
 import { useAppStore } from '../state/store'
 
 /**
@@ -12,17 +12,36 @@ import { useAppStore } from '../state/store'
  * later meant remembering which picture went with which draft.
  *
  * So this writes one row: the post text with the chosen tags appended exactly as they would
- * be published, and the generated image as the row's file. That is also the shape the
- * Library already understands — text plus one attachment — so the entry is editable in place
- * and the picture shows on the card, with nothing new taught to the Library itself.
+ * be published, and the post's attachment — the generated image, or an uploaded clip — as
+ * the row's file. That is also the shape the Library already understands: text plus one
+ * attachment, so the entry is editable in place and the media shows on the card, with
+ * nothing new taught to the Library itself.
+ *
+ * The clip shares that slot rather than getting one of its own because a post carries one
+ * embed; the send path refuses an image and a video together for the same reason. Carrying
+ * it here is what lets a video survive Create → Library → Distribute, which it did not
+ * before: the composer's clip reached Engage and nothing else, so distributing a saved post
+ * meant attaching the file a second time in the send dialog.
  *
  * Separate from SaveButton rather than a flag on it. That one exists to avoid duplicating
- * what a tool already saved, and answers "is this kept?" with a libraryId. This one is
- * always a fresh write, because a composition is only finished once the person says it is —
+ * what a tool already saved, and answers "is this kept?" with a libraryId. This one still
+ * writes whenever asked, because a composition is only finished once the person says it is —
  * and they may well say so twice, having changed the tags.
+ *
+ * Where it writes is the part that took a bug to get right. The Mastodon and Bluesky
+ * generators file a Library row of their own the moment they produce text, and this button
+ * used to add a second one — so a single post arrived as two near-identical cards, the bare
+ * generation and the finished composition. Given that row's `libraryId` it now finishes that
+ * row in place instead: same entry, now carrying the tags and the picture. Saving again after
+ * changing the tags updates it again rather than accumulating cards, and a fresh generation
+ * brings a new libraryId and therefore a new row. Without one (Tumblr, whose generator files
+ * nothing) it still creates the entry itself.
  */
 
 interface Props {
+  /** The row the generator already filed for this text, when there is one. Finished in
+   *  place rather than duplicated; see the note above. */
+  libraryId?: string | null
   /** Library grouping. Social for Bluesky, and for the other two as well: an image or a
    *  post is the same kind of artefact whichever network it was written for. */
   tool: string
@@ -34,19 +53,26 @@ interface Props {
   tags?: string[]
   /** An /outputs URL for the generated image, if one was drawn and kept. */
   imageUrl?: string
-  /** A YouTube link chosen for the post. Kept in the text, since the Library holds one
-   *  file per entry and that slot belongs to the picture. */
+  /** A YouTube link chosen for the post. Kept in the text, because it is a link rather
+   *  than a file and the entry's one file slot is for the real attachment. */
   videoUrl?: string
+  /** An /outputs URL for an uploaded clip. Shares the entry's single file slot with the
+   *  picture — safe because a post carries one embed, which is why the send path refuses
+   *  an image and a video together. The picture wins if somehow both are present, since
+   *  that is the pairing this button has always filed. */
+  videoFileUrl?: string
 }
 
 export default function SaveCompositionButton({
+  libraryId,
   tool,
   title,
   subtitle = '',
   postText,
   tags = [],
   imageUrl = '',
-  videoUrl = ''
+  videoUrl = '',
+  videoFileUrl = ''
 }: Props): React.JSX.Element | null {
   const goLibrary = useAppStore((s) => s.goLibrary)
   const [savedId, setSavedId] = useState('')
@@ -54,9 +80,10 @@ export default function SaveCompositionButton({
 
   // Editing the draft, the tags or the picture makes the saved copy no longer this one, so
   // the button offers to keep the new version rather than claiming the work is already in.
+  // A new generation arrives as a new libraryId and resets it for the same reason.
   useEffect(() => {
     setSavedId('')
-  }, [postText, imageUrl, videoUrl, tags.join(' ')])
+  }, [postText, imageUrl, videoUrl, videoFileUrl, tags.join(' '), libraryId])
 
   if (!postText.trim()) return null
 
@@ -70,11 +97,15 @@ export default function SaveCompositionButton({
   const video = videoUrl.trim()
   const content = video && !body.includes(video) ? `${body}\n\n${video}` : body
 
+  // The clip and the YouTube link are different things and are named differently, so the
+  // button does not claim to be keeping a file when all it has is a link.
+  const clip = !imageUrl && videoFileUrl ? videoFileUrl : ''
   const parts = [
     'post',
     tags.length ? `${tags.length} tag${tags.length === 1 ? '' : 's'}` : '',
     imageUrl ? 'image' : '',
-    video ? 'video' : ''
+    clip ? 'video' : '',
+    video ? 'video link' : ''
   ].filter(Boolean)
 
   const base: React.CSSProperties = {
@@ -115,8 +146,24 @@ export default function SaveCompositionButton({
           ? undefined
           : () => {
               setBusy(true)
-              void saveToLibrary({ tool, title, subtitle, content, imageUrl: imageUrl || undefined })
-                .then((res) => setSavedId(res.libraryId))
+              const written = libraryId
+                ? updateLibraryItem(libraryId, {
+                    title,
+                    subtitle,
+                    content,
+                    imageUrl: imageUrl || undefined,
+                    videoFileUrl: clip || undefined
+                  }).then(() => libraryId)
+                : saveToLibrary({
+                    tool,
+                    title,
+                    subtitle,
+                    content,
+                    imageUrl: imageUrl || undefined,
+                    videoFileUrl: clip || undefined
+                  }).then((res) => res.libraryId)
+              void written
+                .then((id) => setSavedId(id))
                 // The API client raises the error popup itself.
                 .catch(() => undefined)
                 .finally(() => setBusy(false))

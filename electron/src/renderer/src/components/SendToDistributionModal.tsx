@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { fetchDistributionChannels, sendToDistribution, type DistributionJob } from '../api/client'
 import { useAppStore } from '../state/store'
 import BackendImage from './BackendImage'
-import UploadVideoButton, { type ChosenVideo } from './UploadVideoButton'
+import BackendVideo from './BackendVideo'
 import { PLATFORM_SETUP_GUIDES } from '../state/platformSetupGuides'
 import { label, primaryButton, secondaryButtonSmall, tag, textInput, textarea } from '../styles/styleKit'
 
@@ -33,6 +33,9 @@ interface Props {
   title: string
   defaultText: string
   defaultImageUrl?: string
+  /** The clip the entry carries, when its one file is a video rather than a picture.
+   *  There is no picker here any more — see the note on the video block below. */
+  defaultVideoFileUrl?: string
   onClose: () => void
 }
 
@@ -51,6 +54,7 @@ export default function SendToDistributionModal({
   title,
   defaultText,
   defaultImageUrl = '',
+  defaultVideoFileUrl = '',
   onClose
 }: Props): React.JSX.Element {
   const [loading, setLoading] = useState(true)
@@ -61,7 +65,6 @@ export default function SendToDistributionModal({
   const [channelId, setChannelId] = useState('')
   const [pageId, setPageId] = useState('')
   const [imageUrl, setImageUrl] = useState(defaultImageUrl)
-  const [videoFile, setVideoFile] = useState<ChosenVideo | null>(null)
   const [videoFileAlt, setVideoFileAlt] = useState('')
   const [to, setTo] = useState('')
   const [from, setFrom] = useState('')
@@ -122,13 +125,11 @@ export default function SendToDistributionModal({
   const supportsImage = imageChannels.length > 0
   const videoChannels = selected.filter((c) => ['bluesky', 'mastodon'].includes(c))
   const supportsVideo = videoChannels.length > 0
-  const videoNetwork = selected.includes('mastodon') ? 'mastodon' : 'bluesky'
-  useEffect(() => {
-    if (!supportsVideo) {
-      setVideoFile(null)
-      setVideoFileAlt('')
-    }
-  }, [supportsVideo])
+  // The clip is the entry's, not this dialog's, so there is nothing to hold in state: it
+  // applies when a ticked channel takes video and no image has been chosen instead. A post
+  // carries one embed, so picking an image supersedes the clip for this send rather than
+  // being refused as a conflict — untick the image and the clip comes back.
+  const videoFileUrl = supportsVideo && !imageUrl.trim() ? defaultVideoFileUrl : ''
   // The limits in play for what is currently ticked, and which of them this text breaks.
   const limited = selected
     .filter((c) => CHANNEL_LIMITS[c])
@@ -147,7 +148,6 @@ export default function SendToDistributionModal({
     if (needsChannelId && !channelId.trim()) return 'Discord channel ID is required.'
     if (needsPageId && !pageId.trim()) return 'Page ID is required.'
     if (needsImageUrl && !imageUrl.trim()) return 'Instagram needs an image URL.'
-    if (imageUrl.trim() && supportsVideo && videoFile) return 'Attach either an image or a video, not both.'
     if (needsEmail && (!to.trim() || !from.trim())) return 'Email needs both To and From addresses.'
     if (needsReddit && (!subreddit.trim() || !redditTitle.trim())) return 'Reddit needs a subreddit and a post title.'
     if (schedule) {
@@ -173,8 +173,8 @@ export default function SendToDistributionModal({
         channelId: needsChannelId ? channelId : undefined,
         pageId: needsPageId ? pageId : undefined,
         imageUrl: supportsImage ? imageUrl.trim() || undefined : undefined,
-        videoFileUrl: supportsVideo ? videoFile?.url : undefined,
-        videoFileAlt: supportsVideo && videoFile ? videoFileAlt.trim() : undefined,
+        videoFileUrl: videoFileUrl || undefined,
+        videoFileAlt: videoFileUrl ? videoFileAlt.trim() : undefined,
         to: needsEmail ? to : undefined,
         from: needsEmail ? from : undefined,
         subject: needsEmail ? subject : undefined,
@@ -317,12 +317,7 @@ export default function SendToDistributionModal({
                         key={img.url}
                         title={img.title}
                         onClick={() => {
-                          const next = imageUrl === img.url ? '' : img.url
-                          setImageUrl(next)
-                          if (next) {
-                            setVideoFile(null)
-                            setVideoFileAlt('')
-                          }
+                          setImageUrl(imageUrl === img.url ? '' : img.url)
                         }}
                         style={{
                           width: 74,
@@ -348,13 +343,7 @@ export default function SendToDistributionModal({
                 )}
                 <input
                   value={imageUrl}
-                  onChange={(e) => {
-                    setImageUrl(e.target.value)
-                    if (e.target.value.trim()) {
-                      setVideoFile(null)
-                      setVideoFileAlt('')
-                    }
-                  }}
+                  onChange={(e) => setImageUrl(e.target.value)}
                   style={textInput}
                   placeholder="Pick one above, or paste a public image URL"
                 />
@@ -378,27 +367,38 @@ export default function SendToDistributionModal({
                       : ' Bluesky requires pasted public images to already be under 1MB.'
                     : ''}
                 </div>
-                {videoChannels.length > 0 && (
+                {/* No picker here. A clip is chosen once, in the composer that wrote the
+                    post, and travels with the entry — this dialog shows what is attached
+                    rather than offering a second place to attach it. The upload button that
+                    used to sit here was the only way a video reached Distribute at all,
+                    which meant re-picking the same file after composing with it. */}
+                {videoChannels.length > 0 && defaultVideoFileUrl && (
                   <>
                     <div style={{ borderTop: '2px dashed var(--border-soft)', marginTop: 12 }} />
-                    <UploadVideoButton
-                      network={videoNetwork}
-                      value={videoFile}
-                      onChange={(video) => {
-                        if (!video || video.url !== videoFile?.url) setVideoFileAlt('')
-                        setVideoFile(video)
-                        if (video) setImageUrl('')
-                      }}
-                      alt={videoFileAlt}
-                      onAltChange={setVideoFileAlt}
-                      disabled={sending}
-                    />
-                    {videoFile && (
-                      <div style={{ font: "600 11.5px/1.5 'Quicksand'", color: 'var(--ink-faint)', marginTop: 4 }}>
-                        Will be attached on {videoChannels.join(', ')}.
-                        {selected.includes('mastodon') && videoFileAlt.trim()
-                          ? ' Alt text is carried by Bluesky; the current Mastodon connector does not expose an alt-text field.'
-                          : ''}
+                    <div style={{ font: "700 11px 'Quicksand'", color: 'var(--ink-fainter)', margin: '10px 0 6px' }}>
+                      Video attached in the composer
+                    </div>
+                    {videoFileUrl ? (
+                      <>
+                        <BackendVideo url={videoFileUrl} alt={videoFileAlt} />
+                        <input
+                          value={videoFileAlt}
+                          disabled={sending}
+                          onChange={(e) => setVideoFileAlt(e.target.value)}
+                          placeholder="Describe the video for people who can't see it (optional)"
+                          style={{ ...textInput, marginTop: 8 }}
+                        />
+                        <div style={{ font: "600 11.5px/1.5 'Quicksand'", color: 'var(--ink-faint)', marginTop: 4 }}>
+                          Will be attached on {videoChannels.join(', ')}.
+                          {selected.includes('mastodon') && videoFileAlt.trim()
+                            ? ' Alt text is carried by Bluesky; the current Mastodon connector does not expose an alt-text field.'
+                            : ''}
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ font: "600 11.5px/1.5 'Quicksand'", color: 'var(--ink-faint)' }}>
+                        Held back while an image is chosen — a post carries one embed. Clear
+                        the image above to send the video instead.
                       </div>
                     )}
                   </>

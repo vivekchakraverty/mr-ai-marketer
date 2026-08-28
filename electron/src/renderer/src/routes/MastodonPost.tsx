@@ -541,12 +541,15 @@ export default function MastodonPost(): React.JSX.Element {
             videoFileAlt={videoFileAlt}
           />
           <SaveCompositionButton
+                libraryId={result.libraryId}
                 tool="Social"
                 title={`Mastodon post · ${fields.niche || 'untitled'}`}
                 subtitle="Mastodon post"
                 postText={result.text}
                 tags={keptTags}
                 imageUrl={keptImage?.url ?? ''}
+                videoUrl={videoUrl}
+                videoFileUrl={videoFile?.url ?? ''}
               />
             </div>
           )}

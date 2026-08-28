@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAppStore } from '../state/store'
 import BackendImage from '../components/BackendImage'
+import BackendVideo from '../components/BackendVideo'
 import EditableContent from '../components/EditableContent'
 import SendToDistributionModal from '../components/SendToDistributionModal'
 import { paperCard, primaryButtonSmall, tag } from '../styles/styleKit'
@@ -13,11 +14,14 @@ export default function Reader(): React.JSX.Element | null {
   if (!item) return null
 
   // output_path is an absolute file path; /outputs is how the backend serves that tree.
-  // Only images can be shown inline — a .docx has nothing to render.
+  // Pictures and clips can be shown inline — a .docx has nothing to render.
   const outputs = item.output_path?.replace(/\\/g, '/') ?? ''
-  const imageUrl = /\.(png|jpe?g|webp|gif)$/i.test(outputs)
-    ? '/outputs/' + outputs.split('/outputs/').slice(1).join('/outputs/')
-    : ''
+  const served = '/outputs/' + outputs.split('/outputs/').slice(1).join('/outputs/')
+  const imageUrl = /\.(png|jpe?g|webp|gif)$/i.test(outputs) ? served : ''
+  // A composed post files its clip in the same slot the picture uses, so an entry carries
+  // one or the other. Recognising it here is what carries a video through to the send
+  // dialog, which otherwise has no way to know the post ever had one.
+  const videoFileUrl = /\.(mp4|mov|m4v|webm)$/i.test(outputs) ? served : ''
 
   return (
     <div style={{ maxWidth: 840, margin: '0 auto', padding: '26px 34px 60px' }}>
@@ -50,6 +54,10 @@ export default function Reader(): React.JSX.Element | null {
               }}
             />
           </div>
+        ) : videoFileUrl ? (
+          <div style={{ marginTop: 16 }}>
+            <BackendVideo url={videoFileUrl} alt={item.title} style={{ maxWidth: '100%' }} />
+          </div>
         ) : (
           item.output_path && (
             <p style={{ font: "600 13px/1.7 'Quicksand'", color: 'var(--ink-faint)', margin: '14px 0 0' }}>
@@ -77,6 +85,7 @@ export default function Reader(): React.JSX.Element | null {
           title={item.title}
           defaultText={item.content ?? ''}
           defaultImageUrl={imageUrl}
+          defaultVideoFileUrl={videoFileUrl}
           onClose={() => setShowSend(false)}
         />
       )}

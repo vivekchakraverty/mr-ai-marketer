@@ -306,7 +306,14 @@ def count_items() -> int:
         return conn.execute("SELECT COUNT(*) FROM library").fetchone()[0]
 
 
-def update_item(item_id: str, *, content: Optional[str] = None, title: Optional[str] = None):
+def update_item(
+    item_id: str,
+    *,
+    content: Optional[str] = None,
+    title: Optional[str] = None,
+    subtitle: Optional[str] = None,
+    output_path: Optional[str] = None,
+):
     """Edit a saved item in place. Returns the updated row, or None if it is gone.
 
     Only the fields passed are touched, so an autosaving editor can send content alone
@@ -318,7 +325,9 @@ def update_item(item_id: str, *, content: Optional[str] = None, title: Optional[
 
     A file at output_path is not rewritten. That document belongs to the tool that
     produced it, and this column is the note about it — silently editing one to match the
-    other would be a guess about which the user meant.
+    other would be a guess about which the user meant. Repointing the note *is* allowed,
+    which is how a composition attaches its picture to the row its generation already
+    filed; the previously named file is left on disk untouched.
     """
     sets: list[str] = []
     values: list[str] = []
@@ -328,6 +337,12 @@ def update_item(item_id: str, *, content: Optional[str] = None, title: Optional[
     if title is not None:
         sets.append("title = ?")
         values.append(title)
+    if subtitle is not None:
+        sets.append("subtitle = ?")
+        values.append(subtitle)
+    if output_path is not None:
+        sets.append("output_path = ?")
+        values.append(output_path)
     if not sets:
         return get_item(item_id)
 

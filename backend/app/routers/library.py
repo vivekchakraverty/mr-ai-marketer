@@ -17,6 +17,47 @@ class SaveRequest(BaseModel):
     #: here through the same containment check the share links use, so a caller cannot
     #: name a file outside the outputs tree.
     imageUrl: str | None = None
+    #: An /outputs URL for an uploaded clip, filed the same way and into the same slot.
+    #: Not the YouTube link a composer may also carry — that one lives in the text.
+    videoFileUrl: str | None = None
+
+
+def _attachment_output_path(url: str, noun: str) -> str:
+    """The local file an /outputs URL names, refusing anything outside the tree.
+
+    Shared by save and update, and by both kinds of attachment, so a picture or a clip
+    filed against an existing row goes through the same containment check as one filed at
+    save time. `noun` only shapes the refusal message.
+    """
+    from ..services import share_links
+
+    resolved = share_links.path_from_outputs_url(url)
+    if resolved is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"That {noun} is not one this app is holding, so it cannot be saved.",
+        )
+    return str(resolved)
+
+
+def _attachment_from(image_url: str | None, video_file_url: str | None) -> str | None:
+    """The single file a row carries, from whichever attachment the caller named.
+
+    A row holds one file, and a post carries one embed — the distribution send path
+    refuses an image and a video together for exactly that reason — so the two share the
+    slot rather than needing a column each. Naming both here is a caller bug, not a
+    choice to resolve silently.
+    """
+    if image_url and video_file_url:
+        raise HTTPException(
+            status_code=400,
+            detail="An entry holds one file: attach either an image or a video, not both.",
+        )
+    if image_url:
+        return _attachment_output_path(image_url, "image")
+    if video_file_url:
+        return _attachment_output_path(video_file_url, "video")
+    return None
 
 
 @router.get("")
@@ -37,17 +78,7 @@ def save_library_item(body: SaveRequest) -> dict:
     title = body.title.strip()
     content = body.content.strip()
 
-    output_path = body.outputPath
-    if body.imageUrl:
-        from ..services import share_links
-
-        resolved = share_links.path_from_outputs_url(body.imageUrl)
-        if resolved is None:
-            raise HTTPException(
-                status_code=400,
-                detail="That image is not one this app generated, so it cannot be saved.",
-            )
-        output_path = str(resolved)
+    output_path = _attachment_from(body.imageUrl, body.videoFileUrl) or body.outputPath
 
     if not content and not output_path:
         raise HTTPException(status_code=400, detail="Nothing to save.")
@@ -73,6 +104,14 @@ class UpdateRequest(BaseModel):
     #: Omitted fields are left alone, so an autosaving editor can send content by itself.
     content: str | None = None
     title: str | None = None
+    #: Set when a caller is finishing a row a tool filed for it — see the composition save
+    #: in the post composers, which turns the bare generation into the finished post.
+    subtitle: str | None = None
+    #: An /outputs URL for a picture to file against this row, resolved through the same
+    #: containment check as the save path.
+    imageUrl: str | None = None
+    #: An /outputs URL for an uploaded clip, sharing the row's single file slot.
+    videoFileUrl: str | None = None
 
 
 @router.patch("/{item_id}")
@@ -84,7 +123,13 @@ def update_library_item(item_id: str, body: UpdateRequest) -> dict:
     anything worth keeping, but by the time an item exists that judgement has been made,
     and clearing a box the user deliberately emptied is not this endpoint's call.
     """
-    updated = db.update_item(item_id, content=body.content, title=body.title)
+    updated = db.update_item(
+        item_id,
+        content=body.content,
+        title=body.title,
+        subtitle=body.subtitle,
+        output_path=_attachment_from(body.imageUrl, body.videoFileUrl),
+    )
     if not updated:
         raise HTTPException(status_code=404, detail="Not found")
     return {"item": updated}

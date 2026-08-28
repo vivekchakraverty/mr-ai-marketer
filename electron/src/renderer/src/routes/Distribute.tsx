@@ -15,6 +15,7 @@ import {
 import AddChannelModal from '../components/AddChannelModal'
 import ApprovalQueueCard from '../components/ApprovalQueueCard'
 import BackendImage from '../components/BackendImage'
+import BackendVideo from '../components/BackendVideo'
 import ChannelConnectModal from '../components/ChannelConnectModal'
 import MailComposer from '../components/MailComposer'
 import {
@@ -667,7 +668,15 @@ function JobDetails({ job }: { job: DistributionJob }): React.JSX.Element {
           <div style={{ font: "700 11px 'Quicksand'", letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink-faint)', marginBottom: 5 }}>
             Video
           </div>
-          <div style={{ font: "600 12.5px 'Quicksand'", color: 'var(--ink-muted)', wordBreak: 'break-all' }}>{videoUrl}</div>
+          {/* Same split as the image above: a clip this app is holding gets played here,
+              anything else is somebody else's URL and is shown as one. A path on its own
+              answered "was a video attached?" but never "which one, and is it the right
+              cut?" — which is the question a send history is looked at to settle. */}
+          {videoUrl.startsWith('/outputs/') ? (
+            <BackendVideo url={videoUrl} alt={videoAlt} />
+          ) : (
+            <div style={{ font: "600 12.5px 'Quicksand'", color: 'var(--ink-muted)', wordBreak: 'break-all' }}>{videoUrl}</div>
+          )}
           {videoAlt && (
             <div style={{ font: "600 12px/1.5 'Quicksand'", color: 'var(--ink-faint)', marginTop: 4 }}>
               Alt text: {videoAlt}
