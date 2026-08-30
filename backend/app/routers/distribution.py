@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import db
-from ..services import activepieces_client, mastodon_delivery
+from ..services import activepieces_client, generation_link, mastodon_delivery
 from ..services.activepieces_client import ActivepiecesError
 
 router = APIRouter(prefix="/distribution", tags=["distribution"])
@@ -1046,6 +1046,11 @@ def _scheduler_loop() -> None:
                 + db.list_distribution_jobs(status="pending_approval")
             ):
                 _reconcile_job(job)
+            # Trace posts that have gone out back to the drafts that wrote them, which is
+            # what the Social Post learning loop measures. Runs here rather than at send
+            # time so a slow or failed lookup is never reported as a publishing problem,
+            # and costs nothing — not even an import — when there is nothing to link.
+            generation_link.link_sent_bluesky_posts()
         except Exception:  # noqa: BLE001 — a bad tick must not kill the scheduler thread
             pass
         time.sleep(30)

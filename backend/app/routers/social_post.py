@@ -556,6 +556,10 @@ def generate(body: GenerateRequest) -> GenerateResponse:
         subtitle=f"{body.platform} · {body.niche}",
         content=result.text,
     )
+    # The one moment both identities are in the same place. Without this edge a published
+    # post can never be traced back to the draft that wrote it, which is what the learning
+    # loop measures — see services/generation_link.py.
+    db.record_generation_link(item["id"], result.generation_id, body.platform, body.niche)
 
     return GenerateResponse(
         text=result.text,

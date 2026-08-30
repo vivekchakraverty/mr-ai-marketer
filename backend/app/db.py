@@ -236,6 +236,30 @@ CREATE TABLE IF NOT EXISTS custom_channels (
     input_map TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+-- Which draft became which Library entry, so a post that actually goes out can be traced
+-- back to the generation that wrote it.
+--
+-- WHY THIS EXISTS. The Social Post generator's learning loop only judges generations that
+-- carry a `posted_uri`, and the only way to set one was a /published call the app never
+-- made — 94 generations, none linked, so the snapshot job that runs hourly had nothing to
+-- measure. Nothing in the two databases connected the pieces: the generation lives in the
+-- vendored corpus DB and knows nothing about Library rows, while a distribution job knows
+-- its Library row and its published post but not which draft produced the text.
+--
+-- This is that missing edge, and it is deliberately app-side: the vendored schema is
+-- shared with the standalone collector and should not grow a column about Library entries.
+-- `posted_uri` here is a local record of what was linked, so the sweep can tell a job it
+-- has already handled from one it has not.
+CREATE TABLE IF NOT EXISTS generation_links (
+    library_item_id TEXT PRIMARY KEY,
+    generation_id INTEGER NOT NULL,
+    platform TEXT NOT NULL,
+    niche TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    posted_uri TEXT,
+    linked_at TEXT
+);
 """
 
 
@@ -1005,3 +1029,58 @@ def community_revenue() -> dict:
             "SELECT COUNT(*) FROM community_members WHERE status = 'active'"
         ).fetchone()[0]
     return {"totalStars": total, "payments": count, "activeMembers": active}
+
+
+# --- generation links ------------------------------------------------------
+# See the generation_links comment in the schema above for why this edge exists.
+
+
+def record_generation_link(
+    library_item_id: str, generation_id: int, platform: str, niche: str
+) -> None:
+    """Remember which draft a Library entry came from.
+
+    Written at generation time because that is the only moment both ids are in the same
+    place. INSERT OR REPLACE rather than INSERT: regenerating into the same entry is the
+    normal way to work, and the newest draft is the one that will be published.
+    """
+    with _connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO generation_links "
+            "(library_item_id, generation_id, platform, niche, created_at, posted_uri, linked_at) "
+            "VALUES (?, ?, ?, ?, ?, NULL, NULL)",
+            (
+                library_item_id,
+                int(generation_id),
+                platform,
+                niche,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+
+
+def unlinked_generation_links(platform: str, limit: int = 25) -> list[dict]:
+    """Drafts whose published post has not been traced back to them yet.
+
+    Only those with a distribution job that actually went out: a draft nobody sent has
+    nothing to link, and would otherwise be re-examined on every sweep forever.
+    """
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT g.*, j.id AS job_id, j.activepieces_run_id "
+            "FROM generation_links g "
+            "JOIN distribution_jobs j ON j.library_item_id = g.library_item_id "
+            "WHERE g.posted_uri IS NULL AND g.platform = ? "
+            "  AND j.channel = ? AND j.status = 'sent' "
+            "ORDER BY j.updated_at DESC LIMIT ?",
+            (platform, platform, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def mark_generation_linked(library_item_id: str, posted_uri: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE generation_links SET posted_uri = ?, linked_at = ? WHERE library_item_id = ?",
+            (posted_uri, datetime.now(timezone.utc).isoformat(), library_item_id),
+        )
