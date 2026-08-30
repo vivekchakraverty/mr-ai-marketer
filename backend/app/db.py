@@ -258,7 +258,10 @@ CREATE TABLE IF NOT EXISTS generation_links (
     niche TEXT NOT NULL,
     created_at TEXT NOT NULL,
     posted_uri TEXT,
-    linked_at TEXT
+    linked_at TEXT,
+    -- Mastodon only: which server the draft was written for. A status id means nothing
+    -- without the host that issued it, and the corpus key encodes the instance too.
+    instance TEXT
 );
 """
 
@@ -276,6 +279,9 @@ def init_db() -> None:
         # a release need widening explicitly or an upgraded install keeps the old shape.
         for column in ("gated_chat_id", "gated_chat_title", "gated_invite_link"):
             _ensure_column(conn, "community_config", column, "TEXT NOT NULL DEFAULT ''")
+        # generation_links shipped in 0.7.11 without this; an install upgraded from it
+        # keeps the old shape until the column is added.
+        _ensure_column(conn, "generation_links", "instance", "TEXT")
 
 
 @contextmanager
@@ -1036,7 +1042,11 @@ def community_revenue() -> dict:
 
 
 def record_generation_link(
-    library_item_id: str, generation_id: int, platform: str, niche: str
+    library_item_id: str,
+    generation_id: int,
+    platform: str,
+    niche: str,
+    instance: str = "",
 ) -> None:
     """Remember which draft a Library entry came from.
 
@@ -1047,14 +1057,16 @@ def record_generation_link(
     with _connect() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO generation_links "
-            "(library_item_id, generation_id, platform, niche, created_at, posted_uri, linked_at) "
-            "VALUES (?, ?, ?, ?, ?, NULL, NULL)",
+            "(library_item_id, generation_id, platform, niche, created_at, posted_uri, "
+            "linked_at, instance) "
+            "VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)",
             (
                 library_item_id,
                 int(generation_id),
                 platform,
                 niche,
                 datetime.now(timezone.utc).isoformat(),
+                instance,
             ),
         )
 

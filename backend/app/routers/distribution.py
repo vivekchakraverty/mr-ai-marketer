@@ -1051,6 +1051,8 @@ def _scheduler_loop() -> None:
             # time so a slow or failed lookup is never reported as a publishing problem,
             # and costs nothing — not even an import — when there is nothing to link.
             generation_link.link_sent_bluesky_posts()
+            generation_link.link_sent_mastodon_posts()
+            generation_link.link_sent_mastodon_posts()
         except Exception:  # noqa: BLE001 — a bad tick must not kill the scheduler thread
             pass
         time.sleep(30)

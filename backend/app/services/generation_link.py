@@ -18,8 +18,11 @@ the middle of publishing, where a slow or failed call would be reported as a sen
 which it is not. A sweep retries on the next tick instead, and a post whose run has been
 purged simply never links rather than failing anything.
 
-DELIBERATELY BLUESKY ONLY. Mastodon and Tumblr have their own loops with their own
-measurement paths; this is the one that was never connected.
+BLUESKY AND MASTODON. Both publish through Distribute, so the app knows the published post
+without being told — a Bluesky at:// URI from the automation run's output, a Mastodon status
+id straight off the delivery record when the native uploader sent it. Tumblr is not a
+Distribute channel at all, so there is no publish event here to hook; its loop still closes
+through the composer's own "I posted this" step.
 """
 
 from __future__ import annotations
@@ -89,4 +92,68 @@ def link_sent_bluesky_posts(limit: int = _BATCH) -> int:
 
     if linked:
         log.info("[generation-link] linked %d published post(s) to their drafts", linked)
+    return linked
+
+
+def _mastodon_status_id(run_id: str) -> str:
+    """The status id behind a sent Mastodon job, from whichever path published it.
+
+    Media posts go out through the app's own uploader, which records `mastodon:<id>` as the
+    delivery reference — the id is simply there. A text-only post goes through the
+    automation engine instead, and its id has to be read out of the run.
+    """
+    if run_id.startswith("mastodon:"):
+        return run_id.split(":", 1)[1]
+
+    from . import activepieces_client
+
+    try:
+        run = activepieces_client.get_flow_run(run_id)
+    except activepieces_client.ActivepiecesError as err:
+        log.info("[generation-link] run %s unreadable: %s", run_id, err)
+        return ""
+    output = ((run.get("steps") or {}).get("post_to_mastodon") or {}).get("output") or {}
+    status_id = ((output.get("body") or {}).get("id")) or ""
+    return str(status_id) if status_id else ""
+
+
+def link_sent_mastodon_posts(limit: int = _BATCH) -> int:
+    """Attach published toots to the drafts that produced them.
+
+    The manual path asks for the post's link and an access token, because a URL is not
+    addressable — engagement has to be re-read by the id the instance assigned, which only
+    an authenticated search can resolve. None of that applies here: the app published the
+    post, so it has the id, and a public status reads back without a token.
+    """
+    pending = db.unlinked_generation_links("mastodon", limit)
+    if not pending:
+        return 0
+
+    from . import mastodon as masto
+    from ..routers import mastodon_post
+
+    linked = 0
+    for row in pending:
+        run_id = row.get("activepieces_run_id") or ""
+        host = (row.get("instance") or "").strip()
+        if not run_id or not host:
+            continue
+        status_id = _mastodon_status_id(run_id)
+        if not status_id:
+            continue
+        try:
+            status = masto.get_status(host, status_id)
+            if status is None:
+                continue
+            result = mastodon_post.link_published_status(
+                status, host, row["niche"], int(row["generation_id"])
+            )
+        except Exception as err:  # noqa: BLE001 — retried on the next tick
+            log.info("[generation-link] could not link mastodon %s: %s", status_id, err)
+            continue
+        db.mark_generation_linked(row["library_item_id"], result["postedUri"])
+        linked += 1
+
+    if linked:
+        log.info("[generation-link] linked %d published toot(s) to their drafts", linked)
     return linked

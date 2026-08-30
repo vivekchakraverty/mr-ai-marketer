@@ -138,6 +138,12 @@ export default function Distribute(): React.JSX.Element {
   // question ("what went out?", "why did that fail?"), not browsed side by side.
   const [expandedJob, setExpandedJob] = useState<string | null>(null)
   const [cancellingJob, setCancellingJob] = useState<string | null>(null)
+  // Which row is asking "are you sure?". Confirmed inline rather than through
+  // window.confirm: that is a native Chromium dialog, and in Electron putting one up
+  // leaves the date picker in the send dialog unable to open — the page keeps working,
+  // the picker does not, which reads as scheduling breaking after a cancel. An in-page
+  // confirmation asks the same question without a popup being involved at all.
+  const [confirmingJob, setConfirmingJob] = useState<string | null>(null)
   const [cancelError, setCancelError] = useState('')
   const historyRefreshSequence = useRef(0)
   const [customChannels, setCustomChannels] = useState<CustomChannelStatus[]>([])
@@ -248,15 +254,7 @@ export default function Distribute(): React.JSX.Element {
 
   async function handleCancelScheduled(job: DistributionJob): Promise<void> {
     if (cancellingJob) return
-    const label =
-      PLATFORM_SETUP_GUIDES[job.channel]?.label ??
-      customChannels.find((channel) => channel.channel === job.channel)?.label ??
-      job.channel
-    const timing = job.scheduled_at
-      ? ` scheduled for ${formatScheduledDate(job.scheduled_at)}`
-      : ''
-    if (!window.confirm(`Cancel the ${label} post${timing}? It will not be published.`)) return
-
+    setConfirmingJob(null)
     setCancellingJob(job.id)
     setCancelError('')
     try {
@@ -510,7 +508,53 @@ export default function Distribute(): React.JSX.Element {
                     <span style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-faint)', whiteSpace: 'nowrap' }}>
                       {rowTimestamp}
                     </span>
-                    {job.status === 'scheduled' && (
+                    {job.status === 'scheduled' && confirmingJob === job.id && !cancelling && (
+                      <span
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <span style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-muted)' }}>
+                          Cancel this post?
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void handleCancelScheduled(job)
+                          }}
+                          style={{
+                            border: 0,
+                            borderRadius: 8,
+                            padding: '3px 10px',
+                            background: 'var(--danger-ink)',
+                            color: 'var(--surface)',
+                            font: "700 11.5px 'Quicksand'",
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Yes
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            setConfirmingJob(null)
+                          }}
+                          style={{
+                            border: 0,
+                            borderRadius: 8,
+                            padding: '3px 10px',
+                            background: 'transparent',
+                            color: 'var(--ink-muted)',
+                            font: "700 11.5px 'Quicksand'",
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Keep
+                        </button>
+                      </span>
+                    )}
+                    {job.status === 'scheduled' && (confirmingJob !== job.id || cancelling) && (
                       <button
                         type="button"
                         className="cancel-scheduled-post-button"
@@ -520,7 +564,7 @@ export default function Distribute(): React.JSX.Element {
                         disabled={Boolean(cancellingJob)}
                         onClick={(event) => {
                           event.stopPropagation()
-                          void handleCancelScheduled(job)
+                          setConfirmingJob(job.id)
                         }}
                         style={{
                           width: 24,

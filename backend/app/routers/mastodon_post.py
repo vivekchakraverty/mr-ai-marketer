@@ -826,6 +826,86 @@ def _follower_counts(dids: set[str]) -> dict[str, int]:
     return out
 
 
+#: Pool slots held for the user's own published posts, when they have one that qualifies.
+#
+# One, for the same reason the Tumblr tool reserves one: the point is that the generator sees
+# *an* example of what worked for this account, not that the pool fills up with self-imitation.
+RESERVED_OWN_SLOTS = 1
+
+
+def _own_post_uris(key: str) -> set[str]:
+    """Toots the user published from a draft, in this niche.
+
+    `generations.posted_uri` is the record of that — written by /published when the link is
+    pasted in, and by the automatic sweep in services/generation_link.py when the app was
+    what published it.
+    """
+    spg_db, _, _ = _spg()
+    rows = (
+        spg_db.get_client()
+        .table("generations")
+        .select("posted_uri, niche")
+        .eq("niche", key)
+        .execute()
+        .data
+        or []
+    )
+    return {
+        row["posted_uri"]
+        for row in rows
+        if (row.get("posted_uri") or "").startswith("mastodon://")
+    }
+
+
+def _reserve_own_slot(
+    chosen: list[tuple[float, dict]], scored: list[tuple[float, dict]], key: str
+) -> list[tuple[float, dict]]:
+    """Give the user's best qualifying toot a slot, displacing the weakest earned entry.
+
+    WHY A RESERVED SLOT RATHER THAN FAIR COMPETITION. Ranking divides interactions by
+    followers plus RANKING_FOLLOWER_PRIOR, which is right for comparing strangers and
+    hopeless for a new account: three followers against a prior of 292 means a post that did
+    genuinely well for this account still scores near zero beside a corpus of posts that did
+    well for accounts with thousands. Without a reserved slot the generator would never once
+    be shown something that worked for the person using it.
+
+    DELIBERATELY NOT A BYPASS OF THE FLOORS. `scored` has already dropped anything under
+    MIN_EXEMPLAR_INTERACTIONS or without real prose, so a post nobody reacted to gets no slot
+    — reserving one for a flop would teach the generator to write like a post that did not
+    work, which is exactly what those floors exist to prevent.
+
+    A no-op when the user has published nothing here, when nothing they published clears the
+    floors, or when their post already made the pool on merit.
+    """
+    if not chosen:
+        return chosen
+    own_uris = _own_post_uris(key)
+    if not own_uris:
+        return chosen
+    if sum(1 for _, post in chosen if post["uri"] in own_uris) >= RESERVED_OWN_SLOTS:
+        return chosen
+
+    best_own = next((pair for pair in scored if pair[1]["uri"] in own_uris), None)
+    if best_own is None:
+        return chosen
+
+    # Drop the weakest earned entry rather than growing the pool. Trimmed against the pool
+    # actually handed over, not against TARGET_POOL_SIZE: a niche that scored fewer posts
+    # than the target would otherwise gain an entry instead of trading one, and the pool is
+    # a budget on what rides in the prompt rather than a target to reach.
+    kept = [pair for pair in chosen if pair[1]["uri"] != best_own[1]["uri"]]
+    kept = kept[: max(0, len(chosen) - RESERVED_OWN_SLOTS)]
+    log.info(
+        "[mastodon-post] %s: reserving a pool slot for the user's own %s (score %.6f vs "
+        "pool best %.6f)",
+        key,
+        best_own[1]["uri"],
+        best_own[0],
+        chosen[0][0],
+    )
+    return [best_own, *kept]
+
+
 def _rebuild_pool(niche: str, host: str) -> int:
     """Replace the niche's Mastodon exemplar pool from everything measured so far.
 
@@ -896,7 +976,7 @@ def _rebuild_pool(niche: str, host: str) -> int:
         return 0
 
     scored.sort(key=lambda pair: pair[0], reverse=True)
-    chosen = scored[:TARGET_POOL_SIZE]
+    chosen = _reserve_own_slot(scored[:TARGET_POOL_SIZE], scored, key)
     vectors = embeddings.embed([p["text"] for _, p in chosen])
 
     client.table("exemplars").update({"active": False}).eq("niche", key).eq(
@@ -1184,6 +1264,12 @@ def generate(body: GenerateRequest) -> GenerateResponse:
         content=text,
     )
 
+    # The one moment the draft's identity and its Library entry are both in hand. The
+    # instance rides along because a status id means nothing without the host that issued
+    # it — see services/generation_link.py, which closes the loop from the other end.
+    if generation_id:
+        db.record_generation_link(item["id"], generation_id, PLATFORM, body.niche, host)
+
     meta = db.get_mastodon_post_meta([e["post_uri"] for e in exemplars])
     return GenerateResponse(
         text=text,
@@ -1311,7 +1397,19 @@ def mark_published(body: PublishedRequest) -> dict:
             ),
         )
 
-    key = _corpus_niche(body.niche, host)
+    return link_published_status(status, host, body.niche, body.generationId)
+
+
+def link_published_status(status, host: str, niche: str, generation_id: int) -> dict:
+    """Record that a published toot came from a draft, and make it measurable.
+
+    Shared by /published — where the user pastes the link — and by the automatic sweep in
+    services/generation_link.py, which knows the status id already because the app was what
+    published it. One implementation so a post linked automatically lands in exactly the
+    same shape as one linked by hand.
+    """
+    spg_db, _, _ = _spg()
+    key = _corpus_niche(niche, host)
     uri = masto.corpus_uri(host, status.id)
     now = spg_db.utcnow()
 
@@ -1359,7 +1457,7 @@ def mark_published(body: PublishedRequest) -> dict:
         ]
     )
     spg_db.get_client().table("generations").update({"posted_uri": uri}).eq(
-        "id", body.generationId
+        "id", generation_id
     ).execute()
 
     return {"postedUri": uri, "webUrl": status.url}
