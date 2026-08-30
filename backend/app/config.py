@@ -91,15 +91,26 @@ ACTIVEPIECES_URL = "http://127.0.0.1:8081"
 # Hugging Face Space, one tool reads a RAG index from an HF Dataset, and mail tracking uses
 # a small Space as its pixel/redirect host. Each of those is *your own* deployment.
 #
-# There are deliberately no defaults. An earlier version hardcoded the original author's
-# Space ids, which meant anyone who cloned this repo silently sent their generation traffic
-# to someone else's account — burning that person's quota, and breaking the moment they
-# rotated or deleted anything. Deploy your own (see the README) and point these at them.
+# Every one of these is overridable from Settings, which hands the value over when the
+# backend starts. Set one there and it wins over anything written here.
+#
+# Most have no default on purpose. A hardcoded id means anyone who clones this repo sends
+# their generation traffic to someone else's account — burning that person's quota, and
+# breaking the moment they rename or delete the Space. Deploy your own (see the README) and
+# point these at it.
 #
 # Empty is a valid state: the tool that needs one says so clearly instead of failing deep
 # inside an HTTP call.
 BLOG_WRITER_SPACE = os.environ.get("BLOG_WRITER_SPACE", "").strip()
-EMAIL_WRITER_SPACE = os.environ.get("EMAIL_WRITER_SPACE", "").strip()
+
+# The exception, at the repo owner's request: the Email Writer points at their own public
+# Space so the tool works out of the box rather than refusing until it is configured. The
+# trade is the one described above and it falls on that account — if you are running a fork,
+# set EMAIL_WRITER_SPACE (or the Settings field) to a Space of your own, both so your
+# generations are yours and so this one is not answering for you.
+EMAIL_WRITER_SPACE = os.environ.get(
+    "EMAIL_WRITER_SPACE", "vivekchakraverty/marketing-email-writer"
+).strip()
 BRANDFORGE_SPACE = os.environ.get("BRANDFORGE_SPACE", "").strip()
 MARKETING_PLAN_RAG_DATASET = os.environ.get("MARKETING_PLAN_RAG_DATASET", "").strip()
 

@@ -30,6 +30,7 @@ const EMPTY: AppSettings = {
   googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
   keywordSurfer: { proxyServer: '', proxyUsername: '', proxyPassword: '' },
   marketingPlan: { spaceUrl: '' },
+  writerSpaces: { blogWriter: '', emailWriter: '' },
   brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '', modelRepo: '', imageBucket: '' },
   topicScout: {
     contactEmail: '',
@@ -694,6 +695,46 @@ export default function Settings(): React.JSX.Element {
                 placeholder="owner/space-name or https://owner-space-name.hf.space"
                 style={textInput}
               />
+            </div>
+          </Section>
+
+          <Section
+            title="Blog Writer and Email Writer Spaces"
+            optional
+            blurb="Each of these tools generates on a Hugging Face Space you deploy yourself — see the README for how. There are deliberately no defaults: a shared id would send your generation traffic to somebody else's account. Until one is set, that tool refuses with an explanation rather than pretending to work. The backend reads these when it starts, so restart the app after saving."
+            accent="var(--tool-create)"
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div>
+                <label style={label}>Blog Writer Space</label>
+                <input
+                  type="text"
+                  value={settings.writerSpaces.blogWriter}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      writerSpaces: { ...s.writerSpaces, blogWriter: e.target.value }
+                    }))
+                  }
+                  placeholder="owner/space-name or https://owner-space-name.hf.space"
+                  style={textInput}
+                />
+              </div>
+              <div>
+                <label style={label}>Email Writer Space</label>
+                <input
+                  type="text"
+                  value={settings.writerSpaces.emailWriter}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      writerSpaces: { ...s.writerSpaces, emailWriter: e.target.value }
+                    }))
+                  }
+                  placeholder="owner/space-name or https://owner-space-name.hf.space"
+                  style={textInput}
+                />
+              </div>
             </div>
           </Section>
 

@@ -46,6 +46,24 @@ export interface MarketingPlanSettings {
 }
 
 /**
+ * The Spaces the Blog Writer and Email Writer generate on.
+ *
+ * config.py reads BLOG_WRITER_SPACE and EMAIL_WRITER_SPACE from the environment and has no
+ * defaults on purpose: hardcoded ids meant anyone who cloned the repo sent their generation
+ * traffic to the original author's account. But nothing in a packaged install could write an
+ * env var either, so both tools were unreachable — refusing with a message telling the user
+ * to edit `backend/.env`, a file that does not exist in an installed build. Same gap
+ * brandForge.spaceId and marketingPlan.spaceUrl already close, and for the same reason.
+ *
+ * Either form gradio_client understands: "owner/space-name" or a full https://...hf.space
+ * URL. Empty keeps the tool's existing refusal, which is honest rather than broken.
+ */
+export interface WriterSpaceSettings {
+  blogWriter: string
+  emailWriter: string
+}
+
+/**
  * Proxy for the Marketing Plan's Keyword Surfer tier, which scrapes Google with a
  * headless browser.
  *
@@ -158,6 +176,7 @@ export interface AppSettings {
   googleAds: GoogleAdsSettings
   keywordSurfer: KeywordSurferSettings
   marketingPlan: MarketingPlanSettings
+  writerSpaces: WriterSpaceSettings
   brandForge: BrandForgeSettings
   topicScout: TopicScoutSettings
   telegram: TelegramSettings
@@ -176,6 +195,7 @@ export type SettingsPatch = Partial<
     | 'googleAds'
     | 'keywordSurfer'
     | 'marketingPlan'
+    | 'writerSpaces'
     | 'brandForge'
     | 'topicScout'
     | 'telegram'
@@ -187,6 +207,7 @@ export type SettingsPatch = Partial<
   googleAds?: Partial<GoogleAdsSettings>
   keywordSurfer?: Partial<KeywordSurferSettings>
   marketingPlan?: Partial<MarketingPlanSettings>
+  writerSpaces?: Partial<WriterSpaceSettings>
   brandForge?: Partial<BrandForgeSettings>
   topicScout?: Partial<TopicScoutSettings>
   telegram?: Partial<TelegramSettings>
@@ -204,6 +225,7 @@ const EMPTY_SETTINGS: AppSettings = {
   googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
   keywordSurfer: { proxyServer: '', proxyUsername: '', proxyPassword: '' },
   marketingPlan: { spaceUrl: '' },
+  writerSpaces: { blogWriter: '', emailWriter: '' },
   brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '', modelRepo: '', imageBucket: '' },
   topicScout: {
     contactEmail: '',
@@ -238,6 +260,7 @@ function withDefaults(parsed: Partial<AppSettings>): AppSettings {
     googleAds: { ...EMPTY_SETTINGS.googleAds, ...(parsed.googleAds ?? {}) },
     keywordSurfer: { ...EMPTY_SETTINGS.keywordSurfer, ...(parsed.keywordSurfer ?? {}) },
     marketingPlan: { ...EMPTY_SETTINGS.marketingPlan, ...(parsed.marketingPlan ?? {}) },
+    writerSpaces: { ...EMPTY_SETTINGS.writerSpaces, ...(parsed.writerSpaces ?? {}) },
     brandForge: { ...EMPTY_SETTINGS.brandForge, ...(parsed.brandForge ?? {}) },
     topicScout: { ...EMPTY_SETTINGS.topicScout, ...(parsed.topicScout ?? {}) },
     telegram: { ...EMPTY_SETTINGS.telegram, ...(parsed.telegram ?? {}) },
@@ -330,6 +353,7 @@ export function setSettings(partial: SettingsPatch): AppSettings {
     googleAds: { ...current.googleAds, ...(partial.googleAds ?? {}) },
     keywordSurfer: { ...current.keywordSurfer, ...(partial.keywordSurfer ?? {}) },
     marketingPlan: { ...current.marketingPlan, ...(partial.marketingPlan ?? {}) },
+    writerSpaces: { ...current.writerSpaces, ...(partial.writerSpaces ?? {}) },
     brandForge: { ...current.brandForge, ...(partial.brandForge ?? {}) },
     topicScout: { ...current.topicScout, ...(partial.topicScout ?? {}) },
     telegram: { ...current.telegram, ...(partial.telegram ?? {}) },

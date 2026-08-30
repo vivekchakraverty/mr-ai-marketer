@@ -62,6 +62,21 @@ function marketingPlanEnv(): Record<string, string> {
   return spaceUrl.trim() ? { MARKETING_PLAN_SPACE: spaceUrl.trim() } : {}
 }
 
+/** The Spaces the Blog Writer and Email Writer generate on, handed over at spawn.
+ *
+ * config.py has no defaults for these on purpose — hardcoded ids sent a cloner's traffic to
+ * the original author's account — but a packaged install had no way to supply one either,
+ * so both tools refused every request and told the user to edit `backend/.env`, which does
+ * not exist in an installed build. Only set when present, so an operator exporting the
+ * variable before launch still wins. */
+function writerSpaceEnv(): Record<string, string> {
+  const { blogWriter, emailWriter } = getSettings().writerSpaces
+  const env: Record<string, string> = {}
+  if (blogWriter.trim()) env.BLOG_WRITER_SPACE = blogWriter.trim()
+  if (emailWriter.trim()) env.EMAIL_WRITER_SPACE = emailWriter.trim()
+  return env
+}
+
 export const BACKEND_PORT = 8756
 export const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`
 
@@ -104,6 +119,7 @@ function spawnDevBackend(): ChildProcessWithoutNullStreams {
       ...sharedTokenEnv(),
       ...brandForgeEnv(),
       ...marketingPlanEnv(),
+      ...writerSpaceEnv(),
       ...hfAssetEnv()
     }
   })
@@ -136,6 +152,7 @@ function spawnPackagedBackend(): ChildProcessWithoutNullStreams {
       ...sharedTokenEnv(),
       ...brandForgeEnv(),
       ...marketingPlanEnv(),
+      ...writerSpaceEnv(),
       ...hfAssetEnv()
     }
   })

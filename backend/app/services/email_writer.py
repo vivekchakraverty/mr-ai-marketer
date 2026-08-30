@@ -9,23 +9,44 @@ own thing with the result.
 
 from __future__ import annotations
 
+import os
+
 from gradio_client import Client
 
 from .. import config
 from . import ctr_predictor
 
-# The marketing-email model (a QLoRA fine-tune of Qwen2.5-7B) runs on the user's own free
-# Hugging Face CPU Space, called exactly the way blog_writer.py calls its Space. Public, runs
-# on its own CPU, so no HF token is passed.
+# The marketing-email model (a QLoRA fine-tune of Qwen2.5-7B) runs on a Hugging Face CPU
+# Space, which serves the GGUF itself rather than forwarding to an inference API.
+#
+# THE TOKEN IS FOR ACCESS, NOT FOR BILLING. A free CPU Space costs nobody anything, so there
+# is no charge to attribute — passing a token cannot move a cost that does not exist. What it
+# does is authenticate the caller, which is what lets the Space be private: config.py points
+# at the repo owner's deployment by default, and private means an account without access gets
+# a clean refusal and goes and deploys its own, rather than silently queueing on somebody
+# else's container.
+#
+# Cached per token: the client holds a connection bound to whoever opened it, so a changed
+# token has to produce a new one rather than reuse a session opened as someone else.
 
-_client: Client | None = None
+_clients: dict[str, Client] = {}
 
 
-def _get_client() -> Client:
-    global _client
-    if _client is None:
-        _client = Client(config.require_space(config.EMAIL_WRITER_SPACE, "EMAIL_WRITER_SPACE", "Email Writer"))
-    return _client
+def _get_client(hf_token: str | None = None) -> Client:
+    space = config.require_space(config.EMAIL_WRITER_SPACE, "EMAIL_WRITER_SPACE", "Email Writer")
+    # Falling back to the environment is not a convenience. The Lead Gen Agent drafts through
+    # this same service and its injected writer takes only an instruction — no token — so a
+    # private Space would refuse every outreach draft while the Email Writer screen, which
+    # does send one, carried on working. Electron hands HF_TOKEN over at spawn, so the same
+    # account is available to both paths.
+    key = (hf_token or "").strip() or (os.environ.get("HF_TOKEN") or "").strip()
+    client = _clients.get(key)
+    if client is None:
+        # `token`, not `hf_token`: gradio_client renamed the argument, and the installed
+        # 2.5.0 rejects the old name outright with a TypeError rather than ignoring it.
+        client = Client(space, token=key or None)
+        _clients[key] = client
+    return client
 
 
 def generate_marketing_email(instruction: str, hf_token: str | None = None) -> dict:
@@ -40,7 +61,7 @@ def generate_marketing_email(instruction: str, hf_token: str | None = None) -> d
 
     # The Space's /generate takes one freeform instruction and returns the finished email as a
     # single string (subject + body together), already leak-filtered.
-    text = (_get_client().predict(instruction, api_name="/generate") or "").strip()
+    text = (_get_client(hf_token).predict(instruction, api_name="/generate") or "").strip()
     if not text:
         raise RuntimeError("The model returned an empty email — try again.")
 
