@@ -27,8 +27,10 @@ class GenerateEmailResponse(BaseModel):
     libraryId: str
     # A statistical estimate only (see services/ctr_predictor.py for what it's
     # trained on and its real limitations) -- never present this as a guarantee.
-    predictedClickRate: float
-    ctrBucket: str
+    #: Absent when no click-through model is configured — the estimate is an extra, and an
+    #: install without one still writes emails. See services/email_writer.
+    predictedClickRate: float | None = None
+    ctrBucket: str = ""
 
 
 @router.post("/generate", response_model=GenerateEmailResponse, dependencies=[Depends(queue_slot("space"))])

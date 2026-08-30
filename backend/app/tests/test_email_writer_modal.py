@@ -133,3 +133,23 @@ def test_an_empty_instruction_never_reaches_either_backend(monkeypatch, space, m
         email_writer.generate_marketing_email("   ")
     assert modal_runtime[1] == []
     assert space == []
+
+
+def test_a_missing_ctr_model_does_not_throw_the_email_away(monkeypatch, space, modal_runtime):
+    """The estimate is an extra, and it is absent on any install not pointed at a model
+    repo — the model is deliberately not shipped in the public repo. Failing the request
+    over it discarded an email that had already been written."""
+    _no_modal(monkeypatch)
+
+    def unavailable(text, hf_token=None):
+        raise RuntimeError(
+            "the click-through-rate model isn't available: no local copy, and "
+            "HF_ASSETS_CTR_MODEL_REPO is not set."
+        )
+
+    monkeypatch.setattr(email_writer.ctr_predictor, "predict_ctr", unavailable)
+
+    result = email_writer.generate_marketing_email("A summer sale email")
+    assert result["text"] == "Subject: from the Space"
+    assert result["predictedClickRate"] is None
+    assert result["ctrBucket"] == ""

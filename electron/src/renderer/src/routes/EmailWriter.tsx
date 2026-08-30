@@ -11,7 +11,12 @@ const EXAMPLE_PLACEHOLDER =
   'e.g. Write a last-chance promotional email for an e-commerce sunglasses brand’s summer sale: ' +
   '20% off, ending tonight, urgent but friendly tone, clear call-to-action button.'
 
-const BUCKET_COLOR: Record<GenerateEmailResponse['ctrBucket'], string> = {
+// Keyed on the scored buckets only. The empty bucket means "no estimate available", and
+// the card it would colour is not rendered at all in that case.
+const BUCKET_COLOR: Record<
+  Exclude<GenerateEmailResponse['ctrBucket'], ''>,
+  string
+> = {
   'below average': 'var(--ink-faint)',
   typical: 'var(--ink-muted)',
   'above average': 'var(--accent)',
@@ -163,6 +168,10 @@ export default function EmailWriter(): React.JSX.Element {
             {result.text}
           </div>
 
+          {/* Absent on an install with no click-through model configured. The estimate is an
+              extra, so the card simply is not there rather than the email being withheld
+              over it — see services/email_writer.py. */}
+          {result.predictedClickRate !== null && result.ctrBucket && (
           <div
             style={{
               marginTop: 14,
@@ -181,19 +190,20 @@ export default function EmailWriter(): React.JSX.Element {
                 width: 9,
                 height: 9,
                 borderRadius: '50%',
-                background: BUCKET_COLOR[result.ctrBucket],
+                background: BUCKET_COLOR[result.ctrBucket || 'typical'],
                 flexShrink: 0
               }}
             />
             <div style={{ font: "700 14px 'Quicksand'", color: 'var(--ink)' }}>
               Predicted click-through: {(result.predictedClickRate * 100).toFixed(1)}%
-              <span style={{ color: BUCKET_COLOR[result.ctrBucket] }}> · {result.ctrBucket}</span>
+              <span style={{ color: BUCKET_COLOR[result.ctrBucket || 'typical'] }}> · {result.ctrBucket}</span>
             </div>
             <div style={{ font: "600 11.5px/1.4 'Quicksand'", color: 'var(--ink-faint)', flexBasis: '100%' }}>
               An estimate only, not a guarantee — from a model trained on ~1,900 historical email campaigns.
               Real results depend on your audience, sender reputation, and plenty this model never sees.
             </div>
           </div>
+          )}
         </div>
       )}
     </div>

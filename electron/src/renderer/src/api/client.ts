@@ -488,8 +488,10 @@ export async function generateBlog(fields: BlogFields, brandVoiceId = ''): Promi
 export interface GenerateEmailResponse {
   text: string
   libraryId: string
-  predictedClickRate: number
-  ctrBucket: 'below average' | 'typical' | 'above average' | 'strong'
+  /** null when no click-through model is configured — the estimate is an extra, and the
+   *  email is written either way. */
+  predictedClickRate: number | null
+  ctrBucket: 'below average' | 'typical' | 'above average' | 'strong' | ''
 }
 
 export async function generateEmail(instruction: string, brandVoiceId = ''): Promise<GenerateEmailResponse> {

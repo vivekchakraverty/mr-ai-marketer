@@ -9,12 +9,15 @@ own thing with the result.
 
 from __future__ import annotations
 
+import logging
 import os
 
 from gradio_client import Client
 
 from .. import config
 from . import ctr_predictor
+
+log = logging.getLogger(__name__)
 
 # The marketing-email model (a QLoRA fine-tune of Qwen2.5-7B) runs on a Hugging Face CPU
 # Space, which serves the GGUF itself rather than forwarding to an inference API.
@@ -98,7 +101,17 @@ def generate_marketing_email(instruction: str, hf_token: str | None = None) -> d
     if not text:
         raise RuntimeError("The model returned an empty email — try again.")
 
-    # The token only matters on the first call of a fresh install, where the CTR model has
-    # to be fetched from Hugging Face; after that it is already on disk.
-    ctr = ctr_predictor.predict_ctr(text, hf_token=hf_token)
+    # The CTR estimate is an extra, and it is missing on any install that has not been
+    # pointed at a model repo — the model is deliberately not shipped in the public repo.
+    # Failing the whole request over it threw away an email that had already been written,
+    # which is the wrong trade for a number the screen labels an estimate. So a score that
+    # cannot be produced comes back absent, and the caller shows the email without it.
+    #
+    # The token only matters on the first call of a fresh install, where the model has to be
+    # fetched from Hugging Face; after that it is already on disk.
+    try:
+        ctr = ctr_predictor.predict_ctr(text, hf_token=hf_token)
+    except Exception as err:  # noqa: BLE001 — no model, no repo, corrupt artifact, ...
+        log.info("[email-writer] no click-through estimate for this draft: %s", err)
+        return {"text": text, "predictedClickRate": None, "ctrBucket": ""}
     return {"text": text, "predictedClickRate": ctr.predictedClickRate, "ctrBucket": ctr.bucket}
