@@ -16,12 +16,25 @@ import pytest
 from app.services import email_writer
 
 
+def _install_ctr(monkeypatch, predict):
+    """Stand in for the scoring module.
+
+    Substituted in sys.modules rather than patched on the real one: the predictor imports
+    numpy, scikit-learn and joblib, and the point of the service importing it lazily is that
+    those need not be present. Reaching for the real module here would put them straight back
+    into the test's requirements — which is exactly what broke CI.
+    """
+    module = types.ModuleType("app.services.ctr_predictor")
+    module.predict_ctr = predict
+    monkeypatch.setitem(sys.modules, "app.services.ctr_predictor", module)
+    return module
+
+
 @pytest.fixture(autouse=True)
 def no_ctr(monkeypatch):
-    """The CTR model is a joblib load; irrelevant to which backend generated the text."""
-    monkeypatch.setattr(
-        email_writer.ctr_predictor,
-        "predict_ctr",
+    """A score is irrelevant to which backend generated the text."""
+    return _install_ctr(
+        monkeypatch,
         lambda text, hf_token=None: types.SimpleNamespace(predictedClickRate=0.1, bucket="mid"),
     )
 
@@ -147,7 +160,7 @@ def test_a_missing_ctr_model_does_not_throw_the_email_away(monkeypatch, space, m
             "HF_ASSETS_CTR_MODEL_REPO is not set."
         )
 
-    monkeypatch.setattr(email_writer.ctr_predictor, "predict_ctr", unavailable)
+    _install_ctr(monkeypatch, unavailable)
 
     result = email_writer.generate_marketing_email("A summer sale email")
     assert result["text"] == "Subject: from the Space"

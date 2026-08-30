@@ -15,7 +15,6 @@ import os
 from gradio_client import Client
 
 from .. import config
-from . import ctr_predictor
 
 log = logging.getLogger(__name__)
 
@@ -110,6 +109,12 @@ def generate_marketing_email(instruction: str, hf_token: str | None = None) -> d
     # The token only matters on the first call of a fresh install, where the model has to be
     # fetched from Hugging Face; after that it is already on disk.
     try:
+        # Imported here, not at module scope: the predictor pulls in numpy, scikit-learn and
+        # joblib, and nothing above this line needs any of them. Keeping it lazy means
+        # writing an email does not load the scoring stack until there is something to
+        # score — and means this module can be imported where that stack is absent.
+        from . import ctr_predictor
+
         ctr = ctr_predictor.predict_ctr(text, hf_token=hf_token)
     except Exception as err:  # noqa: BLE001 — no model, no repo, corrupt artifact, ...
         log.info("[email-writer] no click-through estimate for this draft: %s", err)
