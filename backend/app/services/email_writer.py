@@ -49,19 +49,52 @@ def _get_client(hf_token: str | None = None) -> Client:
     return client
 
 
+def _modal_config(hf_token: str | None):
+    """The user's Modal credentials, or None when they have not set any.
+
+    Handed over at spawn by Electron, the same route Brand Studio's take. No credentials is
+    the normal state and means the Space is used, so this returns None rather than raising.
+    """
+    token_id = (os.environ.get("EMAIL_WRITER_MODAL_TOKEN_ID") or "").strip()
+    token_secret = (os.environ.get("EMAIL_WRITER_MODAL_TOKEN_SECRET") or "").strip()
+    if not (token_id and token_secret):
+        return None
+    from ..emailwriter import modal_runtime
+
+    return modal_runtime.ModalConfig(
+        token_id=token_id,
+        token_secret=token_secret,
+        hf_token=(hf_token or "").strip() or (os.environ.get("HF_TOKEN") or "").strip(),
+    )
+
+
 def generate_marketing_email(instruction: str, hf_token: str | None = None) -> dict:
     """Generate a finished email from one freeform instruction, with a CTR estimate.
 
     Returns {"text", "predictedClickRate", "ctrBucket"}. Raises on an empty instruction or a
     Space/network failure so callers can surface a clean error.
+
+    Runs on the user's own Modal GPU when they have configured one — seconds rather than the
+    Space's minute and a half, on hardware nobody else is queueing for — and on the free
+    Hugging Face Space otherwise. The Space stays the default because it costs nothing and
+    never runs out; Modal is faster and spends credits.
     """
     instruction = (instruction or "").strip()
     if not instruction:
         raise ValueError("Tell me what the email should be about.")
 
-    # The Space's /generate takes one freeform instruction and returns the finished email as a
-    # single string (subject + body together), already leak-filtered.
-    text = (_get_client(hf_token).predict(instruction, api_name="/generate") or "").strip()
+    cfg = _modal_config(hf_token)
+    if cfg is not None:
+        from ..emailwriter import modal_runtime
+
+        # A deliberate hard failure rather than a silent fall back to the Space. Someone who
+        # configured a GPU wants to know it stopped working — quietly taking ninety seconds
+        # on shared CPU instead looks like the tool got slower for no reason.
+        text = modal_runtime.generate_email(cfg, instruction).strip()
+    else:
+        # The Space's /generate takes one freeform instruction and returns the finished email
+        # as a single string (subject + body together), already leak-filtered.
+        text = (_get_client(hf_token).predict(instruction, api_name="/generate") or "").strip()
     if not text:
         raise RuntimeError("The model returned an empty email — try again.")
 

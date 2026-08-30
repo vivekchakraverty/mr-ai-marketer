@@ -64,6 +64,25 @@ export interface WriterSpaceSettings {
 }
 
 /**
+ * Optional: run Email Writer generation on the user's own Modal GPU instead of the free
+ * Hugging Face Space.
+ *
+ * The Space is the default and stays it — free forever, and slow: about ninety seconds an
+ * email on two shared vCPUs, queued behind everyone else using it. A T4 answers in seconds.
+ * The trade is that Modal's starter plan is $30 of credits a month rather than a free tier,
+ * so this is opt-in and blank means nothing changes.
+ *
+ * Blank falls back to the Brand Studio credentials, because a person has one Modal account
+ * and being asked for the same token twice is a worse experience than a sensible default.
+ */
+export interface EmailWriterModalSettings {
+  modalTokenId: string
+  modalTokenSecret: string
+  //: ISO timestamp of the last successful deploy, so Settings can say "already set up".
+  modalProvisionedAt: string
+}
+
+/**
  * Proxy for the Marketing Plan's Keyword Surfer tier, which scrapes Google with a
  * headless browser.
  *
@@ -177,6 +196,7 @@ export interface AppSettings {
   keywordSurfer: KeywordSurferSettings
   marketingPlan: MarketingPlanSettings
   writerSpaces: WriterSpaceSettings
+  emailWriterModal: EmailWriterModalSettings
   brandForge: BrandForgeSettings
   topicScout: TopicScoutSettings
   telegram: TelegramSettings
@@ -196,6 +216,7 @@ export type SettingsPatch = Partial<
     | 'keywordSurfer'
     | 'marketingPlan'
     | 'writerSpaces'
+    | 'emailWriterModal'
     | 'brandForge'
     | 'topicScout'
     | 'telegram'
@@ -208,6 +229,7 @@ export type SettingsPatch = Partial<
   keywordSurfer?: Partial<KeywordSurferSettings>
   marketingPlan?: Partial<MarketingPlanSettings>
   writerSpaces?: Partial<WriterSpaceSettings>
+  emailWriterModal?: Partial<EmailWriterModalSettings>
   brandForge?: Partial<BrandForgeSettings>
   topicScout?: Partial<TopicScoutSettings>
   telegram?: Partial<TelegramSettings>
@@ -226,6 +248,7 @@ const EMPTY_SETTINGS: AppSettings = {
   keywordSurfer: { proxyServer: '', proxyUsername: '', proxyPassword: '' },
   marketingPlan: { spaceUrl: '' },
   writerSpaces: { blogWriter: '', emailWriter: '' },
+  emailWriterModal: { modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '' },
   brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '', modelRepo: '', imageBucket: '' },
   topicScout: {
     contactEmail: '',
@@ -261,6 +284,7 @@ function withDefaults(parsed: Partial<AppSettings>): AppSettings {
     keywordSurfer: { ...EMPTY_SETTINGS.keywordSurfer, ...(parsed.keywordSurfer ?? {}) },
     marketingPlan: { ...EMPTY_SETTINGS.marketingPlan, ...(parsed.marketingPlan ?? {}) },
     writerSpaces: { ...EMPTY_SETTINGS.writerSpaces, ...(parsed.writerSpaces ?? {}) },
+    emailWriterModal: { ...EMPTY_SETTINGS.emailWriterModal, ...(parsed.emailWriterModal ?? {}) },
     brandForge: { ...EMPTY_SETTINGS.brandForge, ...(parsed.brandForge ?? {}) },
     topicScout: { ...EMPTY_SETTINGS.topicScout, ...(parsed.topicScout ?? {}) },
     telegram: { ...EMPTY_SETTINGS.telegram, ...(parsed.telegram ?? {}) },
@@ -354,6 +378,7 @@ export function setSettings(partial: SettingsPatch): AppSettings {
     keywordSurfer: { ...current.keywordSurfer, ...(partial.keywordSurfer ?? {}) },
     marketingPlan: { ...current.marketingPlan, ...(partial.marketingPlan ?? {}) },
     writerSpaces: { ...current.writerSpaces, ...(partial.writerSpaces ?? {}) },
+    emailWriterModal: { ...current.emailWriterModal, ...(partial.emailWriterModal ?? {}) },
     brandForge: { ...current.brandForge, ...(partial.brandForge ?? {}) },
     topicScout: { ...current.topicScout, ...(partial.topicScout ?? {}) },
     telegram: { ...current.telegram, ...(partial.telegram ?? {}) },

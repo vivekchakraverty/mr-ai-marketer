@@ -5,6 +5,8 @@ import {
   getSocialPostSchema,
   getTumblrSession,
   provisionModalBackend,
+  provisionEmailWriterModal,
+  getEmailWriterModalStatus,
   pushLeadgenEnv,
   pushSocialPostEnv,
   testKeywordSurfer,
@@ -31,6 +33,7 @@ const EMPTY: AppSettings = {
   keywordSurfer: { proxyServer: '', proxyUsername: '', proxyPassword: '' },
   marketingPlan: { spaceUrl: '' },
   writerSpaces: { blogWriter: '', emailWriter: '' },
+  emailWriterModal: { modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '' },
   brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '', modelRepo: '', imageBucket: '' },
   topicScout: {
     contactEmail: '',
@@ -73,6 +76,8 @@ export default function Settings(): React.JSX.Element {
   const setUpdateInfo = useAppStore((s) => s.setUpdateInfo)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [modalStatus, setModalStatus] = useState<ModalProvisionStatus | null>(null)
+  const [emailModalStatus, setEmailModalStatus] = useState<ModalProvisionStatus | null>(null)
+  const [emailModalBusy, setEmailModalBusy] = useState(false)
   const [provisioning, setProvisioning] = useState(false)
 
   useEffect(() => {
@@ -171,6 +176,51 @@ export default function Settings(): React.JSX.Element {
     }, 3000)
     return () => clearInterval(timer)
   }, [modalStatus?.status])
+
+  useEffect(() => {
+    if (emailModalStatus?.status !== 'running') return
+    const timer = setInterval(() => {
+      getEmailWriterModalStatus()
+        .then(setEmailModalStatus)
+        .catch(() => undefined)
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [emailModalStatus?.status])
+
+  useEffect(() => {
+    if (emailModalStatus?.status !== 'ready' || settings.emailWriterModal.modalProvisionedAt) return
+    const next: AppSettings = {
+      ...settings,
+      emailWriterModal: {
+        ...settings.emailWriterModal,
+        modalProvisionedAt: new Date().toISOString()
+      }
+    }
+    setSettings(next)
+    void window.api.settings.setAll(next)
+  }, [emailModalStatus?.status, settings])
+
+  /** Falls back to the Brand Studio credentials, matching what the backend does at spawn:
+   *  one Modal account, and being asked for the same token twice is the worse experience. */
+  async function handleProvisionEmailModal(): Promise<void> {
+    setEmailModalBusy(true)
+    setError('')
+    try {
+      await window.api.settings.setAll(settings)
+      setEmailModalStatus(
+        await provisionEmailWriterModal(
+          settings.emailWriterModal.modalTokenId.trim() || settings.brandForge.modalTokenId.trim(),
+          settings.emailWriterModal.modalTokenSecret.trim() ||
+            settings.brandForge.modalTokenSecret.trim(),
+          settings.hfToken.trim()
+        )
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setEmailModalBusy(false)
+    }
+  }
 
   // Remember a successful deploy so the section still reads as set up after a
   // restart, when the backend's in-memory status is back to idle.
@@ -735,6 +785,75 @@ export default function Settings(): React.JSX.Element {
                   style={textInput}
                 />
               </div>
+            </div>
+          </Section>
+
+          <Section
+            title="Email Writer GPU"
+            optional
+            blurb="Optional. The Email Writer runs on a free Hugging Face Space by default — free forever, and slow: about ninety seconds an email on two shared vCPUs, queued behind everyone else using it. Point it at your own Modal GPU and the same model answers in seconds. Modal's starter plan is $30 of credits a month rather than a free tier, so this spends something; at T4 rates an email is well under a cent. Leave it blank and nothing changes. If you already set up Brand Studio's GPU, those credentials are used automatically — this is only for pointing the Email Writer at a different account."
+            accent="var(--tool-email)"
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div>
+                <label style={label}>Modal token ID</label>
+                <input
+                  type="text"
+                  value={settings.emailWriterModal.modalTokenId}
+                  onChange={(e) =>
+                    setSettings((st) => ({
+                      ...st,
+                      emailWriterModal: { ...st.emailWriterModal, modalTokenId: e.target.value }
+                    }))
+                  }
+                  placeholder="ak-..."
+                  style={textInput}
+                />
+              </div>
+              <div>
+                <label style={label}>Modal token secret</label>
+                <input
+                  type="password"
+                  value={settings.emailWriterModal.modalTokenSecret}
+                  onChange={(e) =>
+                    setSettings((st) => ({
+                      ...st,
+                      emailWriterModal: { ...st.emailWriterModal, modalTokenSecret: e.target.value }
+                    }))
+                  }
+                  placeholder="as-..."
+                  style={textInput}
+                />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <div
+                  style={{ ...secondaryButtonSmall, opacity: emailModalBusy ? 0.6 : 1 }}
+                  onClick={emailModalBusy ? undefined : () => void handleProvisionEmailModal()}
+                >
+                  {emailModalBusy ? 'Setting up…' : 'Set up the Email Writer GPU'}
+                </div>
+                {emailModalStatus && (
+                  <span
+                    style={{
+                      font: "600 12px 'Quicksand'",
+                      color:
+                        emailModalStatus.status === 'error'
+                          ? 'var(--danger-ink)'
+                          : 'var(--ink-muted)'
+                    }}
+                  >
+                    {emailModalStatus.message || emailModalStatus.status}
+                    {emailModalStatus.status === 'running' && emailModalStatus.elapsedSeconds
+                      ? ` (${emailModalStatus.elapsedSeconds}s)`
+                      : ''}
+                  </span>
+                )}
+              </div>
+              {emailModalStatus?.status === 'running' && emailModalStatus.hint && (
+                <div style={{ font: "600 11.5px/1.5 'Quicksand'", color: 'var(--ink-faint)' }}>
+                  {emailModalStatus.hint}
+                </div>
+              )}
             </div>
           </Section>
 

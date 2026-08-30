@@ -69,6 +69,24 @@ function marketingPlanEnv(): Record<string, string> {
  * so both tools refused every request and told the user to edit `backend/.env`, which does
  * not exist in an installed build. Only set when present, so an operator exporting the
  * variable before launch still wins. */
+/** Email Writer generation on the user's own Modal GPU, handed over at spawn.
+ *
+ * Falls back to the Brand Studio credentials when its own are blank: a person has one Modal
+ * account, and asking for the same token twice to reach the same workspace is worse than a
+ * default that just works. Blank on both sides means the free Space is used, which is the
+ * normal state and not a degraded one. */
+function emailWriterModalEnv(): Record<string, string> {
+  const own = getSettings().emailWriterModal
+  const shared = getSettings().brandForge
+  const tokenId = own.modalTokenId.trim() || shared.modalTokenId.trim()
+  const tokenSecret = own.modalTokenSecret.trim() || shared.modalTokenSecret.trim()
+  if (!tokenId || !tokenSecret) return {}
+  return {
+    EMAIL_WRITER_MODAL_TOKEN_ID: tokenId,
+    EMAIL_WRITER_MODAL_TOKEN_SECRET: tokenSecret
+  }
+}
+
 function writerSpaceEnv(): Record<string, string> {
   const { blogWriter, emailWriter } = getSettings().writerSpaces
   const env: Record<string, string> = {}
@@ -120,6 +138,7 @@ function spawnDevBackend(): ChildProcessWithoutNullStreams {
       ...brandForgeEnv(),
       ...marketingPlanEnv(),
       ...writerSpaceEnv(),
+      ...emailWriterModalEnv(),
       ...hfAssetEnv()
     }
   })
@@ -153,6 +172,7 @@ function spawnPackagedBackend(): ChildProcessWithoutNullStreams {
       ...brandForgeEnv(),
       ...marketingPlanEnv(),
       ...writerSpaceEnv(),
+      ...emailWriterModalEnv(),
       ...hfAssetEnv()
     }
   })

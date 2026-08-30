@@ -2572,6 +2572,22 @@ export function getModalStatus(): Promise<ModalProvisionStatus> {
   return getJson('/brand-forge/modal/status')
 }
 
+/** The same two calls for the Email Writer's own GPU backend.
+ *
+ * A separate Modal app from Brand Studio's — different model, different container — even
+ * when both are deployed into the same workspace with the same credentials. */
+export function provisionEmailWriterModal(
+  modalTokenId: string,
+  modalTokenSecret: string,
+  hfToken: string
+): Promise<ModalProvisionStatus> {
+  return postJson('/email-writer/modal/provision', { modalTokenId, modalTokenSecret, hfToken })
+}
+
+export function getEmailWriterModalStatus(): Promise<ModalProvisionStatus> {
+  return getJson('/email-writer/modal/status')
+}
+
 export function assembleBrandDocument(
   intake: BrandIntakeInput,
   sections: Record<string, string>

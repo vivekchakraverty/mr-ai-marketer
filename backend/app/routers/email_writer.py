@@ -60,3 +60,71 @@ def generate_email(body: GenerateEmailRequest) -> GenerateEmailResponse:
         predictedClickRate=result["predictedClickRate"],
         ctrBucket=result["ctrBucket"],
     )
+
+
+# ---------------------------------------------------------------------------
+# Bring-your-own Modal GPU
+#
+# The Space is the default and always will be: it costs nothing and never runs out. Modal
+# is the opt-in alternative for anyone who would rather have an answer in seconds than in
+# ninety of them, and pays for that in credits on their own account.
+# ---------------------------------------------------------------------------
+
+
+class ModalProvisionRequest(BaseModel):
+    modalTokenId: str = ""
+    modalTokenSecret: str = ""
+    #: Needed at image-build time: the weights repo is private, so the build downloads them
+    #: with this token. Falls back to the backend's own when blank.
+    hfToken: str = ""
+
+
+class ModalStatusOut(BaseModel):
+    status: str
+    message: str = ""
+    elapsedSeconds: int = 0
+    appPageUrl: str = ""
+    #: Always empty here. Present so this matches the shape the renderer already declares
+    #: for Brand Studio's identical status, rather than the type quietly lying about a
+    #: field that would come back undefined.
+    logsUrl: str = ""
+    hint: str = ""
+
+
+def _modal_runtime():
+    """Imported lazily so this router still loads when the modal SDK is missing."""
+    try:
+        from ..emailwriter import modal_runtime
+    except Exception as err:  # noqa: BLE001
+        raise HTTPException(
+            status_code=501, detail=f"The Modal SDK is not available in this build: {err}"
+        ) from err
+    return modal_runtime
+
+
+@router.post("/modal/provision", response_model=ModalStatusOut)
+def modal_provision(body: ModalProvisionRequest) -> ModalStatusOut:
+    """Deploy the Email Writer GPU backend into the user's own Modal workspace.
+
+    Returns immediately — the first deploy builds a CUDA image and bakes ~4.5 GB of weights
+    into it, so it runs on a background thread. Poll /modal/status for progress.
+    """
+    import os
+
+    runtime = _modal_runtime()
+    cfg = runtime.ModalConfig(
+        token_id=body.modalTokenId,
+        token_secret=body.modalTokenSecret,
+        hf_token=body.hfToken.strip() or (os.environ.get("HF_TOKEN") or "").strip(),
+    )
+    try:
+        state = runtime.provision(cfg)
+    except runtime.EmailWriterModalError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    return ModalStatusOut(**{k: v for k, v in state.items() if k in ModalStatusOut.model_fields})
+
+
+@router.get("/modal/status", response_model=ModalStatusOut)
+def modal_status() -> ModalStatusOut:
+    state = _modal_runtime().provision_status()
+    return ModalStatusOut(**{k: v for k, v in state.items() if k in ModalStatusOut.model_fields})
