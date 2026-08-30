@@ -160,3 +160,77 @@ def test_an_image_and_a_clip_together_are_refused(outputs, app_db):
             videoFileUrl="/outputs/uploads/run/clip.mp4",
         )
     assert err.value.status_code == 400
+
+
+def test_a_composition_absorbs_the_auto_filed_image_row(outputs, app_db):
+    """A companion image files its own row when it is drawn. Once the finished post carries
+    the same file, that row is a second card for one picture — which is what put duplicate
+    pairs on the shelf."""
+    drawn = app_db.add_item(
+        tool="Social",
+        title="we used to say quantum mechanics was magic",
+        subtitle="bluesky image",
+        content="a prompt about spirals",
+        output_path=str(outputs),
+    )
+    generated = app_db.add_item(
+        tool="Social", title="draft", subtitle="bluesky · science", content="words"
+    )
+
+    _finish(
+        generated["id"],
+        title="Bluesky post · science",
+        subtitle="Bluesky post",
+        content="words\n\n#quantum",
+        imageUrl="/outputs/social/run/post-image.png",
+    )
+
+    assert app_db.get_item(drawn["id"]) is None
+    assert app_db.count_items() == 1
+    assert app_db.get_item(generated["id"])["output_path"] == str(outputs)
+
+
+def test_an_asset_that_stands_on_its_own_is_never_absorbed(outputs, app_db):
+    """A Brand Studio asset picked into a post is still an asset. Matching on the file alone
+    would delete something nobody replaced."""
+    asset = app_db.add_item(
+        tool="Brand",
+        title="Logo mark",
+        subtitle="logo mark",
+        content="a prompt",
+        output_path=str(outputs),
+    )
+    _save(
+        tool="Social",
+        title="Bluesky post · science",
+        subtitle="Bluesky post",
+        content="words",
+        imageUrl="/outputs/social/run/post-image.png",
+    )
+    assert app_db.get_item(asset["id"]) is not None
+
+
+def test_a_companion_image_for_a_different_file_is_left_alone(outputs, app_db):
+    drawn = app_db.add_item(
+        tool="Social",
+        title="another picture",
+        subtitle="bluesky image",
+        content="a prompt",
+        output_path=str(outputs.parent / "other-image.png"),
+    )
+    _save(
+        tool="Social",
+        title="Bluesky post · science",
+        subtitle="Bluesky post",
+        content="words",
+        imageUrl="/outputs/social/run/post-image.png",
+    )
+    assert app_db.get_item(drawn["id"]) is not None
+
+
+def test_saving_without_an_attachment_absorbs_nothing(outputs, app_db):
+    drawn = app_db.add_item(
+        tool="Social", title="pic", subtitle="bluesky image", content="p", output_path=str(outputs)
+    )
+    _save(tool="Social", title="x", subtitle="Bluesky post", content="just words")
+    assert app_db.get_item(drawn["id"]) is not None

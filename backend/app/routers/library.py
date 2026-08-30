@@ -60,6 +60,22 @@ def _attachment_from(image_url: str | None, video_file_url: str | None) -> str |
     return None
 
 
+def _absorb_companion_image(output_path: str | None, keep_id: str) -> int:
+    """Fold an auto-filed companion image into the entry that now carries it.
+
+    Called wherever an entry gains an attachment, which is the moment the standalone row
+    for that picture stops being the only place it lives. See db.delete_superseded_companion_images
+    for why this matches on subtitle as well as on the file.
+    """
+    if not output_path:
+        return 0
+    from ..services import image_prompt
+
+    return db.delete_superseded_companion_images(
+        output_path, keep_id, set(image_prompt.COMPANION_SUBTITLES)
+    )
+
+
 @router.get("")
 def list_library() -> dict:
     return {"items": db.list_items(), "count": db.count_items()}
@@ -89,6 +105,7 @@ def save_library_item(body: SaveRequest) -> dict:
         content=content or None,
         output_path=output_path,
     )
+    _absorb_companion_image(output_path, item["id"])
     return {"item": item, "libraryId": item["id"]}
 
 
@@ -132,6 +149,7 @@ def update_library_item(item_id: str, body: UpdateRequest) -> dict:
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Not found")
+    _absorb_companion_image(updated["output_path"], item_id)
     return {"item": updated}
 
 

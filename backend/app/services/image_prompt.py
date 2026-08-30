@@ -439,6 +439,15 @@ def remember_image(
         log.exception("[image-prompt] could not save the image to the Library")
 
 
+#: The subtitles _remember writes. Named as a set because the Library uses them to tell an
+#: auto-filed companion image from an asset that stands on its own: a composition that takes
+#: the picture into itself supersedes the former and must never touch the latter — a Brand
+#: Studio asset picked into a post is still a Brand Studio asset.
+COMPANION_SUBTITLES = frozenset(
+    f"{platform} image" for platform in ("bluesky", "x", "linkedin", "mastodon", "tumblr")
+)
+
+
 def _remember(path: Path, prompt: str, platform: str, post_text: str) -> None:
     """A companion image for a post, titled by the post it accompanies."""
     remember_image(

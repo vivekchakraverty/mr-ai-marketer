@@ -125,7 +125,12 @@ export default function MastodonPost(): React.JSX.Element {
       setPolicy(p)
       setError('')
     } catch (err) {
-      setPolicy(null)
+      // Keep the rules that are already on screen. Both calls reach the instance live, and
+      // dropping the policy on a failed refresh closed the gate — which takes away the whole
+      // composer, niche selector included, over a momentary network blip. What was accepted
+      // is still accepted; only a different server makes what is shown wrong, so that is the
+      // one case that clears it.
+      setPolicy((cur) => (cur && cur.instance === fields.instance ? cur : null))
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoadingPolicy(false)

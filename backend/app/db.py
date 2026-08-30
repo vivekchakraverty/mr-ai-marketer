@@ -1084,3 +1084,29 @@ def mark_generation_linked(library_item_id: str, posted_uri: str) -> None:
             "UPDATE generation_links SET posted_uri = ?, linked_at = ? WHERE library_item_id = ?",
             (posted_uri, datetime.now(timezone.utc).isoformat(), library_item_id),
         )
+
+
+def delete_superseded_companion_images(
+    output_path: str, keep_id: str, subtitles: set[str]
+) -> int:
+    """Remove auto-filed image rows that a composition has just taken into itself.
+
+    A companion image files its own row the moment it is drawn, because until a post is
+    finished that row is the only place it lives. Once the finished post carries the same
+    file, that row is a second card for one picture — the exact fragmentation the
+    composition save exists to end.
+
+    Matched on the file AND on the subtitles the companion writer uses, never on the file
+    alone: a Brand Studio asset picked into a post is still an asset in its own right, and
+    deleting it because a post borrowed it would lose something nobody replaced.
+    """
+    if not output_path or not subtitles:
+        return 0
+    placeholders = ",".join("?" for _ in subtitles)
+    with _connect() as conn:
+        cursor = conn.execute(
+            f"DELETE FROM library WHERE output_path = ? AND id <> ? "
+            f"AND subtitle IN ({placeholders})",
+            (output_path, keep_id, *sorted(subtitles)),
+        )
+        return cursor.rowcount
