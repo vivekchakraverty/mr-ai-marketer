@@ -561,7 +561,11 @@ def generate(body: GenerateRequest) -> GenerateResponse:
         text=result.text,
         generationId=result.generation_id,
         characters=len(result.text),
-        overLimit=body.platform == "bluesky" and len(result.text) > 300,
+        # UTF-8 bytes, not characters. Bluesky's own rule is 300 graphemes, but the
+        # connector that publishes for us checks `RichText.length` — which in @atproto/api
+        # is the byte length — against that 300. A draft of exactly 300 characters was
+        # rejected for exceeding 300 because three curly apostrophes made it 306 bytes.
+        overLimit=body.platform == "bluesky" and len(result.text.encode("utf-8")) > 300,
         exemplars=[
             ExemplarOut(
                 id=e.id,

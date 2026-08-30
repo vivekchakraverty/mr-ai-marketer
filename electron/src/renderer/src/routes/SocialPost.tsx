@@ -26,6 +26,7 @@ import NichePanel from '../components/NichePanel'
 import HashtagSuggester from '../components/HashtagSuggester'
 import PostingTimePanel from '../components/PostingTimePanel'
 import ScreenBackdrop from '../components/ScreenBackdrop'
+import { postLength } from '../state/postLength'
 import SaveButton from '../components/SaveButton'
 
 // Bluesky only, deliberately.
@@ -143,7 +144,11 @@ export default function SocialPost(): React.JSX.Element {
     }
   }
 
-  const over = result ? result.characters > CHAR_LIMIT : false
+  // Counted in UTF-8 bytes, which is what the Bluesky connector actually enforces against
+  // this 300 — see state/postLength.ts. A draft of exactly 300 characters was rejected for
+  // exceeding 300 because three curly apostrophes made it 306 bytes.
+  const used = result ? postLength(result.text, 'bluesky') : 0
+  const over = used > CHAR_LIMIT
 
   return (
     <div style={{ maxWidth: 1120, margin: '0 auto', padding: '22px 34px 60px' }}>
@@ -341,8 +346,8 @@ export default function SocialPost(): React.JSX.Element {
                   color: over ? 'var(--danger-ink)' : 'var(--ink-faint)'
                 }}
               >
-                {result.characters}
-                {` / ${CHAR_LIMIT}`} characters{over ? ' — too long, trim it' : ''}
+                {used}
+                {` / ${CHAR_LIMIT}`} bytes{over ? ' — too long, trim it' : ''}
               </div>
               </div>
             </div>

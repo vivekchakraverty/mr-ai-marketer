@@ -4,6 +4,7 @@ import { useAppStore } from '../state/store'
 import BackendImage from './BackendImage'
 import BackendVideo from './BackendVideo'
 import { PLATFORM_SETUP_GUIDES } from '../state/platformSetupGuides'
+import { postLength, postLengthUnit } from '../state/postLength'
 import { label, primaryButton, secondaryButtonSmall, tag, textInput, textarea } from '../styles/styleKit'
 
 /** Per-channel post limits, for the ones that actually enforce one.
@@ -137,7 +138,9 @@ export default function SendToDistributionModal({
   const tightestLimit = limited.length
     ? limited.reduce((a, b) => (b.limit < a.limit ? b : a))
     : null
-  const tooLongFor = limited.filter((x) => text.length > x.limit).map((x) => x.channel)
+  // Measured the way each channel's send path measures — see state/postLength.ts, where
+  // Bluesky is counted in UTF-8 bytes because that is what the connector enforces.
+  const tooLongFor = limited.filter((x) => postLength(text, x.channel) > x.limit).map((x) => x.channel)
 
   const needsEmail = selected.includes('email')
   const needsReddit = selected.includes('reddit')
@@ -148,6 +151,12 @@ export default function SendToDistributionModal({
     if (needsChannelId && !channelId.trim()) return 'Discord channel ID is required.'
     if (needsPageId && !pageId.trim()) return 'Page ID is required.'
     if (needsImageUrl && !imageUrl.trim()) return 'Instagram needs an image URL.'
+    // Bluesky's connector rejects an over-length post outright, so sending one is a
+    // guaranteed failure rather than a risk worth taking. Every other limit here is a
+    // number this screen is only guessing at, so those still warn without blocking.
+    if (tooLongFor.includes('bluesky')) {
+      return `This post is ${postLength(text, 'bluesky').toLocaleString()} bytes and Bluesky accepts 300. Non-ASCII characters — curly quotes, dashes, emoji — cost two or three bytes each.`
+    }
     if (needsEmail && (!to.trim() || !from.trim())) return 'Email needs both To and From addresses.'
     if (needsReddit && (!subreddit.trim() || !redditTitle.trim())) return 'Reddit needs a subreddit and a post title.'
     if (schedule) {
@@ -283,7 +292,11 @@ export default function SendToDistributionModal({
               }}
             >
               <span>
-                {text.length.toLocaleString()} character{text.length === 1 ? '' : 's'}
+                {(tightestLimit
+                  ? postLength(text, tightestLimit.channel)
+                  : text.length
+                ).toLocaleString()}{' '}
+                {tightestLimit ? postLengthUnit(tightestLimit.channel) : 'characters'}
                 {tightestLimit ? ` · ${tightestLimit.label} allows ${tightestLimit.limit}` : ''}
               </span>
               {tooLongFor.length > 0 && (
