@@ -287,9 +287,26 @@ export default function TumblrPost(): React.JSX.Element {
         {result && (
           <div style={{ marginTop: 16 }}>
             <Card>
-              <div style={{ whiteSpace: 'pre-wrap', font: "600 14px/1.7 'Quicksand'", color: 'var(--ink)' }}>
-                {result.text}
-              </div>
+              {/* Editable in place — a generated post is a first attempt, and the panels
+                  below read the same text, so an edit here reaches them too. */}
+              <textarea
+                value={result.text}
+                spellCheck
+                onChange={(e) => setResult({ ...result, text: e.target.value })}
+                style={{
+                  font: "600 14px/1.7 'Quicksand'",
+                  color: 'var(--ink)',
+                  background: 'var(--surface)',
+                  border: '2px solid var(--border)',
+                  borderRadius: 14,
+                  padding: '12px 14px',
+                  width: '100%',
+                  minHeight: 168,
+                  boxSizing: 'border-box',
+                  resize: 'vertical',
+                  outline: 'none'
+                }}
+              />
 
               {result.tags.length > 0 && (
                 <div>

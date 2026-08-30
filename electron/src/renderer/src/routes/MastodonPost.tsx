@@ -474,6 +474,7 @@ export default function MastodonPost(): React.JSX.Element {
           {result && (
             <Draft
               result={result}
+              onEdit={(text) => setResult({ ...result, text })}
               copied={copied}
               onCopy={() => {
                 void navigator.clipboard.writeText(result.text)
@@ -747,6 +748,7 @@ function RuleRow({ rule, highlight = false }: { rule: MastodonRule; highlight?: 
 
 function Draft({
   result,
+  onEdit,
   copied,
   onCopy,
   onRetry,
@@ -758,6 +760,7 @@ function Draft({
   instance
 }: {
   result: MastodonGenerateResponse
+  onEdit: (text: string) => void
   copied: boolean
   onCopy: () => void
   onRetry: () => void
@@ -798,7 +801,14 @@ function Draft({
           </div>
         </div>
 
-        <div
+        {/* Editable in place: a generated post is a first attempt, and everything else on
+            this screen — the character count against the instance's limit, the image
+            prompt, the hashtag suggestions — reads the same text, so an edit here keeps
+            them all describing what will actually be posted. */}
+        <textarea
+          value={result.text}
+          spellCheck
+          onChange={(e) => onEdit(e.target.value)}
           style={{
             font: "600 15px/1.6 'Quicksand'",
             color: 'var(--ink)',
@@ -806,11 +816,13 @@ function Draft({
             border: '2px solid var(--border)',
             borderRadius: 14,
             padding: '14px 16px',
-            whiteSpace: 'pre-wrap'
+            width: '100%',
+            minHeight: 168,
+            boxSizing: 'border-box',
+            resize: 'vertical',
+            outline: 'none'
           }}
-        >
-          {result.text}
-        </div>
+        />
 
         <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
           <div style={primaryButtonSmall} onClick={onCopy}>

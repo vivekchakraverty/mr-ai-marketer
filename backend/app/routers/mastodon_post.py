@@ -1004,6 +1004,55 @@ def _retrieve_exemplars(niche: str, host: str, query: str, n: int = N_EXEMPLARS)
 
 DISCLOSURE_LINE = "🤖 Written with AI assistance."
 
+#: A line that is nothing but hashtags. Mirrors what Mastodon itself looks for — see
+#: _with_disclosure.
+_HASHTAG_LINE = re.compile(r"#\S+(?:\s+#\S+)*")
+
+
+def _with_disclosure(text: str) -> str:
+    """Add the AI disclosure without displacing a trailing hashtag line.
+
+    Mastodon lifts hashtags out of a post and renders them as a separate bar under the
+    content — but only when they are the LAST line. Its `hashtag_bar.tsx` walks back from
+    the end and gives up the moment it meets a node that is not a hashtag: "if the last
+    line only contains hashtags". Anything after them, including one short sentence, leaves
+    every tag inline in the body instead.
+
+    Appending the disclosure to the end did exactly that. The generator is told hashtags are
+    Mastodon's primary discovery mechanism and duly ends on them, and this line then landed
+    after and broke the bar on every disclosed post — visible against any other post in the
+    timeline, which shows tidy chips.
+
+    So the disclosure goes immediately before that trailing block instead. It is no less
+    visible for being one line earlier, and the rule it satisfies is about the post saying
+    plainly that a machine wrote it, not about where the sentence sits.
+    """
+    body = text.strip()
+    if not body:
+        return DISCLOSURE_LINE
+
+    lines = body.split("\n")
+    tail: list[str] = []
+    while lines:
+        last = lines[-1].strip()
+        if not last:
+            lines.pop()
+            continue
+        if _HASHTAG_LINE.fullmatch(last):
+            tail.insert(0, last)
+            lines.pop()
+            continue
+        break
+
+    if not tail:
+        return f"{body}\n\n{DISCLOSURE_LINE}"
+
+    head = "\n".join(lines).rstrip()
+    tags = "\n".join(tail)
+    # A post that is nothing but hashtags still keeps them last, so a media post can carry
+    # its bar; the disclosure simply leads.
+    return f"{head}\n\n{DISCLOSURE_LINE}\n\n{tags}" if head else f"{DISCLOSURE_LINE}\n\n{tags}"
+
 
 def _compliance_for(policy: masto.InstancePolicy, disclose: bool) -> ComplianceOut:
     """Turn the instance's own rules into concrete instructions for this post.
@@ -1105,7 +1154,7 @@ def generate(body: GenerateRequest) -> GenerateResponse:
 
     text = text.strip()
     if body.discloseAi and DISCLOSURE_LINE not in text:
-        text = f"{text}\n\n{DISCLOSURE_LINE}"
+        text = _with_disclosure(text)
 
     generation_id: int | None = None
     try:

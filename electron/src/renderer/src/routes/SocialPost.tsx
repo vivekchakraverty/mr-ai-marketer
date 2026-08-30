@@ -352,7 +352,17 @@ export default function SocialPost(): React.JSX.Element {
               </div>
             </div>
 
-            <div
+            {/* The draft is edited here rather than only after it reaches the Library.
+                A generated post is a first attempt — a word to change or a line to cut is
+                the normal case, and sending it to the Library to fix it there meant the
+                byte counter, the image prompt, the hashtag suggestions and everything else
+                on this screen kept describing text nobody was going to publish. Writing
+                back into `result` is what keeps all of them honest, since they already
+                read from it. */}
+            <textarea
+              value={result.text}
+              spellCheck
+              onChange={(e) => setResult({ ...result, text: e.target.value })}
               style={{
                 font: "600 15px/1.6 'Quicksand'",
                 color: 'var(--ink)',
@@ -360,11 +370,13 @@ export default function SocialPost(): React.JSX.Element {
                 border: '2px solid var(--border)',
                 borderRadius: 14,
                 padding: '14px 16px',
-                whiteSpace: 'pre-wrap'
+                width: '100%',
+                minHeight: 148,
+                boxSizing: 'border-box',
+                resize: 'vertical',
+                outline: 'none'
               }}
-            >
-              {result.text}
-            </div>
+            />
 
             <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
               <div
