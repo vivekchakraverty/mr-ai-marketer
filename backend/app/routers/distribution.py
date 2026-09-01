@@ -918,6 +918,57 @@ def cancel_scheduled_job(job_id: str) -> dict:
     )
 
 
+@router.post("/jobs/{job_id}/retry")
+def retry_failed_job(job_id: str) -> dict:
+    """Send a failed post again, on the same row.
+
+    History had no way to act on a failure: the detail view showed the engine's error and
+    left re-creating the whole post by hand as the only way forward. That was tolerable
+    while failures meant the content was wrong, and stopped being tolerable once one of
+    them turned out to be a timeout — a post that would have gone out untouched on a
+    second attempt.
+
+    Re-fired in place rather than queued as a new job, for two reasons. The history stays
+    one row per intent instead of accumulating a copy per attempt; and `fire_job` keys
+    Mastodon's Idempotency-Key off the job id, so re-using the row is what lets the server
+    recognise a repeat. That matters for the failure this was written for: an upload can
+    fail in a way that leaves the status genuinely unsent, but a lost *response* looks
+    identical from here, and re-firing under the original key is what stops the second
+    attempt becoming a second post.
+
+    Only a failed job. A scheduled one has `cancel`, a sent one must not be sent twice, and
+    anything mid-flight belongs to the scheduler.
+    """
+    job = db.get_distribution_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="No distribution job with that id")
+    if job["status"] != "failed":
+        raise HTTPException(
+            status_code=409,
+            detail="Only a post that failed can be sent again.",
+        )
+
+    stored_payload = json.loads(job["payload"] or "{}")
+    canonical_payload = _upgrade_legacy_media_payload(stored_payload, job["channel"])
+    native_mastodon = (
+        job["channel"] == "mastodon" and mastodon_delivery.carries_media(canonical_payload)
+    )
+    if native_mastodon and not mastodon_delivery.has_credentials():
+        raise HTTPException(
+            status_code=503,
+            detail="Mastodon is not connected. Reconnect it in Distribute and retry.",
+        )
+    # Raises 400 for media the payload still names but the disk no longer has, which is a
+    # better answer than firing and failing on it a second time.
+    payload = canonical_payload if native_mastodon else _materialize_media_payload(canonical_payload)
+
+    # The old error has to go with the old attempt. Leaving it set would put a stale
+    # explanation next to a post that has just succeeded.
+    db.update_distribution_job(job_id, status="sending", error=None)
+    fire_job(job_id, job["channel"], payload)
+    return db.get_distribution_job(job_id)
+
+
 @router.get("/queue")
 def list_queue() -> dict:
     return {"jobs": db.list_distribution_jobs(status="pending_approval")}

@@ -172,3 +172,65 @@ def test_an_empty_pool_is_not_reserved_into(monkeypatch):
 def test_buckets_match_the_shared_schema_constraint():
     # engagement_snapshots.window_label has a CHECK permitting exactly these three.
     assert [label for label, _ in tp._BUCKETS] == ["1h", "24h", "48h"]
+
+
+# --- the multipart post has to outlive its own body -------------------------
+#
+# Tumblr takes video inline, up to video_attach.TUMBLR_MAX_BYTES (100MB), through the one
+# request in this module that is multipart. It used to be written under REQUEST_TIMEOUT, the
+# same 25 seconds a JSON call gets. The identical mistake on Mastodon surfaced as
+# SSLError(SSLWantWriteError(...)) rather than a timeout — see upload_budget.
+
+import pytest
+
+from app.services import tumblr, upload_budget, video_attach
+
+_CREDS = tumblr.Credentials("ck", "cs", "tok", "sec", blog="example")
+
+
+class _Resp:
+    status_code = 201
+
+    def json(self) -> dict:
+        return {"response": {"id": "9"}}
+
+
+def _budget_for(monkeypatch: pytest.MonkeyPatch, content: bytes) -> float:
+    """The timeout the multipart post actually hands to requests for a body this size."""
+    seen: dict[str, float] = {}
+
+    def fake_post(*_a, **kwargs) -> _Resp:
+        seen["timeout"] = kwargs["timeout"]
+        return _Resp()
+
+    monkeypatch.setattr(tumblr.requests, "post", fake_post)
+    tumblr.create_npf_post_with_media(_CREDS, "example", {}, "clip.mp4", content)
+    return seen["timeout"]
+
+
+def test_a_video_post_is_not_written_under_a_json_call_s_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _budget_for(monkeypatch, b"x" * 30_302_290) > tumblr.REQUEST_TIMEOUT
+
+
+def test_the_budget_covers_the_largest_video_tumblr_is_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ceiling video_attach enforces must be postable, not merely uploadable."""
+    budget = _budget_for(monkeypatch, b"x" * video_attach.TUMBLR_MAX_BYTES)
+    assert budget < upload_budget.MAX_SECONDS  # covered on its own terms, not by the cap
+    assert budget == pytest.approx(860, abs=2)
+
+
+def test_a_failed_upload_says_which_file_and_how_long_it_waited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_post(*_a, **_k):
+        raise tumblr.requests.RequestException("SSLWantWriteError")
+
+    monkeypatch.setattr(tumblr.requests, "post", fake_post)
+    with pytest.raises(tumblr.TumblrError) as excinfo:
+        tumblr.create_npf_post_with_media(_CREDS, "example", {}, "clip.mp4", b"x" * (2 << 20))
+    message = str(excinfo.value)
+    assert "clip.mp4" in message and "2.0MB" in message

@@ -46,6 +46,10 @@ from urllib.parse import quote, urlparse
 
 import requests
 
+# REQUEST_TIMEOUT below is a JSON call's budget and far too short for a body of
+# attachment size — see upload_budget for what that cost and how the figure is arrived at.
+from .upload_budget import upload_timeout
+
 log = logging.getLogger(__name__)
 
 USER_AGENT = "MrAIMarketer/1.0 (+https://github.com/; Mastodon Post Creator)"
@@ -441,11 +445,15 @@ def api_delete(host: str, path: str, token: str) -> Any:
 def upload_media(
     host: str, token: str, filename: str, content: bytes, description: str = ""
 ) -> str:
-    """Upload one image and return its media id, for attaching to a status.
+    """Upload one image or video and return its media id, for attaching to a status.
 
     A separate call rather than part of _call because this is the one request that is
     multipart rather than JSON, and folding a files= branch into the shared transport
     would complicate every other caller for one endpoint's sake.
+
+    It is also the only request whose body is large enough for the socket timeout to
+    matter, so it does not use REQUEST_TIMEOUT — see upload_budget for what a 20-second
+    budget does to a 29MB video, and why the error did not look like a timeout.
 
     Uses v2, which answers 202 for anything the server is still processing. That claim
     used to end "the id is valid immediately either way, so there is nothing to poll",
@@ -467,16 +475,23 @@ def upload_media(
 
     files = {"file": (filename, content)}
     data = {"description": description[:1500]} if description.strip() else None
+    budget = upload_timeout(len(content))
+    megabytes = len(content) / (1024 * 1024)
     try:
         resp = requests.post(
             f"https://{host}/api/v2/media",
             headers={"User-Agent": USER_AGENT, "Authorization": f"Bearer {token}"},
             files=files,
             data=data,
-            timeout=REQUEST_TIMEOUT,
+            timeout=budget,
         )
     except requests.RequestException as err:
-        raise MastodonError(f"Could not reach {host} to upload the image: {err}") from None
+        # Named rather than "the image": this path carries video too, and the size and the
+        # budget are the two numbers that say whether the next failure is the uplink or us.
+        raise MastodonError(
+            f"Could not reach {host} to upload {filename} "
+            f"({megabytes:.1f}MB, gave up after {budget:.0f}s): {err}"
+        ) from None
 
     if resp.status_code not in (200, 202):
         raise MastodonError(_error_detail(resp))

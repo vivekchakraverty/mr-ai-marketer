@@ -758,6 +758,17 @@ export function cancelScheduledDistributionJob(jobId: string): Promise<Distribut
   return postJson(`/distribution/jobs/${jobId}/cancel`, {})
 }
 
+/**
+ * Send a failed post again.
+ *
+ * Deliberately without a timeout, like every other call here. The request is held open for
+ * the whole delivery, and a delivery carrying video is minutes of upload rather than
+ * milliseconds — aborting it early would abandon a post that was still going out fine.
+ */
+export function retryFailedDistributionJob(jobId: string): Promise<DistributionJob> {
+  return postJson(`/distribution/jobs/${jobId}/retry`, {})
+}
+
 export interface SendToDistributionRequest {
   libraryItemId: string
   channels: string[]

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from ..services import mastodon
+from ..services import mastodon, upload_budget
 
 
 class _Resp:
@@ -108,3 +108,59 @@ def test_a_real_error_while_polling_is_raised_rather_than_waited_out(
     monkeypatch.setattr(mastodon.requests, "get", lambda *a, **k: _Resp(401, {"error": "nope"}))
     with pytest.raises(mastodon.MastodonError):
         mastodon.upload_media("example.social", "tok", "clip.mp4", b"d")
+
+
+# The other failure only video produces: the upload never finishes inside the socket's write
+# deadline. A 28.9MB clip against the flat 20s REQUEST_TIMEOUT needs a sustained 12Mbit/s
+# uplink, and when it does not get one the deadline expires mid-body and is reported as
+# SSLError(SSLWantWriteError(...)) rather than a timeout — so it looked like a TLS fault.
+
+
+def _budget_for(monkeypatch: pytest.MonkeyPatch, content: bytes) -> float:
+    """The timeout the upload actually hands to requests for a body of this size."""
+    seen: dict[str, float] = {}
+
+    def fake_post(*_a, **kwargs) -> _Resp:
+        seen["timeout"] = kwargs["timeout"]
+        return _Resp(200, {"id": "1"})
+
+    monkeypatch.setattr(mastodon.requests, "post", fake_post)
+    mastodon.upload_media("example.social", "tok", "clip.mp4", content)
+    return seen["timeout"]
+
+
+def test_the_upload_budget_grows_with_the_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The clip that produced the bug must get minutes, not the 20s a JSON call gets."""
+    budget = _budget_for(monkeypatch, b"x" * 30_302_290)
+    assert budget > mastodon.REQUEST_TIMEOUT
+    assert budget == pytest.approx(291, abs=1)
+
+
+def test_a_small_attachment_is_not_given_the_whole_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An image that will never take minutes should still fail in about one."""
+    assert _budget_for(monkeypatch, b"x" * (1 << 20)) < 90
+
+
+def test_the_budget_is_capped_so_a_stalled_transfer_cannot_hold_a_post_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _budget_for(monkeypatch, b"x" * (500 << 20)) == upload_budget.MAX_SECONDS
+
+
+def test_a_failed_upload_names_the_file_rather_than_calling_a_video_an_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The size and the budget are what say whether the next failure is the uplink or us."""
+
+    def fake_post(*_a, **_k):
+        raise mastodon.requests.RequestException("SSLWantWriteError")
+
+    monkeypatch.setattr(mastodon.requests, "post", fake_post)
+    with pytest.raises(mastodon.MastodonError) as excinfo:
+        mastodon.upload_media("example.social", "tok", "clip.mp4", b"x" * (2 << 20))
+    message = str(excinfo.value)
+    assert "clip.mp4" in message
+    assert "the image" not in message
+    assert "2.0MB" in message

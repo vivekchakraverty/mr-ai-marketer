@@ -8,6 +8,7 @@ import {
   fetchDistributionJobs,
   fetchDistributionQueue,
   rejectDistributionItem,
+  retryFailedDistributionJob,
   type ChannelStatus,
   type CustomChannelStatus,
   type DistributionJob
@@ -138,6 +139,7 @@ export default function Distribute(): React.JSX.Element {
   // question ("what went out?", "why did that fail?"), not browsed side by side.
   const [expandedJob, setExpandedJob] = useState<string | null>(null)
   const [cancellingJob, setCancellingJob] = useState<string | null>(null)
+  const [retryingJob, setRetryingJob] = useState<string | null>(null)
   // Which row is asking "are you sure?". Confirmed inline rather than through
   // window.confirm: that is a native Chromium dialog, and in Electron putting one up
   // leaves the date picker in the send dialog unable to open — the page keeps working,
@@ -250,6 +252,32 @@ export default function Distribute(): React.JSX.Element {
 
   function handleResolved(jobId: string): void {
     setQueue((current) => current.filter((job) => job.id !== jobId))
+  }
+
+  /**
+   * Send a failed post again, without rebuilding it by hand.
+   *
+   * The request is held open for the whole delivery — minutes, for a post carrying video —
+   * so the button has to stay visibly busy rather than merely disabled, or a wait that long
+   * reads as nothing having happened and gets clicked again.
+   */
+  async function handleRetry(job: DistributionJob): Promise<void> {
+    if (retryingJob) return
+    setRetryingJob(job.id)
+    try {
+      const retried = await retryFailedDistributionJob(job.id)
+      historyRefreshSequence.current += 1
+      setJobs((current) => current.map((item) => (item.id === retried.id ? retried : item)))
+    } catch (err) {
+      // Onto the row itself, where the previous failure is already being read. The poll
+      // would otherwise overwrite it with the stored error and lose why the retry failed.
+      const detail = err instanceof Error ? err.message : String(err)
+      setJobs((current) =>
+        current.map((item) => (item.id === job.id ? { ...item, status: 'failed', error: detail } : item))
+      )
+    } finally {
+      setRetryingJob(null)
+    }
   }
 
   async function handleCancelScheduled(job: DistributionJob): Promise<void> {
@@ -586,7 +614,14 @@ export default function Distribute(): React.JSX.Element {
                     )}
                   </div>
                 </div>
-                {open && <JobDetails job={job} />}
+                {open && (
+                  <JobDetails
+                    job={job}
+                    retrying={retryingJob === job.id}
+                    retryDisabled={Boolean(retryingJob)}
+                    onRetry={() => void handleRetry(job)}
+                  />
+                )}
               </div>
             )
           })}
@@ -628,7 +663,17 @@ export default function Distribute(): React.JSX.Element {
  * whatever was current when the job was queued — an older row may not have the fields a
  * newer one does, and a history view is the last place that should throw.
  */
-function JobDetails({ job }: { job: DistributionJob }): React.JSX.Element {
+function JobDetails({
+  job,
+  retrying,
+  retryDisabled,
+  onRetry
+}: {
+  job: DistributionJob
+  retrying: boolean
+  retryDisabled: boolean
+  onRetry: () => void
+}): React.JSX.Element {
   let payload: Record<string, unknown> = {}
   try {
     payload = job.payload ? (JSON.parse(job.payload) as Record<string, unknown>) : {}
@@ -672,6 +717,35 @@ function JobDetails({ job }: { job: DistributionJob }): React.JSX.Element {
           }}
         >
           {job.error}
+        </div>
+      )}
+
+      {job.status === 'failed' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={retryDisabled}
+            aria-busy={retrying}
+            title={retrying ? 'Sending again…' : 'Send this post again, exactly as it is'}
+            style={{
+              font: "700 12.5px 'Quicksand'",
+              color: 'var(--ink)',
+              background: 'var(--surface)',
+              border: '2px solid var(--border)',
+              borderRadius: 10,
+              padding: '7px 14px',
+              cursor: retryDisabled ? 'wait' : 'pointer',
+              opacity: retryDisabled && !retrying ? 0.4 : 1
+            }}
+          >
+            {retrying ? 'Sending again…' : 'Try again'}
+          </button>
+          <span style={{ font: "600 11.5px 'Quicksand'", color: 'var(--ink-faint)' }}>
+            {retrying
+              ? 'Video can take a few minutes to upload — leave this open.'
+              : 'Sends the same text and attachment again.'}
+          </span>
         </div>
       )}
 

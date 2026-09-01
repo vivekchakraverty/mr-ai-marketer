@@ -54,6 +54,11 @@ from requests_oauthlib import OAuth1
 # the rest — so it is imported rather than copied.
 from .mastodon import html_to_text
 
+# REQUEST_TIMEOUT below is a JSON call's budget. The multipart post is the one request
+# whose body is large enough for the socket timeout to matter, and it is sized from the
+# payload instead — see upload_budget.
+from .upload_budget import upload_timeout
+
 log = logging.getLogger(__name__)
 
 API_ROOT = "https://api.tumblr.com/v2"
@@ -440,7 +445,7 @@ def create_npf_post_with_media(
     content: bytes,
     identifier: str = "attached-image",
 ) -> Any:
-    """Create an NPF post carrying one uploaded image.
+    """Create an NPF post carrying one uploaded image or video.
 
     Tumblr takes media inline rather than through a separate upload endpoint like
     Mastodon's: the request is multipart, one part holds the NPF JSON, another holds the
@@ -453,6 +458,11 @@ def create_npf_post_with_media(
 
     Not retried. `request()` retries on 429 because its calls are idempotent or cheap to
     repeat; repeating this one publishes a second post.
+
+    The timeout is sized from the payload rather than shared with `request()`. Tumblr takes
+    video here, and video_attach lets it up to 100MB — which a 25-second budget could only
+    write over a sustained 34Mbit/s uplink. The same mistake on Mastodon failed naming TLS
+    rather than the clock. See upload_budget.
     """
     url = f"{API_ROOT}/blog/{blog_path(blog)}/posts"
     # The JSON part must be typed, or Tumblr parses it as a plain string and rejects the
@@ -461,16 +471,23 @@ def create_npf_post_with_media(
         "json": (None, json.dumps(payload), "application/json"),
         identifier: (filename, content),
     }
+    budget = upload_timeout(len(content))
+    megabytes = len(content) / (1024 * 1024)
     try:
         resp = requests.post(
             url,
             auth=_auth(creds),
             files=files,
             headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
-            timeout=REQUEST_TIMEOUT,
+            timeout=budget,
         )
     except requests.RequestException as err:
-        raise TumblrError(f"Could not reach Tumblr: {err}") from None
+        # The size and the budget are the two numbers that say whether a repeat of this is
+        # the uplink or us; "Could not reach Tumblr" said neither.
+        raise TumblrError(
+            f"Could not reach Tumblr to upload {filename} "
+            f"({megabytes:.1f}MB, gave up after {budget:.0f}s): {err}"
+        ) from None
 
     try:
         body = resp.json()
