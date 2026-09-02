@@ -184,6 +184,33 @@ async function handOverTumblrKeys(): Promise<void> {
  * this copy in memory only, which lets a post scheduled for later upload its attachment
  * without teaching Activepieces or the backend database how to persist the credential.
  */
+/** Give the backend the poster Space this install owns, without waiting for a restart.
+ *
+ * backend.ts already puts these in the spawn environment, which covers every launch after
+ * setup. It cannot cover the launch where setup HAPPENS — the Space is created minutes after
+ * the backend started — so without this the walkthrough would finish, report success, and
+ * leave scheduled posts going to the local scheduler until the app was restarted.
+ */
+async function handOverCloudPosting(): Promise<void> {
+  try {
+    const c = getSettings().cloudPosting
+    await fetch(`${BACKEND_URL}/cloud-posting/credentials`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-mraim-token': API_TOKEN },
+      body: JSON.stringify({
+        spaceId: c.spaceId,
+        spaceUrl: c.spaceUrl,
+        posterKey: c.posterKey,
+        outboxRepo: c.outboxRepo,
+        spaceToken: c.spaceToken
+      })
+    })
+  } catch {
+    // Not set up, or the backend is not answering yet. Cloud posting stays inert and
+    // scheduled posts keep going out from this app, which is the previous behaviour.
+  }
+}
+
 async function handOverMastodonKeys(): Promise<void> {
   try {
     const settings = getSettings()
@@ -238,6 +265,9 @@ app.whenReady().then(async () => {
       'mastodonAccounts' in partial
     ) {
       void handOverMastodonKeys()
+    }
+    if ('cloudPosting' in partial) {
+      void handOverCloudPosting()
     }
     return updated
   })
@@ -356,6 +386,7 @@ app.whenReady().then(async () => {
   // collection that must survive weeks gets what it needs without anything landing on disk.
   void handOverTumblrKeys()
   void handOverMastodonKeys()
+  void handOverCloudPosting()
 
   await createWindow()
 

@@ -178,6 +178,27 @@ RAG_SERVICE_KEY = os.environ.get("RAG_SERVICE_KEY", "").strip()
 # private repo that scripts/hf/publish_assets.py knows about and the app never reads.
 
 
+# --- Cloud posting ---------------------------------------------------------
+#
+# The user's OWN copy of the poster Space, plus the private dataset it takes its queue from.
+# Electron writes all four at spawn from what the setup walkthrough provisioned; empty means
+# cloud posting is off and scheduled posts stay on the local scheduler exactly as before.
+#
+# CLOUD_POSTER_TOKEN is a fine-grained Hugging Face token scoped to the outbox dataset alone,
+# deliberately not the account-wide token in Settings: this one is also handed to the Space,
+# and the whole point of the arrangement is that a Space compromise costs the outbox and
+# nothing else.
+#
+# There is no template Space to point at: the Space is built from resources/poster-space,
+# which ships with the app. That removes the trusted third party — the code that receives the
+# credentials is the code the user already has — and one more thing to configure.
+CLOUD_POSTER_SPACE = os.environ.get("CLOUD_POSTER_SPACE", "").strip()
+CLOUD_POSTER_URL = os.environ.get("CLOUD_POSTER_URL", "").strip()
+CLOUD_POSTER_KEY = os.environ.get("CLOUD_POSTER_KEY", "").strip()
+CLOUD_POSTER_OUTBOX = os.environ.get("CLOUD_POSTER_OUTBOX", "").strip()
+CLOUD_POSTER_TOKEN = os.environ.get("CLOUD_POSTER_TOKEN", "").strip()
+
+
 class NotConfiguredError(RuntimeError):
     """Raised when a tool needs a hosted endpoint the user has not set up yet."""
 

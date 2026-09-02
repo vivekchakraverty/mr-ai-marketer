@@ -769,6 +769,67 @@ export function retryFailedDistributionJob(jobId: string): Promise<DistributionJ
   return postJson(`/distribution/jobs/${jobId}/retry`, {})
 }
 
+// --- cloud posting ---------------------------------------------------------
+//
+// Setting up the user's OWN poster Space, and handing it credentials. Nothing here ever
+// returns a credential: connect/* forward what is typed straight into the Space's secrets and
+// answer with a description of what happened.
+
+export interface CloudProvisionStatus {
+  status: 'idle' | 'running' | 'ready' | 'error'
+  message: string
+  elapsedSeconds: number
+  spaceId?: string
+  spaceUrl?: string
+  outboxRepo?: string
+  posterKey?: string
+}
+
+export interface CloudSpaceStatus {
+  reachable: boolean
+  detail?: string
+  queued?: number
+  lastTickAt?: string
+  needsBlueskyReauth?: boolean
+  mastodonConfigured?: boolean
+  blueskyConfigured?: boolean
+}
+
+export function provisionCloudPoster(body: {
+  hfToken: string
+  spaceToken: string
+  name?: string
+}): Promise<CloudProvisionStatus> {
+  return postJson('/cloud-posting/provision', body)
+}
+
+export function cloudProvisionStatus(): Promise<CloudProvisionStatus> {
+  return getJson('/cloud-posting/provision-status')
+}
+
+export function connectCloudMastodon(body: {
+  hfToken: string
+  spaceId: string
+  instance: string
+  accessToken: string
+}): Promise<{ connected: boolean; instance: string; writeOnly: boolean; detail: string }> {
+  return postJson('/cloud-posting/connect/mastodon', body)
+}
+
+export function connectCloudBluesky(body: {
+  hfToken: string
+  spaceId: string
+  identifier: string
+  appPassword: string
+  pdsHost?: string
+}): Promise<{ connected: boolean; did: string; detail: string }> {
+  return postJson('/cloud-posting/connect/bluesky', body)
+}
+
+export function cloudSpaceStatus(): Promise<CloudSpaceStatus> {
+  return getJson('/cloud-posting/space-status')
+}
+
 export interface SendToDistributionRequest {
   libraryItemId: string
   channels: string[]

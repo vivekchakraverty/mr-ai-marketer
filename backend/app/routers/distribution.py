@@ -9,8 +9,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import db
-from ..services import activepieces_client, generation_link, mastodon_delivery
+from .. import config, db
+from ..services import activepieces_client, cloud_poster, generation_link, mastodon_delivery
 from ..services.activepieces_client import ActivepiecesError
 
 router = APIRouter(prefix="/distribution", tags=["distribution"])
@@ -24,6 +24,21 @@ _CHANNELS = ["bluesky", "mastodon", "discord", "linkedin", "facebook", "instagra
 # The approval step is the line between automation that grows an audience and automation
 # that reads as spam, per the Distribution Layer plan.
 _COMMUNITY_CHANNELS = ["reddit", "discord-conversation"]
+
+# Channels the user's own poster Space can publish for them. A SCHEDULED post on one of these
+# is handed to the Space so it goes out whether or not this app is running; an immediate send
+# stays local, because the app is by definition open and the local path is already working.
+#
+# Handing one over is a change of OWNER, not a flag: the job's status becomes
+# "scheduled_cloud", and every status-conditional query in db.py keys on the literal
+# 'scheduled' — list_due_scheduled_jobs, cancel_scheduled_distribution_job,
+# claim_scheduled_distribution_job and fail_scheduled_distribution_job alike. So the local
+# scheduler cannot see a cloud job at all, and the two can never both believe one is due.
+_CLOUD_CHANNELS = {"bluesky", "mastodon"}
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _statuses(names: list[str], connected: set[str]) -> list[dict]:
@@ -890,6 +905,22 @@ def send(body: SendRequest) -> dict:
             )
             fire_job(job["id"], channel, payload)
             job = db.get_distribution_job(job["id"])
+        elif channel in _CLOUD_CHANNELS and cloud_poster.is_configured():
+            # The upload can take minutes for a video. It happens here, while the user is
+            # watching the send dialog, rather than at posting time when nobody is.
+            try:
+                cloud_poster.enqueue(job["id"], channel, canonical_payload, scheduled_at)
+                job = db.update_distribution_job(
+                    job["id"], status="scheduled_cloud", cloud_enqueued_at=_now_iso()
+                )
+            except cloud_poster.CloudPosterError as err:
+                # Never lose the post over this. It stays on the local scheduler exactly as
+                # it would have before cloud posting existed — it just needs the app open.
+                log.warning("[distribution] cloud enqueue failed for %s: %s", job["id"], err)
+                job = db.update_distribution_job(
+                    job["id"],
+                    error=f"Could not hand this to your poster Space, so it will go out from this app instead: {err}",
+                )
         jobs.append(job)
     return {"jobs": jobs}
 
@@ -901,6 +932,20 @@ def list_jobs(status: Optional[str] = None) -> dict:
 
 @router.post("/jobs/{job_id}/cancel")
 def cancel_scheduled_job(job_id: str) -> dict:
+    existing = db.get_distribution_job(job_id)
+    if existing and existing["status"] == "scheduled_cloud":
+        # Out of the outbox first. A Space that has already claimed the job is posting it
+        # right now, and reporting success here would leave the user believing a post they
+        # are about to see was stopped.
+        if not cloud_poster.cancel(job_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Your poster Space is already sending this one, so it cannot be cancelled.",
+            )
+        cancelled_cloud = db.cancel_cloud_scheduled_distribution_job(job_id)
+        if cancelled_cloud:
+            return cancelled_cloud
+
     cancelled = db.cancel_scheduled_distribution_job(job_id)
     if cancelled:
         return cancelled
@@ -947,6 +992,20 @@ def retry_failed_job(job_id: str) -> dict:
             status_code=409,
             detail="Only a post that failed can be sent again.",
         )
+
+    # A cloud job that failed may have failed only on the way BACK. The outcome file is the
+    # authority, and re-firing through Activepieces — which has no idempotency key of its own
+    # on the Bluesky path — is exactly how one lost response becomes two posts.
+    if job["cloud_enqueued_at"] and cloud_poster.is_configured():
+        recorded = cloud_poster.outcome(job_id)
+        if recorded and recorded.get("status") == "sent":
+            db.update_distribution_job(
+                job_id, status="sent", error=None, cloud_ref=str(recorded.get("ref") or "")
+            )
+            raise HTTPException(
+                status_code=409,
+                detail="This one did go out — your poster Space sent it. History has been corrected.",
+            )
 
     stored_payload = json.loads(job["payload"] or "{}")
     canonical_payload = _upgrade_legacy_media_payload(stored_payload, job["channel"])
@@ -1083,6 +1142,74 @@ def _fire_due_scheduled_jobs() -> None:
         fire_job(claimed["id"], claimed["channel"], payload)
 
 
+def _reconcile_cloud_jobs() -> None:
+    """Read back what the poster Space did, for jobs it owns.
+
+    The outbox is the boundary in both directions, so this works whether or not the Space is
+    awake — the outcome file is already committed by the time it matters.
+
+    The reference is written as "mastodon:<id>" because that is the exact form
+    generation_link already parses (see _mastodon_status_id), so posts sent from the cloud
+    keep feeding the Social Post learning loop with no change there.
+    """
+    if not cloud_poster.is_configured():
+        return
+    for job in db.list_cloud_pending_jobs():
+        outcome = cloud_poster.outcome(job["id"])
+        if not outcome:
+            continue
+        ref = str(outcome.get("ref") or "")
+        if outcome.get("status") == "sent":
+            db.update_distribution_job(
+                job["id"], status="sent", error=None, cloud_ref=ref, activepieces_run_id=ref or None
+            )
+        else:
+            db.update_distribution_job(
+                job["id"],
+                status="failed",
+                error=str(outcome.get("error") or "Your poster Space could not send this one."),
+            )
+
+
+#: The outbox is swept about once a day. More often would be pointless — nothing shrinks
+#: between posts — and each sweep reads every outcome file, so it is not free.
+_PRUNE_INTERVAL_SECONDS = 24 * 3600
+_last_prune_at = 0.0
+
+
+def _prune_outbox_occasionally() -> None:
+    """Keep the user's outbox from growing without bound.
+
+    Deliberately here rather than in the Space: squashing rewrites the branch the Space's
+    compare-and-swap claims against, so it must not run from the process that might be
+    mid-post. This one is, by definition, not.
+    """
+    global _last_prune_at
+    if not cloud_poster.is_configured():
+        return
+    if time.monotonic() - _last_prune_at < _PRUNE_INTERVAL_SECONDS:
+        return
+    _last_prune_at = time.monotonic()
+    result = cloud_poster.prune()
+    if result.get("pruned") or result.get("squashed"):
+        log.info("[distribution] outbox swept: %s", result)
+
+
+def _wake_cloud_if_due() -> None:
+    """Nudge the Space when something it owns is due soon.
+
+    Free hardware sleeps and cannot be told not to, so the Space's own timer only runs while
+    it happens to be awake. This costs one HTTP call and is the difference between "posted at
+    3am" and "posted whenever something next touched the Space" — but only while this app is
+    running, which is why it is insurance rather than the mechanism.
+    """
+    if not cloud_poster.is_configured() or not config.CLOUD_POSTER_URL:
+        return
+    soon = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+    if any((job["scheduled_at"] or "") <= soon for job in db.list_cloud_pending_jobs()):
+        cloud_poster.wake()
+
+
 def _scheduler_loop() -> None:
     while True:
         try:
@@ -1103,7 +1230,11 @@ def _scheduler_loop() -> None:
             # and costs nothing — not even an import — when there is nothing to link.
             generation_link.link_sent_bluesky_posts()
             generation_link.link_sent_mastodon_posts()
-            generation_link.link_sent_mastodon_posts()
+            # Posts the user's own Space owns: read back its outcomes, and wake it if one of
+            # them is nearly due. Both are no-ops when cloud posting is not set up.
+            _reconcile_cloud_jobs()
+            _wake_cloud_if_due()
+            _prune_outbox_occasionally()
         except Exception:  # noqa: BLE001 — a bad tick must not kill the scheduler thread
             pass
         time.sleep(30)

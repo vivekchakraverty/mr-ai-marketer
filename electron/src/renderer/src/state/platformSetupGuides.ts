@@ -27,6 +27,15 @@ export interface PlatformSetupGuide {
   color: string
   blurb: string
   helpSteps: string[]
+  /** The page the steps are talking about, opened with window.api.openExternal. The steps
+   * name these as bare text ("Go to Settings -> App Passwords on bsky.app"), which is a
+   * clear instruction and a tedious one to follow by hand. */
+  helpUrl?: string
+  /** For a page whose address depends on what has already been typed — a Mastodon token is
+   * created on the user's own instance, so the link cannot be known until they name it.
+   * Return '' when the values so far are not enough to build one; takes precedence over
+   * helpUrl when it returns a URL. */
+  helpUrlFor?: (values: Record<string, string>) => string
   fields: SetupField[]
   /** Set for channels that piggyback on another channel's connection (e.g. Discord replies
    * reuse the Discord broadcast bot connection) — no separate connect form of their own. */
@@ -45,6 +54,7 @@ export const PLATFORM_SETUP_GUIDES: Record<string, PlatformSetupGuide> = {
       'Use your handle (e.g. yourname.bsky.social) or account email as the identifier.',
       'Leave PDS Host blank unless you run your own Bluesky server.'
     ],
+    helpUrl: 'https://bsky.app/settings/app-passwords',
     fields: [
       { key: 'identifier', label: 'Handle or email', placeholder: 'yourname.bsky.social' },
       { key: 'password', label: 'App password', placeholder: 'xxxx-xxxx-xxxx-xxxx', secret: true },
@@ -62,6 +72,17 @@ export const PLATFORM_SETUP_GUIDES: Record<string, PlatformSetupGuide> = {
       'Give it any name, then create it.',
       'Copy the "Your access token" value.'
     ],
+    // Straight to the create-application form on whichever instance they named. Falls back
+    // to nothing until base_url has something host-shaped in it.
+    helpUrlFor: (values) => {
+      const host = String(values.base_url ?? '')
+        .trim()
+        .replace(/^https?:\/\//, '')
+        .split('/')[0]
+        .replace(/\.$/, '')
+        .toLowerCase()
+      return host.includes('.') ? `https://${host}/settings/applications/new` : ''
+    },
     fields: [
       { key: 'base_url', label: 'Instance base URL', placeholder: 'https://mastodon.social' },
       { key: 'access_token', label: 'Access token', placeholder: 'Paste your access token', secret: true }

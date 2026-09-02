@@ -18,44 +18,18 @@ import {
 } from '../api/client'
 import { useAppStore } from '../state/store'
 import { label, primaryButtonSmall, secondaryButtonSmall, select, textInput } from '../styles/styleKit'
-import type { AppSettings } from '../../../main/settingsStore'
+import { EMPTY_SETTINGS, type AppSettings } from '../../../shared/settings'
 import BackupPanel from '../components/BackupPanel'
-
-const EMPTY: AppSettings = {
-  hfToken: '',
-  youtubeApiKey: '',
-  hfAssets: { influencerRepo: '', guestPostRepo: '', ctrModelRepo: '' },
-  mastodonInstance: '',
-  mastodonAccessToken: '',
-  mastodonAccounts: [],
-  tumblr: { consumerKey: '', consumerSecret: '', oauthToken: '', oauthTokenSecret: '', blog: '' },
-  googleAds: { developerToken: '', clientId: '', clientSecret: '', refreshToken: '', loginCustomerId: '' },
-  keywordSurfer: { proxyServer: '', proxyUsername: '', proxyPassword: '' },
-  marketingPlan: { spaceUrl: '' },
-  writerSpaces: { blogWriter: '', emailWriter: '' },
-  emailWriterModal: { modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '' },
-  brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '', modelRepo: '', imageBucket: '' },
-  topicScout: {
-    contactEmail: '',
-    githubToken: '',
-    reliefwebAppname: '',
-    fredApiKey: '',
-    twitterAuthToken: '',
-    twitterCt0: '',
-    geo: 'US'
-  },
-  // Filled in by the Community section's Account tab, not here — the login is a phone-code
-  // flow, not a field to paste. Present so a save from this screen doesn't drop it.
-  telegram: { apiId: '', apiHash: '', session: '', username: '' }
-}
+import CloudPostingPanel from '../components/CloudPostingPanel'
 
 type Check = { state: 'idle' | 'checking' | 'ok' | 'error'; detail?: string }
 
 export default function Settings(): React.JSX.Element {
   const goHome = useAppStore((s) => s.goHome)
+  const openSetup = useAppStore((s) => s.openSetup)
   const setHfStatus = useAppStore((s) => s.setHfStatus)
 
-  const [settings, setSettings] = useState<AppSettings>(EMPTY)
+  const [settings, setSettings] = useState<AppSettings>(EMPTY_SETTINGS)
   const [schema, setSchema] = useState<EnvSetting[]>([])
   const [edits, setEdits] = useState<Record<string, string>>({})
   const [clears, setClears] = useState<Record<string, boolean>>({})
@@ -260,7 +234,19 @@ export default function Settings(): React.JSX.Element {
     setError('')
     try {
       // 1. Shared credentials go to Electron's encrypted per-user store.
-      await window.api.settings.setAll(settings)
+      //
+      // Everything this screen actually EDITS, and nothing else. `settings` is a snapshot
+      // taken when the screen mounted, so sending it whole writes back whatever those groups
+      // held at that moment — reverting anything another part of the app changed in the
+      // meantime. That is not hypothetical: connecting cloud posting from the walkthrough
+      // stores a fresh key on this machine and on the Space, and a later "Save everything"
+      // put the stale one back, leaving the Space rejecting the app with a 401 that read as
+      // "your Space did not recognise this app's key".
+      //
+      // Neither group below has a single field on this screen, so omitting them loses
+      // nothing; the panels that own them write them directly.
+      const { cloudPosting: _cloud, setupWizard: _wizard, ...ownedByThisScreen } = settings
+      await window.api.settings.setAll(ownedByThisScreen)
       if (settings.hfToken.trim()) {
         const res = await verifyHfToken(settings.hfToken.trim())
         setHfStatus(res.valid, res.username ?? null)
@@ -464,6 +450,37 @@ export default function Settings(): React.JSX.Element {
         <div style={{ font: "600 14px 'Quicksand'", color: 'var(--ink-muted)' }}>Loading…</div>
       ) : (
         <>
+          {/* The walkthrough is skippable by design, so this is the way back into it. It sits
+              first because someone who skipped it on launch is looking for exactly this. */}
+          <Section
+            title="Setup walkthrough"
+            blurb="Connect your accounts one at a time, in order. Safe to re-run — it fills in what you have already set up and skips nothing you do not ask it to."
+            accent="var(--tool-distribute)"
+            optional
+          >
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={primaryButtonSmall} onClick={() => openSetup(settings.setupWizard.resumeAt || undefined)}>
+                {settings.setupWizard.completedAt ? 'Run it again' : settings.setupWizard.startedAt ? 'Resume setup' : 'Start setup'}
+              </div>
+              <div style={{ font: "600 12.5px 'Quicksand'", color: 'var(--ink-faint)' }}>
+                {settings.setupWizard.completedAt
+                  ? 'Finished — re-running changes nothing you do not touch.'
+                  : settings.setupWizard.startedAt
+                    ? 'Picks up where you left off.'
+                    : 'Never run.'}
+              </div>
+            </div>
+          </Section>
+
+          <Section
+            title="Cloud posting"
+            blurb="Lets scheduled Mastodon and Bluesky posts go out while this app is closed, from a poster in your own Hugging Face account."
+            accent="var(--tool-distribute)"
+            optional
+          >
+            <CloudPostingPanel />
+          </Section>
+
           {/* ---- shared across every tool ------------------------------- */}
           <Section
             title="Hugging Face"

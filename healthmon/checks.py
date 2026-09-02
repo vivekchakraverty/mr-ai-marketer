@@ -305,6 +305,22 @@ def _space_check(space_id: str, critical: bool = True):
     return run
 
 
+def check_cloud_poster() -> tuple[str, str]:
+    """The poster Space, judged by whether it answers rather than by its Spaces API stage.
+
+    A sleeping free Space is not a broken one — it wakes on the next request and posts
+    everything whose time has passed — so an unreachable poster is reported as a warning, not
+    a failure. What WOULD be a failure is /health answering something other than 200, which
+    means the container is up and the app inside it is not.
+    """
+    if not config.CLOUD_POSTER_URL:
+        return "skip", "no poster Space configured (CLOUD_POSTER_URL)"
+    try:
+        return _http_ok(f"{config.CLOUD_POSTER_URL}/health")
+    except requests.RequestException as err:
+        return "warn", f"asleep or unreachable ({type(err).__name__}); queued posts are unaffected"
+
+
 def check_mail_tracker() -> tuple[str, str]:
     """The mail-tracking Space is a plain HTTP service, not a gradio app, so the Spaces API
     stage tells us less than the service answering does. /docs is public; /events is not."""
@@ -476,6 +492,7 @@ def health_checks() -> list[Check]:
         Check("Video search (yt-dlp)", "infra", check_yt_search),
         Check("Video search (Piped)", "infra", check_piped),
         Check("Mail tracking Space", "space", check_mail_tracker),
+        Check("Cloud poster Space", "space", check_cloud_poster),
     ]
     checks += [Check(label, "space", _space_check(space_id, critical))
                for label, space_id, critical in _watched_spaces()]

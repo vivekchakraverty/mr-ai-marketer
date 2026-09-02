@@ -141,6 +141,15 @@ interface AppState {
   closeDistributionGate: () => void
   setDistributionEngineReady: (ready: boolean) => void
 
+  // The first-run credential walkthrough. Open/close live here rather than in a route
+  // because it takes over the screen from anywhere; which step it is on is persisted in
+  // settings (setupWizard.resumeAt), so this only holds the in-flight position.
+  setupOpen: boolean
+  setupStep: string
+  openSetup: (step?: string) => void
+  closeSetup: () => void
+  setSetupStep: (step: string) => void
+
   openLeadgenGate: () => void
   closeLeadgenGate: () => void
   setLeadgenEngineReady: (ready: boolean) => void
@@ -174,6 +183,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   distributionEngineReady: false,
   distributionGateOpen: false,
+  setupOpen: false,
+  setupStep: '',
 
   leadgenEngineReady: false,
   leadgenGateOpen: false,
@@ -261,6 +272,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   openDistributionGate: () => set({ distributionGateOpen: true }),
   closeDistributionGate: () => set({ distributionGateOpen: false }),
   setDistributionEngineReady: (ready) => set({ distributionEngineReady: ready }),
+
+  openSetup: (step) => set({ setupOpen: true, setupStep: step ?? '' }),
+  closeSetup: () => set({ setupOpen: false }),
+  setSetupStep: (step) => set({ setupStep: step }),
 
   openLeadgenGate: () => set({ leadgenGateOpen: true }),
   closeLeadgenGate: () => set({ leadgenGateOpen: false }),

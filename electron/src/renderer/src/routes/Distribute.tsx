@@ -18,6 +18,7 @@ import ApprovalQueueCard from '../components/ApprovalQueueCard'
 import BackendImage from '../components/BackendImage'
 import BackendVideo from '../components/BackendVideo'
 import ChannelConnectModal from '../components/ChannelConnectModal'
+import { cloudSpaceStatus, type CloudSpaceStatus } from '../api/client'
 import MailComposer from '../components/MailComposer'
 import {
   BROADCAST_CHANNELS,
@@ -43,6 +44,8 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: 'Cancelled',
   pending_approval: 'Waiting on approval',
   failed: 'Failed',
+  // Owned by the user's poster Space, so it goes out whether or not this app is open.
+  scheduled_cloud: 'Scheduled (cloud)',
   approved: 'Approved',
   rejected: 'Rejected'
 }
@@ -396,6 +399,8 @@ export default function Distribute(): React.JSX.Element {
         </div>
       )}
 
+      <CloudPostingRow />
+
       <div style={{ font: "700 12px 'Quicksand'", letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--ink-faint)', marginBottom: 8 }}>
         Broadcast
       </div>
@@ -650,6 +655,87 @@ export default function Distribute(): React.JSX.Element {
   )
 }
 
+
+/**
+ * Whether scheduled posts will go out with the app closed.
+ *
+ * Deliberately its own row rather than a channel card: the cards answer "can I post here",
+ * and this answers "will the one I scheduled for 3am actually happen". A user who has not set
+ * cloud posting up is not in an error state, so it says what the current behaviour IS rather
+ * than warning about it.
+ */
+function CloudPostingRow(): React.JSX.Element | null {
+  const openSetup = useAppStore((s) => s.openSetup)
+  const [spaceId, setSpaceId] = useState('')
+  const [status, setStatus] = useState<CloudSpaceStatus | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const saved = await window.api.settings.getAll()
+      if (cancelled) return
+      setSpaceId(saved.cloudPosting.spaceId)
+      if (!saved.cloudPosting.spaceId) return
+      try {
+        const fresh = await cloudSpaceStatus()
+        if (!cancelled) setStatus(fresh)
+      } catch {
+        // A Space that does not answer is almost always asleep, which is not a fault. The
+        // row below already says the queue is safe either way.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const on = Boolean(spaceId)
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 11,
+        flexWrap: 'wrap',
+        background: 'var(--surface)',
+        border: '2px dashed var(--border)',
+        borderRadius: 14,
+        padding: '11px 14px',
+        marginBottom: 18
+      }}
+    >
+      <span
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: 5,
+          flexShrink: 0,
+          background: on ? 'var(--tool-distribute)' : 'var(--ink-fainter)',
+          border: '1.5px solid var(--border)'
+        }}
+      />
+      <div style={{ flex: 1, minWidth: 240 }}>
+        <div style={{ font: "700 13px 'Quicksand'", color: 'var(--ink)' }}>Posts while this app is closed</div>
+        <div style={{ font: "600 12px/1.6 'Quicksand'", color: 'var(--ink-muted)' }}>
+          {!on
+            ? 'Off — a scheduled Mastodon or Bluesky post needs this app running when it is due.'
+            : status?.needsBlueskyReauth
+              ? 'Your Space needs its Bluesky connection renewed.'
+              : status?.reachable
+                ? `Your poster Space is awake${
+                    typeof status.queued === 'number' && status.queued > 0
+                      ? ` with ${status.queued} waiting`
+                      : ''
+                  }.`
+                : 'Your poster Space is asleep. Anything due goes out when it next wakes.'}
+        </div>
+      </div>
+      <div style={secondaryButtonSmall} onClick={() => openSetup('cloud')}>
+        {on ? 'Manage' : 'Set it up'}
+      </div>
+    </div>
+  )
+}
 
 /**
  * What a send actually was, revealed when its row is clicked.

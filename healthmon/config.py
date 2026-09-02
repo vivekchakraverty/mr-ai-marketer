@@ -108,6 +108,10 @@ WATCHED_SPACES = {
 }
 MAIL_TRACKER_URL = os.environ.get("MAIL_TRACKER_URL", "").strip().rstrip("/")
 
+# The user's own poster Space. Not in WATCHED_SPACES: those are checked through the Spaces
+# API by repo id, and this one is per-install and better judged by whether it answers.
+CLOUD_POSTER_URL = os.environ.get("CLOUD_POSTER_URL", "").strip().rstrip("/")
+
 DEFAULT_TIMEOUT = int(os.environ.get("HEALTHMON_TIMEOUT", "25"))
 # Generation is slow by nature — a free CPU Space cold-starting can take minutes.
 E2E_TIMEOUT = int(os.environ.get("HEALTHMON_E2E_TIMEOUT", "600"))

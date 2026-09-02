@@ -95,6 +95,24 @@ function writerSpaceEnv(): Record<string, string> {
   return env
 }
 
+/** The user's own poster Space, handed over at spawn.
+ *
+ * Every value here names a repo in THEIR Hugging Face account — the Space is built from
+ * resources/poster-space rather than copied from one of ours, so there is no publisher-owned
+ * id to configure and nothing of ours in the chain.
+ *
+ * Only set when present, so an operator exporting a variable before launch still wins. */
+function cloudPostingEnv(): Record<string, string> {
+  const c = getSettings().cloudPosting
+  const env: Record<string, string> = {}
+  if (c.spaceId.trim()) env.CLOUD_POSTER_SPACE = c.spaceId.trim()
+  if (c.spaceUrl.trim()) env.CLOUD_POSTER_URL = c.spaceUrl.trim()
+  if (c.posterKey.trim()) env.CLOUD_POSTER_KEY = c.posterKey.trim()
+  if (c.outboxRepo.trim()) env.CLOUD_POSTER_OUTBOX = c.outboxRepo.trim()
+  if (c.spaceToken.trim()) env.CLOUD_POSTER_TOKEN = c.spaceToken.trim()
+  return env
+}
+
 export const BACKEND_PORT = 8756
 export const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`
 
@@ -139,7 +157,8 @@ function spawnDevBackend(): ChildProcessWithoutNullStreams {
       ...marketingPlanEnv(),
       ...writerSpaceEnv(),
       ...emailWriterModalEnv(),
-      ...hfAssetEnv()
+      ...hfAssetEnv(),
+      ...cloudPostingEnv()
     }
   })
 }
@@ -173,7 +192,8 @@ function spawnPackagedBackend(): ChildProcessWithoutNullStreams {
       ...marketingPlanEnv(),
       ...writerSpaceEnv(),
       ...emailWriterModalEnv(),
-      ...hfAssetEnv()
+      ...hfAssetEnv(),
+      ...cloudPostingEnv()
     }
   })
 }

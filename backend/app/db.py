@@ -28,6 +28,10 @@ CREATE TABLE IF NOT EXISTS distribution_jobs (
     error TEXT,
     scheduled_at TEXT,
     payload TEXT,
+    -- Set when the job was handed to the user's poster Space instead of the local
+    -- scheduler. Holds what the Space reported back ("mastodon:<id>", "bluesky:<at-uri>").
+    cloud_ref TEXT,
+    cloud_enqueued_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -282,6 +286,9 @@ def init_db() -> None:
         # generation_links shipped in 0.7.11 without this; an install upgraded from it
         # keeps the old shape until the column is added.
         _ensure_column(conn, "generation_links", "instance", "TEXT")
+        # Cloud posting shipped after distribution_jobs did.
+        _ensure_column(conn, "distribution_jobs", "cloud_ref", "TEXT")
+        _ensure_column(conn, "distribution_jobs", "cloud_enqueued_at", "TEXT")
 
 
 @contextmanager
@@ -512,6 +519,32 @@ def update_distribution_job(job_id: str, **fields) -> Optional[dict]:
     with _connect() as conn:
         conn.execute(f"UPDATE distribution_jobs SET {set_clause} WHERE id = :id", {**fields, "id": job_id})
     return get_distribution_job(job_id)
+
+
+def cancel_cloud_scheduled_distribution_job(job_id: str) -> Optional[dict]:
+    """Cancel a job the poster Space owns. Conditional for the same reason its local twin is:
+    the Space may claim it between the caller deciding and this running."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        cur = conn.execute(
+            "UPDATE distribution_jobs SET status = 'cancelled', updated_at = ? "
+            "WHERE id = ? AND status = 'scheduled_cloud'",
+            (now, job_id),
+        )
+        if cur.rowcount == 0:
+            return None
+    return get_distribution_job(job_id)
+
+
+def list_cloud_pending_jobs(limit: int = 100) -> list[dict]:
+    """Jobs the poster Space owns and has not reported back on yet."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM distribution_jobs WHERE status = 'scheduled_cloud' "
+            "ORDER BY scheduled_at LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
 
 def get_distribution_job(job_id: str) -> Optional[dict]:

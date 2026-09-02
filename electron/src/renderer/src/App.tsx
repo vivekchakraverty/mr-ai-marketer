@@ -31,8 +31,9 @@ import Distribute from './routes/Distribute'
 import Community from './routes/Community'
 import Library from './routes/Library'
 import Reader from './routes/Reader'
+import FirstRunSetup from './components/setup/FirstRunSetup'
 
-// Dev-only: launch with DEBUG_ROUTE=research|create|engage|analytics|manage|community|blog|guest|tutorial|docu|social|mastodon|distribute|library|hf-gate
+// Dev-only: launch with DEBUG_ROUTE=research|create|engage|analytics|manage|community|blog|guest|tutorial|docu|social|mastodon|distribute|library|hf-gate|setup
 // to jump straight to a screen for visual verification (see main/index.ts).
 function applyDebugRoute(): void {
   const route = window.api?.debugRoute
@@ -45,6 +46,8 @@ function applyDebugRoute(): void {
     s.openHfGate()
   } else if (route === 'settings') {
     s.goSettings()
+  } else if (route === 'setup') {
+    s.openSetup()
   } else if (route === 'distribution-gate') {
     s.goDistribute()
     s.openDistributionGate()
@@ -62,7 +65,9 @@ function MainContent(): React.JSX.Element {
   const route = useAppStore((s) => s.route)
   const tool = useAppStore((s) => s.tool)
   const readerItem = useAppStore((s) => s.readerItem)
+  const setupOpen = useAppStore((s) => s.setupOpen)
 
+  if (setupOpen) return <FirstRunSetup />
   if (readerItem) return <Reader />
   if (route === 'home') return <Home />
   if (route === 'research') return <Research />
@@ -117,6 +122,20 @@ function App(): React.JSX.Element {
         }
       } finally {
         if (!cancelled) {
+          // Before setHfChecked, so a first launch goes straight to the walkthrough rather
+          // than flashing Home for a frame on the way there.
+          //
+          // An install that predates the walkthrough has none of its timestamps set and would
+          // otherwise look identical to a first run — so an existing user would be handed an
+          // onboarding wizard for accounts they connected months ago. A stored HF token is the
+          // tell: nothing else in the app works without one, so having one means this machine
+          // has been set up already. Settings -> Setup walkthrough is still there for them.
+          const saved = await window.api.settings.getAll()
+          const { startedAt, completedAt, skippedAt, resumeAt } = saved.setupWizard
+          const alreadySetUp = Boolean(saved.hfToken.trim()) && !startedAt
+          if (!completedAt && !skippedAt && !alreadySetUp) {
+            useAppStore.getState().openSetup(startedAt ? resumeAt : '')
+          }
           setHfChecked(true)
           applyDebugRoute()
         }

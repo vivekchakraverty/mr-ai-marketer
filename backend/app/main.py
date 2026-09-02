@@ -28,6 +28,7 @@ from .routers import (
     community_account,
     brand_forge,
     bluesky_analytics,
+    cloud_posting,
     distribution,
     docu_maker,
     email_writer,
@@ -246,6 +247,7 @@ app.include_router(guest_post.router)
 app.include_router(tutorial_maker.router)
 app.include_router(docu_maker.router)
 app.include_router(distribution.router)
+app.include_router(cloud_posting.router)
 app.include_router(social_post.router)
 app.include_router(mastodon_post.router)
 app.include_router(hashtags.router)
