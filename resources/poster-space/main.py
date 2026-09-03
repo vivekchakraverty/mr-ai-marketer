@@ -24,6 +24,8 @@ import threading
 import time
 
 import httpx
+from datetime import datetime, timezone
+
 from fastapi import FastAPI, Header, HTTPException
 
 import networks
@@ -50,6 +52,9 @@ MIN_SECONDS_BETWEEN_PASSES = 20
 _lock = threading.Lock()
 _last_pass_at = 0.0
 _last_sha = ""
+#: When the soonest queued job comes due. None means "unknown — do a full pass", which is the
+#: safe direction: an extra listing costs a request, a missed one costs the post.
+_next_due_at: "datetime | None" = None
 _state = {"lastTickAt": "", "lastError": "", "needsBlueskyReauth": False}
 
 
@@ -58,18 +63,30 @@ _state = {"lastTickAt": "", "lastError": "", "needsBlueskyReauth": False}
 # ---------------------------------------------------------------------------
 
 
-def _due(job: dict) -> bool:
-    """Everything whose time has passed, not only what is due right now."""
-    from datetime import datetime, timezone
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
+
+def _due_at(job: dict) -> datetime | None:
+    """When this job should go out, or None when that cannot be read."""
     raw = str(job.get("dueAt") or "").replace("Z", "+00:00")
     if not raw:
-        return True
+        return None
     try:
-        return datetime.fromisoformat(raw) <= datetime.now(timezone.utc)
+        return datetime.fromisoformat(raw)
     except ValueError:
         # An unparseable time is a job that would otherwise sit in the queue forever.
-        return True
+        return None
+
+
+def _due(job: dict) -> bool:
+    """Everything whose time has PASSED, not only what is due this minute.
+
+    This is what makes a late pass harmless: a Space that wakes at 07:00 still sends the
+    03:00 post.
+    """
+    at = _due_at(job)
+    return at is None or at <= _now()
 
 
 def _media_for(job_id: str, job: dict) -> tuple[tuple[str, bytes] | None, list[str]]:
@@ -106,28 +123,48 @@ def _post_bluesky(job: dict, media, alt: str, rkey: str) -> str:
         alt,
         job.get("aspectRatio") if isinstance(job.get("aspectRatio"), dict) else None,
         rkey,
+        # Carries didDoc, which saves resolving the account's PDS over the network again.
+        session,
     )
 
 
 def run_pass() -> int:
     """Fire everything due. Returns how many jobs reached a terminal state."""
-    global _last_sha
+    global _last_sha, _next_due_at
 
     if not store.configured():
         _state["lastError"] = "outbox not configured"
         return 0
 
     sha = store.head_sha()
-    # An idle tick costs one repo_info call. Only skip when a previous pass has run against
-    # this exact commit — otherwise a job that became due without the repo changing would
-    # never fire.
-    if sha and sha == _last_sha and _state["lastTickAt"]:
+    # An idle tick should cost one repo_info call rather than a listing plus a download per
+    # job. But "the outbox has not changed" is NOT sufficient to skip: a job becomes due
+    # through the passage of TIME, which moves without touching the repo. Skipping on the sha
+    # alone meant the pass that ran at enqueue time saw nothing due, recorded the sha, and
+    # then every later tick returned early — so the scheduled hour arrived with nothing left
+    # looking at the queue, and the post simply never went out.
+    #
+    # So the guard needs both halves: the repo is unchanged AND the soonest thing in it is
+    # still in the future.
+    if (
+        sha
+        and sha == _last_sha
+        and _state["lastTickAt"]
+        and _next_due_at is not None
+        and _now() < _next_due_at
+    ):
         return 0
 
     done = 0
+    soonest: datetime | None = None
     for job_id in store.list_queue():
         job = store.job(job_id)
-        if not job or not _due(job):
+        if not job:
+            continue
+        if not _due(job):
+            at = _due_at(job)
+            if at is not None and (soonest is None or at < soonest):
+                soonest = at
             continue
         if store.claimed(job_id):
             # A previous pass died mid-post. The idempotency key makes a retry safe, so let
@@ -143,7 +180,7 @@ def run_pass() -> int:
             if channel == "mastodon":
                 ref = f"mastodon:{networks.post_mastodon(MASTODON_HOST, MASTODON_TOKEN, str(job.get('text') or ''), media, alt, job_id)}"
             elif channel == "bluesky":
-                ref = f"bluesky:{_post_bluesky(job, media, alt, job_id.replace('-', '')[:32])}"
+                ref = f"bluesky:{_post_bluesky(job, media, alt, networks.tid_for(job_id))}"
             else:
                 raise networks.PostError(f"This Space does not post to {channel or 'that'}.")
             store.finish(job_id, {"status": "sent", "ref": ref, "at": networks._now_iso()}, files)
@@ -167,6 +204,7 @@ def run_pass() -> int:
         done += 1
 
     _last_sha = store.head_sha()
+    _next_due_at = soonest
     _state["lastTickAt"] = networks._now_iso()
     _state["lastError"] = ""
     return done
