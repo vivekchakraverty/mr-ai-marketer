@@ -115,8 +115,8 @@
     "@electron-toolkit/utils": "^4.0.0",
     "electron-updater": "^6.8.9",
     "hls.js": "^1.6.17",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "zustand": "^5.0.14"
@@ -124,8 +124,8 @@
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@types/node": "^22.10.2",
-    "@types/react": "^19.0.2",
-    "@types/react-dom": "^19.0.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^43.0.0",
     "electron-builder": "^26.15.3",
