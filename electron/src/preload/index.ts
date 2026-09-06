@@ -32,10 +32,11 @@ const api = {
   /** Ask the user where to put these bytes. Resolves false if they cancelled. */
   saveBytes: (suggestedName: string, data: Uint8Array): Promise<boolean> =>
     ipcRenderer.invoke('dialog:save-bytes', suggestedName, data),
-  /** Opens a file dialog and copies the chosen video where the backend can read it.
+  /** Opens a file dialog and copies the chosen file where the backend can read it.
+   *  Pass true to offer audio as well as video — only where the network can take it.
    *  Returns null if the person cancelled. */
-  chooseVideo: (): Promise<{ url: string; name: string; bytes: number } | null> =>
-    ipcRenderer.invoke('video:choose'),
+  chooseVideo: (allowAudio = false): Promise<{ url: string; name: string; bytes: number } | null> =>
+    ipcRenderer.invoke('video:choose', allowAudio),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:open-external', url),
   update: {
     check: (): Promise<UpdateState> => ipcRenderer.invoke('update:check'),

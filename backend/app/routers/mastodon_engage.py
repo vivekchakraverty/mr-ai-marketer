@@ -43,7 +43,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..services.genqueue import queue_slot
 from pydantic import BaseModel
 
-from ..services import image_prompt, video_attach
+from ..services import audio_attach, image_prompt, video_attach
 from ..services import mastodon as masto
 from ..services import mastodon_gate as gate
 from ..services.mastodon import MastodonError
@@ -1162,16 +1162,18 @@ def compose(body: ComposeRequest) -> ActionOut:
         payload["in_reply_to_id"] = body.inReplyToId.strip()
 
     if body.videoFileUrl.strip():
-        # Mastodon makes no distinction between a picture and a clip here — both are media
-        # uploaded first and referenced by id — so this is the image path with a different
-        # ceiling, which the instance publishes for itself.
+        # Mastodon makes no distinction between a picture, a clip and a sound file here — all
+        # three are media uploaded first and referenced by id — so this is the image path with
+        # a different ceiling, which the instance publishes for itself. That ceiling is the
+        # instance's video limit for audio too; Mastodon's own configuration groups them.
+        uploaded = body.videoFileUrl
+        ceiling = video_attach.mastodon_max_bytes(policy.info.video_size_limit_mb)
         try:
-            filename, content = video_attach.attachment_bytes(
-                body.videoFileUrl,
-                video_attach.mastodon_max_bytes(policy.info.video_size_limit_mb),
-                host,
-            )
-        except video_attach.VideoUnusable as err:
+            if audio_attach.is_audio(uploaded):
+                filename, content = audio_attach.attachment_bytes(uploaded, ceiling, host)
+            else:
+                filename, content = video_attach.attachment_bytes(uploaded, ceiling, host)
+        except (video_attach.VideoUnusable, audio_attach.AudioUnusable) as err:
             raise HTTPException(status_code=400, detail=str(err)) from None
         try:
             media_id = masto.upload_media(

@@ -55,8 +55,34 @@ def upload_timeout(size_bytes: int) -> float:
     )
 
 
+#: Stated rather than guessed, for the suffixes this app actually sends.
+#:
+#: mimetypes reads the platform's own database — the Windows registry on the desktop, a
+#: mime.types file here — so the same attachment can be typed differently on two machines.
+#: Two of its answers are wrong for Mastodon whichever machine gives them: it types .flac as
+#: audio/x-flac and .aac as audio/vnd.dlna.adts, and neither appears in Mastodon's
+#: AUDIO_MIME_TYPES (app/models/media_attachment.rb), so the instance refuses the upload.
+#: .opus is deliberately audio/ogg for the same reason: Opus is an Ogg stream to Mastodon,
+#: and audio/opus is not on that list either.
+_MIME = {
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+    ".oga": "audio/ogg",
+    ".opus": "audio/ogg",
+}
+
+
 def _mime(filename: str) -> str:
-    return mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    suffix = os.path.splitext(filename)[1].lower()
+    return _MIME.get(suffix) or mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +529,17 @@ def post_bluesky(
         # to go through Bluesky's video service and be transcoded before it yields a blob the
         # embed will accept; an image is an ordinary blob on the PDS. Uploading a video the
         # image way succeeds and is then refused at putRecord with a bare "InvalidRequest".
-        if _mime(filename).startswith("video/"):
+        kind = _mime(filename)
+        if kind.startswith("audio/"):
+            # Never reachable from a correctly built job: the app renders audio into a video
+            # before it ever reaches this outbox, precisely because the lexicon has nowhere
+            # to put a sound file. Said plainly anyway, because the alternative is uploading
+            # it as an image blob and being refused with a bare "InvalidRequest" at 3am.
+            raise PostError(
+                f"Bluesky cannot carry audio, and {filename} is a sound file. "
+                "It should have been converted to a video before it was queued."
+            )
+        if kind.startswith("video/"):
             ref = upload_bluesky_video(pds, did, access_jwt, filename, content, session)
             embed: dict[str, Any] = {"$type": "app.bsky.embed.video", "video": ref}
             if alt.strip():

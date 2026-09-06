@@ -90,7 +90,17 @@ def _now() -> str:
 
 def _attachment(payload: dict, channel: str) -> tuple[str, bytes] | None:
     """The finished bytes for this post, or None when it carries no media."""
-    from . import image_prompt, video_attach
+    from . import audio_attach, image_prompt, video_attach
+
+    # Audio, where the two channels genuinely diverge: Mastodon is handed the sound file and
+    # plays it, Bluesky is handed the video rendered from it at compose time, because its
+    # lexicon has no way to carry sound. A payload for a send to both carries each of them,
+    # so the channel — not the presence of a field — decides which is uploaded.
+    audio_url = str(payload.get("audioUrl") or "").strip()
+    if audio_url and channel != "bluesky":
+        return audio_attach.attachment_bytes(
+            audio_url, video_attach.MASTODON_DEFAULT_MAX_BYTES, channel.title()
+        )
 
     video_url = str(payload.get("videoUrl") or "").strip()
     if video_url:
@@ -135,7 +145,7 @@ def enqueue(job_id: str, channel: str, payload: dict, due_at: str) -> None:
 
     try:
         media = _attachment(payload, channel)
-    except Exception as err:  # noqa: BLE001 - video_attach/image_prompt raise their own types
+    except Exception as err:  # noqa: BLE001 - the attachment services raise their own types
         raise CloudPosterError(str(err)) from None
 
     try:
@@ -232,7 +242,7 @@ def prune() -> dict:
     WHY HISTORY NEEDS COLLAPSING AT ALL. `delete_file` removes a blob from the tree, not from
     the repo's history — so every video ever posted is still stored, forever, in a dataset the
     user pays no attention to. Deleting the queue entry makes the outbox *look* empty while it
-    keeps growing by up to 50MB a post.
+    keeps growing by up to 300MB a post.
 
     WHY ONLY WHEN NOTHING IS PENDING. `super_squash_history` rewrites the branch, and the Space
     claims jobs with a `parent_commit` compare-and-swap against the head it just read. Squashing

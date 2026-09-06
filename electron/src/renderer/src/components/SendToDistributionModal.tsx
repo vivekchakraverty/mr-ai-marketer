@@ -131,6 +131,11 @@ export default function SendToDistributionModal({
   // carries one embed, so picking an image supersedes the clip for this send rather than
   // being refused as a conflict — untick the image and the clip comes back.
   const videoFileUrl = supportsVideo && !imageUrl.trim() ? defaultVideoFileUrl : ''
+  // Audio travels through the same slot. Bluesky cannot carry sound, so what goes out there
+  // is a waveform video rendered from it — said here rather than discovered afterwards.
+  const attachedAudio = /\.(mp3|m4a|aac|wav|flac|ogg|oga|opus)$/i.test(
+    defaultVideoFileUrl.split('?')[0]
+  )
   // The limits in play for what is currently ticked, and which of them this text breaks.
   const limited = selected
     .filter((c) => CHANNEL_LIMITS[c])
@@ -389,20 +394,31 @@ export default function SendToDistributionModal({
                   <>
                     <div style={{ borderTop: '2px dashed var(--border-soft)', marginTop: 12 }} />
                     <div style={{ font: "700 11px 'Quicksand'", color: 'var(--ink-fainter)', margin: '10px 0 6px' }}>
-                      Video attached in the composer
+                      {attachedAudio ? 'Audio attached in the composer' : 'Video attached in the composer'}
                     </div>
                     {videoFileUrl ? (
                       <>
-                        <BackendVideo url={videoFileUrl} alt={videoFileAlt} />
+                        <BackendVideo
+                          url={videoFileUrl}
+                          alt={videoFileAlt}
+                          kind={attachedAudio ? 'audio' : 'video'}
+                        />
                         <input
                           value={videoFileAlt}
                           disabled={sending}
                           onChange={(e) => setVideoFileAlt(e.target.value)}
-                          placeholder="Describe the video for people who can't see it (optional)"
+                          placeholder={
+                            attachedAudio
+                              ? "Describe the audio for people who can't hear it (optional)"
+                              : "Describe the video for people who can't see it (optional)"
+                          }
                           style={{ ...textInput, marginTop: 8 }}
                         />
                         <div style={{ font: "600 11.5px/1.5 'Quicksand'", color: 'var(--ink-faint)', marginTop: 4 }}>
                           Will be attached on {videoChannels.join(', ')}.
+                          {attachedAudio && selected.includes('bluesky')
+                            ? ' Bluesky cannot carry sound, so it receives a waveform video of it.'
+                            : ''}
                           {selected.includes('mastodon') && videoFileAlt.trim()
                             ? ' Alt text is carried by Bluesky; the current Mastodon connector does not expose an alt-text field.'
                             : ''}
@@ -411,7 +427,7 @@ export default function SendToDistributionModal({
                     ) : (
                       <div style={{ font: "600 11.5px/1.5 'Quicksand'", color: 'var(--ink-faint)' }}>
                         Held back while an image is chosen — a post carries one embed. Clear
-                        the image above to send the video instead.
+                        the image above to send the {attachedAudio ? 'audio' : 'video'} instead.
                       </div>
                     )}
                   </>

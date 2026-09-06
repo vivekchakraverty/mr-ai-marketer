@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from threading import RLock
 from typing import Any
 
-from . import image_prompt, mastodon, video_attach
+from . import audio_attach, image_prompt, mastodon, video_attach
 
 
 @dataclass(frozen=True)
@@ -57,10 +57,10 @@ def has_credentials() -> bool:
 
 
 def carries_media(payload: dict) -> bool:
-    """Whether a distribution payload names a local image or video attachment."""
+    """Whether a distribution payload names a local image, video or audio attachment."""
     return any(
         isinstance(payload.get(field), str) and bool(payload[field].strip())
-        for field in ("imageUrl", "videoUrl")
+        for field in ("imageUrl", "videoUrl", "audioUrl")
     )
 
 
@@ -77,9 +77,20 @@ def publish(payload: dict, *, idempotency_key: str) -> dict[str, Any]:
             "Mastodon media posting is not ready. Reconnect Mastodon in Distribute and retry."
         )
 
+    audio_url = str(payload.get("audioUrl") or "").strip()
     video_url = str(payload.get("videoUrl") or "").strip()
     image_url = str(payload.get("imageUrl") or "").strip()
-    if video_url:
+    # Audio first, and it wins over videoUrl deliberately: a payload can carry both, because
+    # a send to Bluesky as well puts the rendered waveform video in videoUrl. Mastodon has an
+    # audio player of its own, so posting the wrapper here would be the worse of the two.
+    if audio_url:
+        filename, content = audio_attach.attachment_bytes(
+            audio_url,
+            video_attach.MASTODON_DEFAULT_MAX_BYTES,
+            "Mastodon",
+        )
+        description = str(payload.get("videoFileAlt") or "").strip()
+    elif video_url:
         filename, content = video_attach.attachment_bytes(
             video_url,
             video_attach.MASTODON_DEFAULT_MAX_BYTES,

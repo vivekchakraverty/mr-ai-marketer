@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from atproto import AtUri, models
-from ..services import image_prompt, video_attach
+from ..services import audio_attach, image_prompt, video_attach
 import logging
 
 from fastapi import APIRouter, HTTPException
@@ -793,9 +793,23 @@ def create_post(body: ComposeRequest) -> ActionResponse:
         client = _client()
         text = _clean_text(body.text)
         if body.videoFileUrl.strip():
+            # Bluesky has no audio embed — app.bsky.embed.* is images, video, external and
+            # record, and there is no fifth option — so a sound file is rendered into a
+            # waveform video first and posted as that. Everything after this point is the
+            # video path, because by then it IS a video.
+            clip = body.videoFileUrl
+            wrapped = ""
+            if audio_attach.is_audio(clip):
+                # Kept for the alt text: the rendered clip is named from a digest of its
+                # source, and falling back to that would describe the post as a hex string.
+                wrapped = audio_attach.source_name(clip)
+                try:
+                    clip = audio_attach.prepare_bluesky_video(clip)
+                except audio_attach.AudioUnusable as err:
+                    raise HTTPException(status_code=400, detail=str(err)) from None
             try:
                 filename, content = video_attach.attachment_bytes(
-                    body.videoFileUrl, video_attach.BLUESKY_MAX_BYTES, "Bluesky"
+                    clip, video_attach.BLUESKY_MAX_BYTES, "Bluesky"
                 )
             except video_attach.VideoUnusable as err:
                 raise HTTPException(status_code=400, detail=str(err)) from None
@@ -805,11 +819,11 @@ def create_post(body: ComposeRequest) -> ActionResponse:
             # Without this the embed carries no aspect ratio and the client reserves a
             # default box, so the timeline reflows when the video loads. Best-effort: None
             # is the old behaviour, not a failure.
-            shape = video_attach.probe_aspect_ratio(body.videoFileUrl)
+            shape = video_attach.probe_aspect_ratio(clip)
             created = client.send_video(
                 text,
                 video=content,
-                video_alt=body.videoFileAlt.strip() or filename,
+                video_alt=body.videoFileAlt.strip() or wrapped or filename,
                 video_aspect_ratio=(
                     models.AppBskyEmbedDefs.AspectRatio(width=shape[0], height=shape[1])
                     if shape

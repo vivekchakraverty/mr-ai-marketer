@@ -4,7 +4,7 @@ Separate from the image path for one reason that matters: the numbers. An image 
 is capped at 16MB and that one figure works everywhere, but the three networks disagree
 sharply about video, and the disagreement is the whole difficulty of the feature:
 
-  Bluesky    50MB and about three minutes, plus a daily allowance per account.
+  Bluesky    300MB and ten minutes, plus a daily allowance per account.
   Mastodon   the instance decides, and publishes the figure — see InstanceInfo, which
              already carries video_size_limit_mb. Commonly 40MB, sometimes 16.
   Tumblr     the most generous of the three.
@@ -27,9 +27,20 @@ log = logging.getLogger(__name__)
 
 MEGABYTE = 1024 * 1024
 
-#: Bluesky's published ceiling. The daily per-account allowance is not knowable from here,
-#: so that one is left to the API to refuse with its own message.
-BLUESKY_MAX_BYTES = 50 * MEGABYTE
+#: Bluesky's published ceilings, raised on 2026-08-26 from 50MB/3min — this app had the old
+#: numbers and was refusing clips the network would have taken.
+#:
+#: In DECIMAL megabytes, not MEGABYTE, and the difference is not pedantry: the client states
+#: the limit as VIDEO_MAX_SIZE_MB * 1000 * 1000 (social-app src/lib/constants.ts), so
+#: 300 * MEGABYTE would wave through 14MB that the video service then rejects — the one
+#: failure this whole module exists to prevent.
+#:
+#: The daily per-account allowance is a third limit and is not knowable from here.
+#: app.bsky.video.getUploadLimits reports it for the logged-in account
+#: (remainingDailyVideos, remainingDailyBytes); until something calls it, that one is left to
+#: the API to refuse with its own message.
+BLUESKY_MAX_BYTES = 300 * 1000 * 1000
+BLUESKY_MAX_SECONDS = 600
 
 #: Tumblr's is larger, but this is a marketing tool posting a clip, not a video host.
 TUMBLR_MAX_BYTES = 100 * MEGABYTE
@@ -80,9 +91,11 @@ def attachment_path(url: str, max_bytes: int, network: str) -> Path:
     if size == 0:
         raise VideoUnusable("That video file is empty.")
     if size > max_bytes:
+        # Decimal megabytes in the sentence, because that is the unit each network publishes
+        # its own limit in and the number the person is being asked to compare against.
         raise VideoUnusable(
-            f"That video is {size / MEGABYTE:.1f}MB and {network} allows "
-            f"{max_bytes / MEGABYTE:.0f}MB. Trim it or export it smaller."
+            f"That video is {size / 1e6:.1f}MB and {network} allows "
+            f"{max_bytes / 1e6:.0f}MB. Trim it or export it smaller."
         )
 
     return path

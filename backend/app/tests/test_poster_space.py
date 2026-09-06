@@ -172,3 +172,48 @@ def test_the_record_key_is_stable_for_a_job(space) -> None:
     _, networks = space
     assert networks.tid_for("job-a") == networks.tid_for("job-a")
     assert networks.tid_for("job-a") != networks.tid_for("job-b")
+
+
+# --- what an attachment is called when it is offered to a network -----------
+
+
+@pytest.mark.parametrize(
+    "filename, mime",
+    [
+        ("clip.mp4", "video/mp4"),
+        ("clip.MOV", "video/quicktime"),
+        ("jingle.mp3", "audio/mpeg"),
+        # The two mimetypes gets wrong for Mastodon: audio/x-flac and audio/vnd.dlna.adts
+        # are not in its AUDIO_MIME_TYPES, so an upload typed that way is refused.
+        ("theme.flac", "audio/flac"),
+        ("theme.aac", "audio/aac"),
+        # Opus is an Ogg stream as far as Mastodon is concerned; audio/opus is not on the list.
+        ("voice.opus", "audio/ogg"),
+    ],
+)
+def test_an_attachment_is_typed_from_our_own_table(space, filename, mime) -> None:
+    """Not from the platform mimetypes database, which differs by machine and disagrees."""
+    _main, networks = space
+
+    assert networks._mime(filename) == mime
+
+
+def test_audio_reaching_the_bluesky_path_is_refused_in_words(space) -> None:
+    """Unreachable from a correctly built job, and worth saying anyway.
+
+    A sound file that slipped through would otherwise be uploaded as an image blob and
+    refused at putRecord with a bare "InvalidRequest" — with nobody watching.
+    """
+    _main, networks = space
+
+    with pytest.raises(networks.PostError, match="cannot carry audio"):
+        networks.post_bluesky(
+            "https://pds.example",
+            "did:plc:someone",
+            "jwt",
+            "listen to this",
+            ("jingle.mp3", b"ID3"),
+            "",
+            None,
+            "3ku7l2vv6b2xx",
+        )

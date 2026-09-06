@@ -294,18 +294,31 @@ app.whenReady().then(async () => {
       return true
     }
   )
-  // Pick a video and put it somewhere the backend is already allowed to read.
+  // Pick a video or audio file and put it somewhere the backend is already allowed to read.
   //
   // The copy is the point. The backend reads attachments only from its own outputs tree —
   // that containment check is what stops a compose request naming any file on the machine —
   // so handing it a raw path from a dialog would mean widening that rule for every caller.
   // Copying the chosen file in keeps one rule and one code path, at the cost of some disk.
-  ipcMain.handle('video:choose', async () => {
+  //
+  // `allowAudio` follows the network being composed for, because the two are not
+  // interchangeable downstream: Mastodon plays a sound file, Bluesky has no audio embed and
+  // is given a rendered waveform video instead, and Tumblr's NPF video block takes neither.
+  // Offering an mp3 on a screen that cannot post one would be a dialog that ends in a refusal.
+  ipcMain.handle('video:choose', async (_event, allowAudio = false) => {
     const owner = BrowserWindow.getFocusedWindow()
+    const video = ['mp4', 'mov', 'm4v', 'webm']
+    const audio = ['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'oga', 'opus']
     const options: Electron.OpenDialogOptions = {
-      title: 'Choose a video to post',
+      title: allowAudio ? 'Choose a video or audio file to post' : 'Choose a video to post',
       properties: ['openFile'],
-      filters: [{ name: 'Video', extensions: ['mp4', 'mov', 'm4v', 'webm'] }]
+      filters: allowAudio
+        ? [
+            { name: 'Video or audio', extensions: [...video, ...audio] },
+            { name: 'Video', extensions: video },
+            { name: 'Audio', extensions: audio }
+          ]
+        : [{ name: 'Video', extensions: video }]
     }
     const picked = await (owner ? dialog.showOpenDialog(owner, options) : dialog.showOpenDialog(options))
     if (picked.canceled || picked.filePaths.length === 0) return null

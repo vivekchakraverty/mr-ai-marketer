@@ -21,7 +21,13 @@ export default function Reader(): React.JSX.Element | null {
   // A composed post files its clip in the same slot the picture uses, so an entry carries
   // one or the other. Recognising it here is what carries a video through to the send
   // dialog, which otherwise has no way to know the post ever had one.
-  const videoFileUrl = /\.(mp4|mov|m4v|webm)$/i.test(outputs) ? served : ''
+  //
+  // Audio shares that slot as well, and is recognised here for the same reason: a post
+  // composed with a sound file and saved would otherwise come back out of the Library
+  // silently without it. What each network then does with it differs, and that is settled
+  // in the backend rather than here.
+  const audioFileUrl = /\.(mp3|m4a|aac|wav|flac|ogg|oga|opus)$/i.test(outputs) ? served : ''
+  const videoFileUrl = audioFileUrl || (/\.(mp4|mov|m4v|webm)$/i.test(outputs) ? served : '')
 
   return (
     <div style={{ maxWidth: 840, margin: '0 auto', padding: '26px 34px 60px' }}>
@@ -56,7 +62,12 @@ export default function Reader(): React.JSX.Element | null {
           </div>
         ) : videoFileUrl ? (
           <div style={{ marginTop: 16 }}>
-            <BackendVideo url={videoFileUrl} alt={item.title} style={{ maxWidth: '100%' }} />
+            <BackendVideo
+              url={videoFileUrl}
+              alt={item.title}
+              kind={audioFileUrl ? 'audio' : 'video'}
+              style={{ maxWidth: '100%' }}
+            />
           </div>
         ) : (
           item.output_path && (

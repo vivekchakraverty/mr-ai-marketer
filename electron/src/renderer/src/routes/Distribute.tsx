@@ -778,12 +778,17 @@ function JobDetails({
     : typeof payload.imageUrl === 'string'
       ? payload.imageUrl
       : ''
-  const videoUrl = typeof payload.videoUrl === 'string' ? payload.videoUrl : ''
+  // Audio splits the same way an image does. Mastodon was sent the sound file itself;
+  // Bluesky, which has no audio embed, was sent the waveform video in videoUrl — so a job
+  // whose payload carries both shows whichever one that channel actually received.
+  const audioUrl =
+    job.channel !== 'bluesky' && typeof payload.audioUrl === 'string' ? payload.audioUrl : ''
+  const videoUrl = audioUrl ? '' : typeof payload.videoUrl === 'string' ? payload.videoUrl : ''
   const videoAlt = typeof payload.videoFileAlt === 'string' ? payload.videoFileAlt : ''
   // Everything except the post body, which gets its own block above.
   const extras = Object.entries(payload).filter(
     ([k, v]) =>
-      !['text', 'imageUrl', 'imageUrls', 'videoUrl', 'videoFileAlt', 'mediaUrl'].includes(k) &&
+      !['text', 'imageUrl', 'imageUrls', 'videoUrl', 'audioUrl', 'videoFileAlt', 'mediaUrl'].includes(k) &&
       typeof v === 'string' &&
       v
   )
@@ -880,6 +885,24 @@ function JobDetails({
             <BackendVideo url={videoUrl} alt={videoAlt} />
           ) : (
             <div style={{ font: "600 12.5px 'Quicksand'", color: 'var(--ink-muted)', wordBreak: 'break-all' }}>{videoUrl}</div>
+          )}
+          {videoAlt && (
+            <div style={{ font: "600 12px/1.5 'Quicksand'", color: 'var(--ink-faint)', marginTop: 4 }}>
+              Alt text: {videoAlt}
+            </div>
+          )}
+        </div>
+      )}
+
+      {audioUrl && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ font: "700 11px 'Quicksand'", letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink-faint)', marginBottom: 5 }}>
+            Audio
+          </div>
+          {audioUrl.startsWith('/outputs/') ? (
+            <BackendVideo url={audioUrl} alt={videoAlt} kind="audio" />
+          ) : (
+            <div style={{ font: "600 12.5px 'Quicksand'", color: 'var(--ink-muted)', wordBreak: 'break-all' }}>{audioUrl}</div>
           )}
           {videoAlt && (
             <div style={{ font: "600 12px/1.5 'Quicksand'", color: 'var(--ink-faint)', marginTop: 4 }}>

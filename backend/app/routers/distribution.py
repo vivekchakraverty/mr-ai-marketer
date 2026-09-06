@@ -10,7 +10,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import config, db
-from ..services import activepieces_client, cloud_poster, generation_link, mastodon_delivery
+from ..services import (
+    activepieces_client,
+    audio_attach,
+    cloud_poster,
+    generation_link,
+    mastodon_delivery,
+    video_attach,
+)
 from ..services.activepieces_client import ActivepiecesError
 
 router = APIRouter(prefix="/distribution", tags=["distribution"])
@@ -320,6 +327,7 @@ PAYLOAD_FIELDS = [
     "imageUrl",
     "imageUrls",
     "videoUrl",
+    "audioUrl",
     "videoFileAlt",
     "mediaUrl",
     "channelId",
@@ -547,7 +555,9 @@ class SendRequest(BaseModel):
     channelId: Optional[str] = None  # discord, discord-conversation
     pageId: Optional[str] = None  # facebook, instagram
     imageUrl: Optional[str] = None  # image-capable social channels
-    videoFileUrl: Optional[str] = None  # staged /outputs video for Bluesky/Mastodon
+    # One staged /outputs upload for Bluesky/Mastodon, video or audio; the suffix decides
+    # which, and audio_attach.is_audio is the single place that decision is made.
+    videoFileUrl: Optional[str] = None
     videoFileAlt: Optional[str] = None  # Bluesky; Mastodon's piece has no alt prop
     to: Optional[str] = None  # email
     from_: Optional[str] = Field(default=None, alias="from")  # email
@@ -642,9 +652,12 @@ def set_share_host(body: ShareHostRequest) -> dict:
 
 def _payload_for(body: SendRequest) -> dict:
     if body.imageUrl and body.videoFileUrl:
+        # Named for what was actually attached: the staged-upload field carries video and
+        # audio alike, and "a video" is a confusing thing to be told about an mp3.
+        other = "an audio file" if audio_attach.is_audio(body.videoFileUrl) else "a video"
         raise HTTPException(
             status_code=400,
-            detail="Attach either an image or a video, not both; social posts carry one media embed.",
+            detail=f"Attach either an image or {other}, not both; social posts carry one media embed.",
         )
 
     payload = {"text": body.text}
@@ -662,15 +675,44 @@ def _payload_for(body: SendRequest) -> dict:
             except image_prompt.ImageRenderError as err:
                 raise HTTPException(status_code=400, detail=str(err)) from None
             payload["imageUrls"] = [prepared]
-    if body.videoFileUrl:
+    if body.videoFileUrl and audio_attach.is_audio(body.videoFileUrl):
+        # Audio arrives through the same staged-upload field as video, because it is the same
+        # picker and the same containment rule; which of the two it is, is the suffix. What
+        # differs is downstream: Mastodon takes the sound file itself, and Bluesky — which has
+        # no audio embed in its lexicon at all — is given a rendered video of it instead.
+        supported = {"bluesky", "mastodon"}.intersection(body.channels)
+        if not supported:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded audio attachments are supported on Bluesky and Mastodon.",
+            )
+        if "mastodon" in supported:
+            try:
+                audio_attach.attachment_path(
+                    body.videoFileUrl, video_attach.MASTODON_DEFAULT_MAX_BYTES, "Mastodon"
+                )
+            except audio_attach.AudioUnusable as err:
+                raise HTTPException(status_code=400, detail=str(err)) from None
+        payload["audioUrl"] = body.videoFileUrl
+        payload["mediaUrl"] = body.videoFileUrl
+        if "bluesky" in supported:
+            # Rendered here, while the person is watching the send dialog, rather than at
+            # posting time when nobody is — the same argument that puts the cloud poster's
+            # upload on this side of the wait.
+            try:
+                payload["videoUrl"] = audio_attach.prepare_bluesky_video(body.videoFileUrl)
+            except audio_attach.AudioUnusable as err:
+                raise HTTPException(status_code=400, detail=str(err)) from None
+            payload["aspectRatio"] = dict(audio_attach.BLUESKY_ASPECT_RATIO)
+        if body.videoFileAlt is not None:
+            payload["videoFileAlt"] = body.videoFileAlt.strip()
+    elif body.videoFileUrl:
         supported = {"bluesky", "mastodon"}.intersection(body.channels)
         if not supported:
             raise HTTPException(
                 status_code=400,
                 detail="Uploaded video attachments are supported on Bluesky and Mastodon.",
             )
-        from ..services import video_attach
-
         max_bytes = (
             video_attach.MASTODON_DEFAULT_MAX_BYTES
             if "mastodon" in supported
@@ -707,7 +749,7 @@ def _materialize_media_payload(payload: dict) -> dict:
     (share links are deliberately capped at fourteen days).
     """
     materialized = dict(payload)
-    for field in ("imageUrl", "videoUrl", "mediaUrl"):
+    for field in ("imageUrl", "videoUrl", "audioUrl", "mediaUrl"):
         value = materialized.get(field)
         if isinstance(value, str) and value:
             materialized[field] = _shareable_media_url(value)

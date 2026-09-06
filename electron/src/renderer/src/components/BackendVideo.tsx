@@ -12,13 +12,18 @@ import { fetchObjectUrl } from '../api/client'
  * Why a blob rather than streaming. The alternative is exempting /outputs from the token
  * check so the element can fetch it itself, and that mount also serves the influencer and
  * tracker CSV exports — the reason BackendImage took this route, and the reasoning has not
- * changed. The cost is real and worth naming: the whole file lands in memory, so a 50MB clip
- * is 50MB held for as long as the player is mounted. That is tolerable here only because
+ * changed. The cost is real and worth naming: the whole file lands in memory, so a clip at
+ * Bluesky's 300MB ceiling is 300MB held for as long as the player is mounted. That is
+ * tolerable here only because
  * nothing renders this until a person opens the card it lives in, and it is released the
  * moment they close it again.
  *
  * Nothing autoplays and nothing preloads beyond metadata. A send-history list can hold many
  * of these, and a screen that starts playing on its own is worse than one that waits.
+ *
+ * `kind="audio"` renders the same thing as an `<audio>` element, for the uploads that are
+ * sound rather than picture. The token problem and the blob answer are identical; only the
+ * element and the words differ, so this is one component rather than two.
  */
 
 interface Props {
@@ -26,10 +31,17 @@ interface Props {
   url: string
   /** The clip's alt text, when the post carried one. Used as the accessible name. */
   alt?: string
+  /** Which player to render. Audio uploads go to Mastodon as sound files, not clips. */
+  kind?: 'video' | 'audio'
   style?: React.CSSProperties
 }
 
-export default function BackendVideo({ url, alt = '', style }: Props): React.JSX.Element {
+export default function BackendVideo({
+  url,
+  alt = '',
+  kind = 'video',
+  style
+}: Props): React.JSX.Element {
   const [src, setSrc] = useState('')
   const [failed, setFailed] = useState(false)
 
@@ -77,7 +89,7 @@ export default function BackendVideo({ url, alt = '', style }: Props): React.JSX
           padding: '9px 12px'
         }}
       >
-        This video is no longer on disk.
+        {kind === 'audio' ? 'This audio is no longer on disk.' : 'This video is no longer on disk.'}
         <div style={{ color: 'var(--ink-faint)', wordBreak: 'break-all', marginTop: 3 }}>{url}</div>
       </div>
     )
@@ -94,6 +106,18 @@ export default function BackendVideo({ url, alt = '', style }: Props): React.JSX
           borderRadius: 12,
           background: 'var(--accent-soft-bg)'
         }}
+      />
+    )
+  }
+
+  if (kind === 'audio') {
+    return (
+      <audio
+        src={src}
+        controls
+        preload="metadata"
+        aria-label={alt || 'Attached audio'}
+        style={{ maxWidth: 320, width: '100%', display: 'block', ...style }}
       />
     )
   }
