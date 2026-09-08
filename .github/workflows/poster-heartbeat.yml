@@ -1,0 +1,81 @@
+name: Poster heartbeat
+
+# Keeps a cloud-posting Space awake so its own ticker fires scheduled posts on time.
+#
+# WHY THIS EXISTS. The poster Space runs on free Hugging Face hardware, which sleeps after a
+# period of inactivity and cannot be told not to (see resources/poster-space/README.md). A
+# sleeping Space posts when it is next woken, so on 2026-09-08 a 09:00 post went out at 09:12
+# — the moment the desktop app was opened and pinged /tick. Nothing was lost, but nothing was
+# on time either, because the app was closed and the Space's own keep-awake ping evidently
+# does not count as activity with HF's router.
+#
+# WHAT THIS IS AND IS NOT. It is not a scheduler — GitHub's cron is routinely 5-20 minutes
+# late under load and is nobody's idea of a timing guarantee. It does not need to be: what
+# matters is that SOMETHING external touches the Space more often than HF's idle timeout, so
+# the Space stays up and its own 60-second ticker is what achieves punctuality. A late
+# heartbeat keeps the Space warm just as well as a punctual one.
+#
+# /tick is unauthenticated by design: the queue lives in a private dataset, and the endpoint
+# carries no post content, no schedule and no credentials. A stranger calling it only causes
+# the owner's own due posts to go out on time, which is what they were going to do anyway.
+# That is what makes it safe to call from a public repo's CI.
+
+on:
+  schedule:
+    # Every 15 minutes. Far more often than HF's idle timeout, and far less often than a
+    # request a minute against free hardware.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+# Nothing in the repo is read or written.
+permissions: {}
+
+concurrency:
+  # A delayed run and the next scheduled one must not stack up.
+  group: poster-heartbeat
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    name: Wake the poster Space
+    runs-on: ubuntu-latest
+    # A repository variable, not a secret: the Space is public, the URL is not confidential,
+    # and masking it would only make failures harder to read. Unset — which is the case in
+    # every fork, and in this repo until someone sets it — the job is skipped rather than
+    # failing, so nobody inherits a red workflow they did not ask for.
+    #
+    # Set it with:  gh variable set POSTER_SPACE_URL --body https://<owner>-<space>.hf.space
+    if: vars.POSTER_SPACE_URL != ''
+    timeout-minutes: 10
+    steps:
+      - name: Ping /tick
+        env:
+          POSTER_SPACE_URL: ${{ vars.POSTER_SPACE_URL }}
+        # Explicit, because the default is `bash -e {0}` and every retry here is an expected
+        # non-zero that must not end the step before the loop has had its three goes.
+        shell: bash --noprofile --norc {0}
+        run: |
+          set -uo pipefail
+          url="${POSTER_SPACE_URL%/}/tick"
+
+          # Three attempts, generously spaced. A Space that has actually gone to sleep takes
+          # the better part of a minute to boot, and the first request is what wakes it — so
+          # a single short timeout would report a failure for the exact case this job exists
+          # to handle.
+          for attempt in 1 2 3; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 120 "$url" || echo "000")
+            echo "attempt $attempt: HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "Space is awake and ran a pass."
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep 45
+            fi
+          done
+
+          # Only now is it worth telling anyone. Failing loudly here is deliberate: a Space
+          # that cannot be woken in three attempts over two minutes is not sleeping, it is
+          # broken, and scheduled posts are silently not going out.
+          echo "::error::Could not reach $url after three attempts. Scheduled posts may not be going out."
+          exit 1

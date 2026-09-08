@@ -320,6 +320,61 @@ def test_the_space_can_be_handed_over_without_a_restart(monkeypatch: pytest.Monk
     assert cloud_poster.is_configured() is False
 
 
+def test_a_space_handed_over_mid_session_is_still_nudged_when_a_post_is_due(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The handover above is only half the job: the scheduler also has to ASK through it.
+
+    _wake_cloud_if_due gated on config.CLOUD_POSTER_URL, which is the spawn environment and
+    frozen at import. Enqueueing already went through the runtime override, so a Space set up
+    mid-session took ownership of scheduled posts and then never got woken for them — leaving
+    them to whenever something else happened to touch the Space. On free hardware that is the
+    difference between a post at 09:00 and a post whenever the app is next opened.
+    """
+    from app import config
+
+    monkeypatch.setattr(config, "CLOUD_POSTER_URL", "")
+    monkeypatch.setattr(cloud_poster, "_runtime", {})
+    assert cloud_poster.set_credentials(
+        space_id="someone/poster",
+        url="https://someone-poster.hf.space",
+        key="k",
+        outbox="someone/poster-outbox",
+        token="hf_test",
+    )
+
+    due_soon = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()
+    monkeypatch.setattr(
+        distribution.db, "list_cloud_pending_jobs", lambda: [{"scheduled_at": due_soon}]
+    )
+    woken = {"n": 0}
+    monkeypatch.setattr(cloud_poster, "wake", lambda: woken.__setitem__("n", woken["n"] + 1))
+
+    distribution._wake_cloud_if_due()
+    assert woken["n"] == 1, "a Space the app knows about at runtime must still be nudged"
+
+
+def test_nothing_due_soon_leaves_the_space_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The nudge is insurance, not a heartbeat — waking the Space on every 30-second tick
+    would be a request a minute against a free Space for no reason."""
+    monkeypatch.setattr(cloud_poster, "_runtime", {})
+    assert cloud_poster.set_credentials(
+        space_id="someone/poster",
+        url="https://someone-poster.hf.space",
+        key="k",
+        outbox="someone/poster-outbox",
+        token="hf_test",
+    )
+    monkeypatch.setattr(
+        distribution.db, "list_cloud_pending_jobs", lambda: [{"scheduled_at": _future()}]
+    )
+    woken = {"n": 0}
+    monkeypatch.setattr(cloud_poster, "wake", lambda: woken.__setitem__("n", woken["n"] + 1))
+
+    distribution._wake_cloud_if_due()
+    assert woken["n"] == 0
+
+
 def test_a_prefilled_bluesky_password_is_resolved_before_it_reaches_bluesky(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

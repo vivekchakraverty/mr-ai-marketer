@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import config, db
+from .. import db
 from ..services import (
     activepieces_client,
     audio_attach,
@@ -1245,7 +1245,11 @@ def _wake_cloud_if_due() -> None:
     3am" and "posted whenever something next touched the Space" — but only while this app is
     running, which is why it is insurance rather than the mechanism.
     """
-    if not cloud_poster.is_configured() or not config.CLOUD_POSTER_URL:
+    # cloud_poster.can_wake(), not config.CLOUD_POSTER_URL: the latter is read from the
+    # environment once, at import, so a Space provisioned during this session — which is
+    # exactly what the setup walkthrough does — would never be nudged until the app was
+    # restarted. Same trap the service module documents at its own _setting().
+    if not cloud_poster.is_configured() or not cloud_poster.can_wake():
         return
     soon = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
     if any((job["scheduled_at"] or "") <= soon for job in db.list_cloud_pending_jobs()):

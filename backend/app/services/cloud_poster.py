@@ -78,6 +78,18 @@ def is_configured() -> bool:
     return bool(_setting("CLOUD_POSTER_OUTBOX") and _setting("CLOUD_POSTER_TOKEN"))
 
 
+def can_wake() -> bool:
+    """Whether there is a Space URL worth nudging.
+
+    Separate from is_configured() because the two answer different questions: the outbox is
+    what makes cloud posting work at all, the URL is only what lets us hurry it along. Public
+    so callers ask through _setting() rather than reading config.CLOUD_POSTER_* directly —
+    those are the spawn environment, frozen at import, and a Space provisioned mid-session
+    only ever reaches the runtime override.
+    """
+    return bool(_setting("CLOUD_POSTER_URL"))
+
+
 def _api():
     from huggingface_hub import HfApi
 

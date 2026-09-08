@@ -203,7 +203,19 @@ def run_pass() -> int:
             log.exception("unexpected failure on %s", job_id)
         done += 1
 
-    _last_sha = store.head_sha()
+    # The sha read at the START of this pass, deliberately, not a fresh one.
+    #
+    # The queue was listed against that commit, so `soonest` describes that commit and
+    # nothing later. Re-reading here recorded a commit the pass had never actually looked
+    # at: an enqueue landing mid-pass — and an enqueue is TWO commits, the media and then
+    # the queue entry — left the Space holding the new sha next to a _next_due_at computed
+    # without the new job. Every later tick then matched the guard and returned early, so
+    # the new job's hour arrived with nothing examining the queue. Same ending as the sha-
+    # only guard above, reached a different way.
+    #
+    # Recording the older sha can only cost one extra pass. Recording the newer one costs
+    # the post, so this errs in the one direction that is safe.
+    _last_sha = sha
     _next_due_at = soonest
     _state["lastTickAt"] = networks._now_iso()
     _state["lastError"] = ""

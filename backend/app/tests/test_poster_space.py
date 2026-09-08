@@ -106,6 +106,52 @@ def test_an_unchanged_outbox_with_nothing_due_yet_is_skipped(space, monkeypatch)
     assert looked["n"] == 0
 
 
+def test_a_write_landing_mid_pass_is_not_recorded_as_examined(space, monkeypatch) -> None:
+    """The second way the same guard loses a post, and the shape of the 2026-09-08 miss.
+
+    A pass lists the queue against one commit. If the app enqueues while that listing is in
+    flight — and an enqueue is two commits, the media then the queue entry — re-reading the
+    sha at the end recorded a commit the pass never looked at. The Space was then holding the
+    newest sha next to a _next_due_at computed without the new job, so every tick until that
+    unrelated later time returned early and the new job's hour passed unexamined.
+    """
+    main, _ = space
+    later = datetime.now(timezone.utc) + timedelta(hours=7)  # already queued, not due
+    sooner = datetime.now(timezone.utc) + timedelta(minutes=18)  # arriving during this pass
+
+    monkeypatch.setattr(main.store, "configured", lambda: True)
+    sha = {"value": "before-the-enqueue"}
+    monkeypatch.setattr(main.store, "head_sha", lambda: sha["value"])
+
+    def list_queue_while_the_app_commits() -> list[str]:
+        sha["value"] = "after-the-enqueue"
+        return ["the-job-already-queued"]
+
+    monkeypatch.setattr(main.store, "list_queue", list_queue_while_the_app_commits)
+    monkeypatch.setattr(main.store, "job", lambda _id: {"dueAt": later.isoformat()})
+    monkeypatch.setattr(main, "_last_sha", "")
+    monkeypatch.setattr(main, "_next_due_at", None)
+    main._state["lastTickAt"] = ""
+
+    main.run_pass()
+
+    assert main._last_sha == "before-the-enqueue", (
+        "a pass must record the commit it actually examined, not one that landed while it ran"
+    )
+    assert main._next_due_at is not None and main._next_due_at > sooner
+
+    # ...so the next tick cannot be skipped, and the job that arrived mid-pass is seen well
+    # before its own due time rather than at the unrelated later one.
+    looked = {"n": 0}
+
+    def counting_queue() -> list[str]:
+        looked["n"] += 1
+        return []
+
+    monkeypatch.setattr(main.store, "list_queue", counting_queue)
+    main.run_pass()
+    assert looked["n"] == 1
+
 # --- the Bluesky video credential -------------------------------------------
 
 

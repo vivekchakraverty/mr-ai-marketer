@@ -45,9 +45,23 @@ upgrade this Space to paid hardware and it will not sleep at all.
 To narrow the window for free, point a scheduler at `/tick`. **cron-job.org** is
 free and does exactly this — add the address, set it to every 5 minutes, and turn
 notifications off, since a sleeping Space is normal here and an uptime monitor will
-otherwise mail you about it. This is a backstop rather than the mechanism: the Space
-already pings itself while awake, and the desktop app wakes it when a post is nearly
-due.
+otherwise mail you about it.
+
+This repo also ships `.github/workflows/poster-heartbeat.yml`, which does the same
+thing from GitHub Actions every 15 minutes. It is skipped until you set the repo
+variable `POSTER_SPACE_URL` to your Space's address, so a fork inherits nothing:
+
+    gh variable set POSTER_SPACE_URL --body https://<owner>-<space>.hf.space
+
+Either way the point is not punctual pinging — GitHub's cron in particular is
+routinely 5-20 minutes late — but keeping the Space awake often enough that its own
+60-second ticker is what fires your posts. Note that GitHub disables scheduled
+workflows on a repo with no activity for 60 days.
+
+Whatever you use, it is a backstop rather than the mechanism: the Space already pings
+itself while awake, and the desktop app wakes it when a post is nearly due. What that
+does not cover is the case this exists for — the app closed, and the Space asleep,
+when a post comes due.
 
 ## Secrets and variables
 
