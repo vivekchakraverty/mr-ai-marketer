@@ -60,6 +60,7 @@ export default function NavBar(): React.JSX.Element {
   const route = useAppStore((s) => s.route)
   const goHome = useAppStore((s) => s.goHome)
   const goResearch = useAppStore((s) => s.goResearch)
+  const goAlign = useAppStore((s) => s.goAlign)
   const goCreate = useAppStore((s) => s.goCreate)
   const goEngage = useAppStore((s) => s.goEngage)
   const goAnalytics = useAppStore((s) => s.goAnalytics)
@@ -107,6 +108,9 @@ export default function NavBar(): React.JSX.Element {
           </div>
           <div style={navStyle(route === 'research')} onClick={goResearch}>
             Research / Strategy
+          </div>
+          <div style={navStyle(route === 'align')} onClick={goAlign}>
+            Align
           </div>
           <div style={navStyle(route === 'create')} onClick={goCreate}>
             Create

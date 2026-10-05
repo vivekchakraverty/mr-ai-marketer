@@ -30,6 +30,8 @@ binaries = []
 hiddenimports = [
     "app.main",
     "app.routers.settings",
+    "app.routers.align_writing",
+    "app.services.align_writing",
     "app.services.genqueue",
     "app.routers.library",
     "app.routers.marketing_plan",
@@ -197,6 +199,8 @@ _COLLECT_ALL = [
     # request and type classes — and resolves them by name at call time, so listing the
     # handful this app calls would still miss everything they construct underneath.
     "telethon",
+    # Align's vec0 extension is loaded into sqlite3 connections at runtime.
+    "sqlite_vec",
 ]
 for pkg in _COLLECT_ALL:
     d, b, h = collect_all(pkg)

@@ -47,6 +47,27 @@ def test_cancel_scheduled_job_reports_missing_and_non_cancellable_jobs(app_db):
     assert "no longer scheduled" in conflict.value.detail
 
 
+def test_delete_scheduled_job_cancels_and_removes_history(app_db):
+    job = _scheduled_job(app_db)
+
+    result = distribution.delete_scheduled_job(job["id"])
+
+    assert result == {"id": job["id"], "deleted": True}
+    assert app_db.get_distribution_job(job["id"]) is None
+    assert app_db.list_due_scheduled_jobs() == []
+
+
+def test_delete_scheduled_job_refuses_a_job_already_claimed_by_scheduler(app_db):
+    job = _scheduled_job(app_db)
+    assert app_db.claim_scheduled_distribution_job(job["id"])
+
+    with pytest.raises(distribution.HTTPException) as conflict:
+        distribution.delete_scheduled_job(job["id"])
+
+    assert conflict.value.status_code == 409
+    assert app_db.get_distribution_job(job["id"])["status"] == "sending"
+
+
 def test_scheduler_claim_wins_once_and_blocks_late_cancellation(app_db):
     job = _scheduled_job(app_db)
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -182,6 +183,83 @@ def test_cancelling_a_queued_cloud_post_takes_it_out_of_the_outbox_first(
     )
     assert distribution.cancel_scheduled_job(job["id"])["status"] == "cancelled"
     assert cloud_ready["cancel"] == [job["id"]]
+
+
+def test_deleting_a_queued_cloud_post_removes_outbox_and_history(
+    app_db, cloud_ready
+) -> None:
+    job = app_db.add_distribution_job(
+        "lib-1", "bluesky", "scheduled_cloud", scheduled_at=_future(), payload=json.dumps(_PAYLOAD)
+    )
+
+    assert distribution.delete_scheduled_job(job["id"]) == {
+        "id": job["id"],
+        "deleted": True,
+    }
+    assert cloud_ready["cancel"] == [job["id"]]
+    assert app_db.get_distribution_job(job["id"]) is None
+
+
+def test_deleting_a_cloud_post_already_sending_keeps_its_history(
+    app_db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job = app_db.add_distribution_job(
+        "lib-1", "mastodon", "scheduled_cloud", scheduled_at=_future(), payload=json.dumps(_PAYLOAD)
+    )
+    monkeypatch.setattr(cloud_poster, "cancel", lambda _id: False)
+
+    with pytest.raises(HTTPException) as excinfo:
+        distribution.delete_scheduled_job(job["id"])
+
+    assert excinfo.value.status_code == 409
+    assert app_db.get_distribution_job(job["id"])["status"] == "scheduled_cloud"
+
+
+def test_cloud_cancel_deletes_queue_and_media_in_one_claim_safe_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commits: list[dict] = []
+
+    class FakeApi:
+        def repo_info(self, _repo, *, repo_type):
+            assert repo_type == "dataset"
+            return SimpleNamespace(sha="examined-head")
+
+        def list_repo_files(self, _repo, *, repo_type):
+            assert repo_type == "dataset"
+            return ["queue/job-1.json", "media/job-1/photo.png", "queue/another.json"]
+
+        def create_commit(self, **kwargs):
+            commits.append(kwargs)
+
+    monkeypatch.setattr(cloud_poster, "is_configured", lambda: True)
+    monkeypatch.setattr(cloud_poster, "_api", lambda: FakeApi())
+    monkeypatch.setattr(cloud_poster, "_setting", lambda _name: "owner/outbox")
+
+    assert cloud_poster.cancel("job-1") is True
+    assert len(commits) == 1
+    assert commits[0]["parent_commit"] == "examined-head"
+    assert [operation.path_in_repo for operation in commits[0]["operations"]] == [
+        "queue/job-1.json",
+        "media/job-1/photo.png",
+    ]
+
+
+def test_cloud_cancel_refuses_a_job_with_a_finished_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeApi:
+        def repo_info(self, _repo, *, repo_type):
+            return SimpleNamespace(sha="finished-head")
+
+        def list_repo_files(self, _repo, *, repo_type):
+            return ["outcomes/job-1.json"]
+
+    monkeypatch.setattr(cloud_poster, "is_configured", lambda: True)
+    monkeypatch.setattr(cloud_poster, "_api", lambda: FakeApi())
+    monkeypatch.setattr(cloud_poster, "_setting", lambda _name: "owner/outbox")
+
+    assert cloud_poster.cancel("job-1") is False
 
 
 # --- the Space's own source has to be findable ------------------------------

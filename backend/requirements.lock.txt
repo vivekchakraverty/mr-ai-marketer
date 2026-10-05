@@ -150,6 +150,7 @@ python-docx==1.2.0
 python-dotenv==1.2.2
 python-multipart==0.0.32
 pytrends==4.9.2
+pypdf==6.19.0
 pytz==2026.2
 PyWavelets==1.9.0
 pywin32-ctypes==0.2.3
@@ -159,6 +160,7 @@ referencing==0.37.0
 regex==2026.6.28
 requests-file==3.0.1
 requests-oauthlib==2.0.0
+sqlite-vec==0.1.9
 requests==2.34.2
 rich==15.0.0
 rpds-py==2026.6.3

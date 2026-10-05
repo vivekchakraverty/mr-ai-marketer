@@ -34,7 +34,7 @@ wired into one place.
 
 ## What you can actually do with it
 
-Ten screens, grouped by what you're trying to get done:
+Eleven screens, grouped by what you're trying to get done:
 
 | Screen | What it's for |
 | --- | --- |
@@ -45,6 +45,7 @@ Ten screens, grouped by what you're trying to get done:
 | **Analytics** | What happened: your sales pipeline, email opens and clicks, how your posts performed against comparable accounts. |
 | **Manage** | A live planning workspace where you track campaigns and budgets. |
 | **Community** | Run a Telegram community: an open group anyone can be added to, and a paid channel people subscribe to. |
+| **Align** | Analyze a creative writing manuscript and find audience spaces that fit its genre, themes, and tone. |
 | **Distribute** | Connect the places you publish to, and push finished work out to them. |
 | **Library** | Everything the app has ever made for you, in one list. |
 | **Settings** | Your accounts and keys. All stored encrypted on your machine. |

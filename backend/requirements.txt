@@ -29,6 +29,8 @@ fastapi==0.139.0
 uvicorn[standard]==0.50.2
 python-multipart==0.0.32
 huggingface_hub==1.22.0
+pypdf==6.19.0
+sqlite-vec==0.1.9
 
 # Guest Post Suggester (vendor/guestpostsuggester)
 pandas==3.0.3

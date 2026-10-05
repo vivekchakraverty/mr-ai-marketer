@@ -269,6 +269,78 @@ CREATE TABLE IF NOT EXISTS generation_links (
 );
 """
 
+# Align → Writing stays in the app's existing SQLite file so there is one database to
+# back up. Its table and column names follow the fan-matching pipeline data model.
+_ALIGN_SCHEMA = """
+CREATE TABLE IF NOT EXISTS book_profile(
+  id INTEGER PRIMARY KEY, title TEXT, blurb TEXT,
+  subgenres TEXT, themes TEXT, tropes TEXT, tone TEXT, comps TEXT,
+  audience_notes TEXT, updated_at TEXT, fingerprint_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS community(
+  id INTEGER PRIMARY KEY, platform TEXT, name TEXT, url TEXT UNIQUE,
+  description TEXT, rules_text TEXT, self_promo_policy TEXT,
+  member_count INTEGER, posts_per_week REAL, fit_score REAL,
+  status TEXT, last_reviewed TEXT,
+  genre_tags TEXT, theme_tags TEXT, engagement_mode TEXT
+);
+
+CREATE TABLE IF NOT EXISTS signal(
+  id INTEGER PRIMARY KEY, platform TEXT,
+  community_id INTEGER REFERENCES community(id),
+  post_url TEXT UNIQUE, author_handle TEXT, text TEXT, created_at TEXT,
+  intent_label TEXT, intent_strength REAL, seen_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS opportunity(
+  id INTEGER PRIMARY KEY, signal_id INTEGER REFERENCES signal(id),
+  score REAL, reasons TEXT, status TEXT
+);
+
+CREATE TABLE IF NOT EXISTS draft(
+  id INTEGER PRIMARY KEY, opportunity_id INTEGER REFERENCES opportunity(id),
+  channel TEXT, body TEXT, utm_url TEXT, model_used TEXT, created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS outcome(
+  id INTEGER PRIMARY KEY, draft_id INTEGER REFERENCES draft(id),
+  clicks INTEGER, signups INTEGER, replies INTEGER, goodreads_adds INTEGER,
+  notes TEXT, measured_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS tag_vocab(
+  field TEXT, tag TEXT, synonyms TEXT,
+  PRIMARY KEY(field, tag)
+);
+
+CREATE TABLE IF NOT EXISTS book_fingerprint(
+  book_id INTEGER REFERENCES book_profile(id), field TEXT, tag TEXT, weight REAL,
+  PRIMARY KEY(book_id, field, tag)
+);
+
+CREATE TABLE IF NOT EXISTS community_profile(
+  community_id INTEGER REFERENCES community(id), field TEXT, tag TEXT, weight REAL,
+  PRIMARY KEY(community_id, field, tag)
+);
+
+CREATE TABLE IF NOT EXISTS field_weight(
+  field TEXT PRIMARY KEY, weight REAL, source TEXT
+);
+
+CREATE TABLE IF NOT EXISTS platform_profile(
+  platform TEXT PRIMARY KEY, genre_affinity TEXT, formats TEXT,
+  promo_friendliness REAL, notes TEXT
+);
+"""
+
+_ALIGN_VECTOR_SCHEMA = """
+CREATE VIRTUAL TABLE IF NOT EXISTS book_vec USING vec0(embedding float[384] distance_metric=cosine);
+CREATE VIRTUAL TABLE IF NOT EXISTS community_vec USING vec0(embedding float[384] distance_metric=cosine);
+CREATE VIRTUAL TABLE IF NOT EXISTS signal_vec USING vec0(embedding float[384] distance_metric=cosine);
+CREATE VIRTUAL TABLE IF NOT EXISTS tag_vec USING vec0(embedding float[384] distance_metric=cosine);
+"""
+
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
     existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
@@ -279,6 +351,19 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str)
 def init_db() -> None:
     with _connect() as conn:
         conn.executescript(_SCHEMA)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.executescript(_ALIGN_SCHEMA)
+        _seed_align_defaults(conn)
+        try:
+            _load_sqlite_vec(conn)
+            conn.executescript(_ALIGN_VECTOR_SCHEMA)
+        except (ImportError, sqlite3.OperationalError) as err:
+            # The application remains usable when sqlite-vec is unavailable; text profiles
+            # still save, while the embedding/vector-search layer reports its own status.
+            import logging
+
+            logging.getLogger(__name__).warning("[align] sqlite-vec unavailable: %s", err)
         # CREATE TABLE IF NOT EXISTS is a no-op on an existing table, so columns added after
         # a release need widening explicitly or an upgraded install keeps the old shape.
         for column in ("gated_chat_id", "gated_chat_title", "gated_invite_link"):
@@ -298,11 +383,62 @@ def _connect() -> Iterator[sqlite3.Connection]:
     # the lock rather than surface "database is locked" to the caller.
     conn = sqlite3.connect(config.DB_PATH, timeout=15)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
     try:
         yield conn
         conn.commit()
     finally:
         conn.close()
+
+
+def _load_sqlite_vec(conn: sqlite3.Connection) -> None:
+    import sqlite_vec
+
+    conn.enable_load_extension(True)
+    try:
+        sqlite_vec.load(conn)
+    finally:
+        conn.enable_load_extension(False)
+
+
+def _seed_align_defaults(conn: sqlite3.Connection) -> None:
+    """Seed the exact default fingerprint weights and reviewed discovery maps."""
+    weights = {
+        "comps": 0.18,
+        "feeling_after": 0.14,
+        "mood_tone": 0.12,
+        "pacing_structure": 0.10,
+        "themes_message": 0.10,
+        "tropes": 0.08,
+        "premise": 0.07,
+        "genre": 0.06,
+        "prose_style": 0.04,
+        "protagonist": 0.04,
+        "setting_aesthetic": 0.03,
+        "sci_realism": 0.02,
+        "context_timeliness": 0.02,
+    }
+    conn.executemany(
+        "INSERT OR IGNORE INTO field_weight(field, weight, source) VALUES (?, ?, 'default')",
+        weights.items(),
+    )
+    platforms = [
+        ("Reddit", {"hard-sf": .95, "science fiction": .95, "fantasy": .85, "horror": .9, "literary": .65}, ["text", "discussion"], .35, "Check each community's current rules and posting threads."),
+        ("Bluesky", {"hard-sf": .8, "science fiction": .8, "literary": .8, "solarpunk": .9, "fantasy": .7}, ["text", "art", "short video"], .8, "Reader and author circles; use relevant hashtags."),
+        ("Mastodon", {"hard-sf": .8, "science fiction": .8, "literary": .75, "solarpunk": .9}, ["text", "art"], .8, "Reader and author circles; instance rules vary."),
+        ("TikTok / Shorts", {"cyberpunk": .95, "dystopian": .85, "romance": .95, "fantasy": .9, "horror": .8}, ["short video", "cover art"], .75, "BookTok, genre and aesthetic tags."),
+        ("Substack", {"literary": .9, "speculative": .85, "science fiction": .7, "solarpunk": .85}, ["text", "serial"], .85, "Substack Notes and theme-led newsletters."),
+        ("YouTube", {"science fiction": .8, "fantasy": .8, "horror": .8, "literary": .65}, ["video", "audio"], .55, "Book review and genre discussion channels."),
+        ("Discord", {"cyberpunk": .8, "litrpg": .9, "progression fantasy": .9, "fantasy": .75}, ["discussion", "serial"], .3, "Discover and participate manually."),
+        ("Royal Road", {"litrpg": 1.0, "progression fantasy": 1.0, "fantasy": .75, "science fiction": .6}, ["serial", "text"], .95, "LitRPG and progression fiction readers."),
+        ("Instagram", {"romance": .9, "fantasy": .8, "romantasy": 1.0, "horror": .65}, ["cover art", "short video"], .7, "Bookstagram and genre tags."),
+        ("Goodreads / StoryGraph", {"literary": .8, "science fiction": .8, "fantasy": .8, "romance": .8}, ["lists", "reviews"], .15, "Manual lists and groups; no scraping."),
+    ]
+    conn.executemany(
+        "INSERT OR IGNORE INTO platform_profile(platform, genre_affinity, formats, promo_friendliness, notes) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [(name, json.dumps(affinity), json.dumps(formats), promo, notes) for name, affinity, formats, promo, notes in platforms],
+    )
 
 
 def add_item(tool: str, title: str, subtitle: str, content: Optional[str] = None, output_path: Optional[str] = None) -> dict:
@@ -534,6 +670,25 @@ def cancel_cloud_scheduled_distribution_job(job_id: str) -> Optional[dict]:
         if cur.rowcount == 0:
             return None
     return get_distribution_job(job_id)
+
+
+def delete_scheduled_distribution_job(job_id: str, *, cloud: bool = False) -> bool:
+    """Remove one pending scheduled job without racing the scheduler.
+
+    The status predicate is the deletion equivalent of the predicates in the cancel and
+    claim helpers above. If a scheduler has already claimed the row, the delete affects
+    nothing and the caller can honestly report that the post was not stopped.
+
+    Cloud jobs use a distinct status because the poster Space, rather than the local
+    scheduler, owns them. Its outbox entry must be removed before this helper is called.
+    """
+    expected_status = "scheduled_cloud" if cloud else "scheduled"
+    with _connect() as conn:
+        cursor = conn.execute(
+            "DELETE FROM distribution_jobs WHERE id = ? AND status = ?",
+            (job_id, expected_status),
+        )
+        return cursor.rowcount > 0
 
 
 def list_cloud_pending_jobs(limit: int = 100) -> list[dict]:

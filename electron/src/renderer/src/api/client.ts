@@ -61,6 +61,8 @@ async function errorFrom(res: Response, path: string): Promise<Error> {
     const detail = JSON.parse(text)?.detail
     if (typeof detail === 'string' && detail.trim()) {
       message = detail
+    } else if (detail && typeof detail === 'object' && !Array.isArray(detail) && typeof detail.message === 'string' && detail.message.trim()) {
+      message = detail.message
     } else if (Array.isArray(detail) && detail.length) {
       // Pydantic validation errors arrive as a list of {loc, msg, …}.
       const msg = detail.map((d) => d?.msg).filter(Boolean).join('; ')
@@ -754,8 +756,67 @@ export function fetchDistributionJobs(status?: string): Promise<{ jobs: Distribu
   return getJson(`/distribution/jobs${status ? `?status=${status}` : ''}`)
 }
 
-export function cancelScheduledDistributionJob(jobId: string): Promise<DistributionJob> {
-  return postJson(`/distribution/jobs/${jobId}/cancel`, {})
+export interface WritingFingerprint {
+  [key: string]: unknown
+  platform_plan?: {
+    platform: string
+    score: number
+    seedCommunities: string
+    contentTypes: string[]
+    cadence: string
+    engagementMode: string
+    starterIdea: string
+    needsRuleReview: boolean
+  }[]
+}
+
+export interface WritingProfile {
+  id: number
+  title: string
+  blurb: string
+  subgenres: string[]
+  themes: string[]
+  tropes: string[]
+  tone: string
+  comps: string[]
+  audience_notes: string
+  updated_at: string
+  fingerprint_json: WritingFingerprint
+}
+
+export function fetchWritingProfiles(): Promise<{ books: WritingProfile[] }> {
+  return getJson('/align/writing/books')
+}
+
+export async function analyzeWritingFile(file: File, title: string): Promise<{
+  book: WritingProfile
+  chunksAnalyzed: number
+  charactersAnalyzed: number
+  model: string
+}> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('title', title)
+  const res = await fetch(`${backendUrl}/align/writing/analyze`, { method: 'POST', headers: authHeaders(), body: form })
+  if (!res.ok) throw await errorFrom(res, '/align/writing/analyze')
+  return res.json()
+}
+
+export function reviewWritingProfile(book: WritingProfile): Promise<{ book: WritingProfile }> {
+  return putJson(`/align/writing/books/${book.id}`, {
+    title: book.title,
+    blurb: book.blurb,
+    subgenres: book.subgenres,
+    themes: book.themes,
+    tropes: book.tropes,
+    tone: book.tone,
+    comps: book.comps,
+    fingerprint: book.fingerprint_json
+  })
+}
+
+export function deleteScheduledDistributionJob(jobId: string): Promise<{ id: string; deleted: boolean }> {
+  return deleteJson(`/distribution/jobs/${jobId}`)
 }
 
 /**

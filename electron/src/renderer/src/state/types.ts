@@ -1,6 +1,7 @@
 export type Route =
   | 'home'
   | 'research'
+  | 'align'
   | 'create'
   | 'engage'
   | 'analytics'

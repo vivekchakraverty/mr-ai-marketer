@@ -1005,6 +1005,44 @@ def cancel_scheduled_job(job_id: str) -> dict:
     )
 
 
+@router.delete("/jobs/{job_id}")
+def delete_scheduled_job(job_id: str) -> dict:
+    """Cancel a pending post and remove its Send history row.
+
+    Deletion is intentionally limited to jobs that are still scheduled. Sent, failed and
+    in-flight rows remain durable history, and a scheduler claim that wins the race makes
+    the conditional database delete fail rather than pretending the post was stopped.
+    """
+    existing = db.get_distribution_job(job_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="No distribution job with that id")
+
+    cloud = existing["status"] == "scheduled_cloud"
+    if existing["status"] not in {"scheduled", "scheduled_cloud"}:
+        raise HTTPException(
+            status_code=409,
+            detail="This post is no longer scheduled, so it cannot be deleted.",
+        )
+
+    if cloud and not cloud_poster.cancel(job_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Your poster Space is already sending this one, so it cannot be deleted.",
+        )
+
+    if db.delete_scheduled_distribution_job(job_id, cloud=cloud):
+        return {"id": job_id, "deleted": True}
+
+    # A concurrent request may have deleted the row after our initial read. Treat that as
+    # success; otherwise the scheduler changed the status and won the race.
+    if not db.get_distribution_job(job_id):
+        return {"id": job_id, "deleted": True}
+    raise HTTPException(
+        status_code=409,
+        detail="This post is no longer scheduled, so it cannot be deleted.",
+    )
+
+
 @router.post("/jobs/{job_id}/retry")
 def retry_failed_job(job_id: str) -> dict:
     """Send a failed post again, on the same row.

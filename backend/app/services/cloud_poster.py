@@ -211,32 +211,50 @@ def outcome(job_id: str) -> dict | None:
 
 
 def cancel(job_id: str) -> bool:
-    """Take a job back out of the outbox.
+    """Take a job and its copied media back out of the outbox.
 
     False means it could not be removed — almost always because the Space has already claimed
     it and is posting right now, which is exactly when cancelling must not appear to succeed.
+
+    The queue entry and attachments are one compare-and-swap commit. If the Space claims the
+    job after we inspect the tree, its commit changes the parent SHA and this delete loses
+    cleanly instead of reporting success while the post is already going out.
     """
     if not is_configured():
         return False
-    from huggingface_hub import HfApi  # noqa: F401 - keeps the lazy-import rule obvious
+    from huggingface_hub import CommitOperationDelete
     from huggingface_hub.utils import HfHubHTTPError
 
     api = _api()
+    repo = _setting("CLOUD_POSTER_OUTBOX")
     try:
-        files = api.list_repo_files(_setting("CLOUD_POSTER_OUTBOX"), repo_type="dataset")
+        parent = api.repo_info(repo, repo_type="dataset").sha
+        files = api.list_repo_files(repo, repo_type="dataset")
     except HfHubHTTPError:
+        return False
+    if not parent:
         return False
     if f"claims/{job_id}.json" in files:
         return False
-    if f"queue/{job_id}.json" not in files:
-        # Never queued, or already finished. Either way there is nothing to stop.
+    if f"outcomes/{job_id}.json" in files:
+        # The Space finished before the app reconciled its local history row.
+        return False
+
+    paths = [
+        path
+        for path in files
+        if path == f"queue/{job_id}.json" or path.startswith(f"media/{job_id}/")
+    ]
+    if not paths:
+        # A retry after an earlier cancellation reached the outbox but lost its response.
         return True
     try:
-        api.delete_file(
-            path_in_repo=f"queue/{job_id}.json",
-            repo_id=_setting("CLOUD_POSTER_OUTBOX"),
+        api.create_commit(
+            repo_id=repo,
             repo_type="dataset",
             commit_message=f"cancel {job_id}",
+            parent_commit=parent,
+            operations=[CommitOperationDelete(path_in_repo=path) for path in paths],
         )
         return True
     except HfHubHTTPError:

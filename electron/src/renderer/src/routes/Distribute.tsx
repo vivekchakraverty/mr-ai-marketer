@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   approveDistributionItem,
-  cancelScheduledDistributionJob,
   deleteCustomChannel,
+  deleteScheduledDistributionJob,
   fetchCataloguePiece,
   fetchDistributionChannels,
   fetchDistributionJobs,
@@ -225,7 +225,7 @@ export default function Distribute(): React.JSX.Element {
         const [queueResult, jobsResult] = await Promise.all([fetchDistributionQueue(), fetchDistributionJobs()])
         if (!cancelled) {
           setQueue(queueResult.jobs)
-          // A successful cancellation increments the sequence so an older GET that was
+          // A successful cancellation-and-delete increments the sequence so an older GET
           // already in flight cannot briefly put its stale Scheduled row back on screen.
           if (requestSequence === historyRefreshSequence.current) setJobs(jobsResult.jobs)
         }
@@ -289,9 +289,10 @@ export default function Distribute(): React.JSX.Element {
     setCancellingJob(job.id)
     setCancelError('')
     try {
-      const cancelled = await cancelScheduledDistributionJob(job.id)
+      await deleteScheduledDistributionJob(job.id)
       historyRefreshSequence.current += 1
-      setJobs((current) => current.map((item) => (item.id === cancelled.id ? cancelled : item)))
+      setJobs((current) => current.filter((item) => item.id !== job.id))
+      setExpandedJob((current) => (current === job.id ? null : current))
     } catch (err) {
       setCancelError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -494,8 +495,9 @@ export default function Distribute(): React.JSX.Element {
               customChannels.find((c) => c.channel === job.channel)?.label ??
               job.channel
             const cancelling = cancellingJob === job.id
+            const scheduled = job.status === 'scheduled' || job.status === 'scheduled_cloud'
             const rowTimestamp =
-              job.status === 'scheduled' && job.scheduled_at
+              scheduled && job.scheduled_at
                 ? `Scheduled ${formatScheduledDate(job.scheduled_at)}`
                 : formatDate(job.updated_at)
             return (
@@ -541,13 +543,13 @@ export default function Distribute(): React.JSX.Element {
                     <span style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-faint)', whiteSpace: 'nowrap' }}>
                       {rowTimestamp}
                     </span>
-                    {job.status === 'scheduled' && confirmingJob === job.id && !cancelling && (
+                    {scheduled && confirmingJob === job.id && !cancelling && (
                       <span
                         style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
                         onClick={(event) => event.stopPropagation()}
                       >
                         <span style={{ font: "600 12px 'Quicksand'", color: 'var(--ink-muted)' }}>
-                          Cancel this post?
+                          Cancel and delete this post?
                         </span>
                         <button
                           type="button"
@@ -565,7 +567,7 @@ export default function Distribute(): React.JSX.Element {
                             cursor: 'pointer'
                           }}
                         >
-                          Yes
+                          Delete
                         </button>
                         <button
                           type="button"
@@ -587,34 +589,33 @@ export default function Distribute(): React.JSX.Element {
                         </button>
                       </span>
                     )}
-                    {job.status === 'scheduled' && (confirmingJob !== job.id || cancelling) && (
+                    {scheduled && (confirmingJob !== job.id || cancelling) && (
                       <button
                         type="button"
                         className="cancel-scheduled-post-button"
-                        aria-label={cancelling ? `Cancelling scheduled ${channelLabel} post` : `Cancel scheduled ${channelLabel} post`}
+                        aria-label={cancelling ? `Cancelling and deleting scheduled ${channelLabel} post` : `Cancel and delete scheduled ${channelLabel} post`}
                         aria-busy={cancelling}
-                        title={cancelling ? 'Cancelling scheduled post…' : 'Cancel scheduled post'}
+                        title={cancelling ? 'Cancelling and deleting scheduled post…' : 'Cancel and delete scheduled post'}
                         disabled={Boolean(cancellingJob)}
                         onClick={(event) => {
                           event.stopPropagation()
                           setConfirmingJob(job.id)
                         }}
                         style={{
-                          width: 24,
-                          height: 24,
-                          display: 'grid',
-                          placeItems: 'center',
-                          padding: 0,
-                          border: 0,
+                          height: 26,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '0 9px',
+                          border: '1.5px solid var(--danger-ink)',
                           borderRadius: 8,
                           background: 'transparent',
                           color: 'var(--danger-ink)',
-                          font: "700 18px/1 'Quicksand'",
+                          font: "700 11.5px/1 'Quicksand'",
                           cursor: cancellingJob ? 'wait' : 'pointer',
                           opacity: cancellingJob && !cancelling ? 0.4 : 1
                         }}
                       >
-                        {cancelling ? '…' : '×'}
+                        {cancelling ? 'Deleting…' : 'Cancel & delete'}
                       </button>
                     )}
                   </div>

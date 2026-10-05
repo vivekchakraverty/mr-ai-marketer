@@ -14,6 +14,7 @@ import ScrapDrawer from './components/ScrapDrawer'
 import QueueIndicator from './components/QueueIndicator'
 import Home from './routes/Home'
 import Research from './routes/Research'
+import Align from './routes/Align'
 import CreateHub from './routes/CreateHub'
 import SocialPost from './routes/SocialPost'
 import MastodonPost from './routes/MastodonPost'
@@ -52,6 +53,7 @@ function applyDebugRoute(): void {
     s.goDistribute()
     s.openDistributionGate()
   } else if (route === 'research') s.goResearch()
+  else if (route === 'align') s.goAlign()
   else if (route === 'create') s.goCreate()
   else if (route === 'engage') s.goEngage()
   else if (route === 'analytics') s.goAnalytics()
@@ -71,6 +73,7 @@ function MainContent(): React.JSX.Element {
   if (readerItem) return <Reader />
   if (route === 'home') return <Home />
   if (route === 'research') return <Research />
+  if (route === 'align') return <Align />
   if (route === 'engage') return <Engage />
   if (route === 'analytics') return <Analytics />
   if (route === 'manage') return <Manage />

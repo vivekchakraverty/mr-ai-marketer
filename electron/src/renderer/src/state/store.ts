@@ -101,6 +101,7 @@ interface AppState {
 
   goHome: () => void
   goResearch: () => void
+  goAlign: () => void
   goCreate: () => void
   goEngage: () => void
   goAnalytics: () => void
@@ -209,6 +210,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   goHome: () => set({ route: 'home', tool: null, readerItem: null }),
   goResearch: () => set({ route: 'research', tool: null, readerItem: null }),
+  goAlign: () => set({ route: 'align', tool: null, readerItem: null }),
   goCreate: () => set({ route: 'create', tool: null, readerItem: null }),
   goEngage: () => set({ route: 'engage', tool: null, readerItem: null }),
   goAnalytics: () => set({ route: 'analytics', tool: null, readerItem: null }),

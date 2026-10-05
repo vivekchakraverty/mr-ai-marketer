@@ -23,6 +23,7 @@ from .services.genqueue import QueueFull as GenQueueFull
 from . import config, db  # imports app.config as a side effect, which sets up the vendor sys.path
 from .routers import (
     backup,
+    align_writing,
     blog_writer,
     community,
     community_account,
@@ -235,6 +236,7 @@ async def _queue_full(_request: Request, exc: GenQueueFull) -> JSONResponse:
 
 
 app.include_router(settings.router)
+app.include_router(align_writing.router)
 app.include_router(backup.router)
 app.include_router(library.router)
 app.include_router(marketing_plan.router)
