@@ -53,7 +53,7 @@ jobs:
       # invites sending it twice — so it is worth the install to have it actually run.
       - name: Install test dependencies
         run: >
-          pip install pytest httpx fastapi "pydantic>=2" pillow huggingface_hub==1.22.0
+          pip install pytest httpx fastapi "pydantic>=2" pillow python-multipart==0.0.32 huggingface_hub==1.22.0
           modal gradio_client python-docx requests requests-oauthlib atproto
 
       - name: Run tests
