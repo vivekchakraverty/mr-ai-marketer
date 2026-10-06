@@ -54,7 +54,7 @@ jobs:
       - name: Install test dependencies
         run: >
           pip install pytest httpx fastapi "pydantic>=2" pillow python-multipart==0.0.32 huggingface_hub==1.22.0
-          modal gradio_client python-docx requests requests-oauthlib atproto yt-dlp==2026.7.4 holidays==0.106
+          modal gradio_client python-docx requests requests-oauthlib atproto yt-dlp==2026.7.4 holidays==0.106 beautifulsoup4==4.15.0
 
       - name: Run tests
         working-directory: backend
