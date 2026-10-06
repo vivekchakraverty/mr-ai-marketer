@@ -17,6 +17,7 @@ need. Resolving each video individually would be ~5x the work for metadata we al
 from __future__ import annotations
 
 from typing import Optional
+from urllib.parse import urlencode
 
 from yt_dlp import YoutubeDL
 
@@ -60,7 +61,7 @@ def _entry_to_video(entry: dict) -> Optional[dict]:
     }
 
 
-def search(topic: str, max_results: int = 5) -> list[dict]:
+def search(topic: str, max_results: int = 5, *, short_videos: bool = False) -> list[dict]:
     """Search YouTube via yt-dlp for ``topic``.
 
     Over-fetches slightly so that dropping livestreams and non-video hits still leaves
@@ -70,9 +71,14 @@ def search(topic: str, max_results: int = 5) -> list[dict]:
     if not topic:
         raise ValueError("Please enter a topic to search for.")
 
-    query = f"ytsearch{max(max_results * 2, max_results)}:{topic}"
+    limit = max(max_results * 2, max_results)
+    # YouTube's Videos + Under 4 minutes search filter. It finds short
+    # references without relying on titles containing the word "shorts".
+    query = ("https://www.youtube.com/results?" + urlencode({"search_query": topic, "sp": "EgQQARgB"})
+             if short_videos else f"ytsearch{limit}:{topic}")
+    options = {**_OPTS, "playlistend": limit}
     try:
-        with YoutubeDL(_OPTS) as ydl:
+        with YoutubeDL(options) as ydl:
             info = ydl.extract_info(query, download=False)
     except Exception as err:  # noqa: BLE001 — any failure means "try the next tier"
         raise YtSearchError(f"yt-dlp search failed: {type(err).__name__}: {err}") from err

@@ -1,0 +1,393 @@
+{
+  "source": "https://huggingface.co/buckets/vivekchakraverty/images",
+  "upstream_dataset": "https://huggingface.co/datasets/bethgelab/PAMELA",
+  "license": "CC BY 4.0",
+  "split": "pamela_train",
+  "rating_count": 50222,
+  "participant_count": 156,
+  "method": "Admirer: at least 3 ratings in a category, category mean >= 4/5, and >= 0.2 above that participant's training-set mean.",
+  "dimensions": {
+    "group": {
+      "abstract": {
+        "ratings": 3289,
+        "images": 237,
+        "mean_rating": 2.069,
+        "eligible_participants": 81,
+        "admirer_participants": 1,
+        "admirer_share": 0.012
+      },
+      "animal": {
+        "ratings": 158,
+        "images": 11,
+        "mean_rating": 3.826,
+        "eligible_participants": 25,
+        "admirer_participants": 11,
+        "admirer_share": 0.44
+      },
+      "architecture": {
+        "ratings": 4460,
+        "images": 312,
+        "mean_rating": 3.277,
+        "eligible_participants": 90,
+        "admirer_participants": 4,
+        "admirer_share": 0.044
+      },
+      "automotive": {
+        "ratings": 2385,
+        "images": 167,
+        "mean_rating": 3.114,
+        "eligible_participants": 86,
+        "admirer_participants": 4,
+        "admirer_share": 0.047
+      },
+      "cinematic": {
+        "ratings": 3831,
+        "images": 269,
+        "mean_rating": 3.145,
+        "eligible_participants": 92,
+        "admirer_participants": 1,
+        "admirer_share": 0.011
+      },
+      "cityscape": {
+        "ratings": 3291,
+        "images": 237,
+        "mean_rating": 3.255,
+        "eligible_participants": 74,
+        "admirer_participants": 5,
+        "admirer_share": 0.068
+      },
+      "fashion": {
+        "ratings": 2028,
+        "images": 142,
+        "mean_rating": 3.232,
+        "eligible_participants": 82,
+        "admirer_participants": 2,
+        "admirer_share": 0.024
+      },
+      "flower painting": {
+        "ratings": 1661,
+        "images": 121,
+        "mean_rating": 3.374,
+        "eligible_participants": 65,
+        "admirer_participants": 8,
+        "admirer_share": 0.123
+      },
+      "food": {
+        "ratings": 3288,
+        "images": 229,
+        "mean_rating": 3.341,
+        "eligible_participants": 86,
+        "admirer_participants": 8,
+        "admirer_share": 0.093
+      },
+      "landscape": {
+        "ratings": 7570,
+        "images": 536,
+        "mean_rating": 3.552,
+        "eligible_participants": 145,
+        "admirer_participants": 26,
+        "admirer_share": 0.179
+      },
+      "lifestyle": {
+        "ratings": 1690,
+        "images": 118,
+        "mean_rating": 3.217,
+        "eligible_participants": 81,
+        "admirer_participants": 2,
+        "admirer_share": 0.025
+      },
+      "portrait": {
+        "ratings": 4824,
+        "images": 347,
+        "mean_rating": 3.214,
+        "eligible_participants": 146,
+        "admirer_participants": 14,
+        "admirer_share": 0.096
+      },
+      "product": {
+        "ratings": 3931,
+        "images": 276,
+        "mean_rating": 2.774,
+        "eligible_participants": 84,
+        "admirer_participants": 1,
+        "admirer_share": 0.012
+      },
+      "scene": {
+        "ratings": 371,
+        "images": 26,
+        "mean_rating": 3.477,
+        "eligible_participants": 63,
+        "admirer_participants": 8,
+        "admirer_share": 0.127
+      },
+      "special": {
+        "ratings": 1151,
+        "images": 80,
+        "mean_rating": 3.087,
+        "eligible_participants": 81,
+        "admirer_participants": 5,
+        "admirer_share": 0.062
+      },
+      "sports": {
+        "ratings": 1175,
+        "images": 82,
+        "mean_rating": 3.314,
+        "eligible_participants": 81,
+        "admirer_participants": 3,
+        "admirer_share": 0.037
+      },
+      "still life": {
+        "ratings": 3183,
+        "images": 229,
+        "mean_rating": 2.943,
+        "eligible_participants": 72,
+        "admirer_participants": 2,
+        "admirer_share": 0.028
+      },
+      "street": {
+        "ratings": 690,
+        "images": 48,
+        "mean_rating": 3.169,
+        "eligible_participants": 76,
+        "admirer_participants": 4,
+        "admirer_share": 0.053
+      },
+      "travel": {
+        "ratings": 1246,
+        "images": 87,
+        "mean_rating": 3.515,
+        "eligible_participants": 81,
+        "admirer_participants": 10,
+        "admirer_share": 0.123
+      }
+    },
+    "style": {
+      "Abstract_Expressionism": {
+        "ratings": 608,
+        "images": 44,
+        "mean_rating": 2.365,
+        "eligible_participants": 62,
+        "admirer_participants": 1,
+        "admirer_share": 0.016
+      },
+      "Action_painting": {
+        "ratings": 849,
+        "images": 63,
+        "mean_rating": 2.181,
+        "eligible_participants": 65,
+        "admirer_participants": 2,
+        "admirer_share": 0.031
+      },
+      "Analytical_Cubism": {
+        "ratings": 587,
+        "images": 42,
+        "mean_rating": 2.785,
+        "eligible_participants": 65,
+        "admirer_participants": 1,
+        "admirer_share": 0.015
+      },
+      "Art_Nouveau_Modern": {
+        "ratings": 700,
+        "images": 51,
+        "mean_rating": 3.192,
+        "eligible_participants": 67,
+        "admirer_participants": 3,
+        "admirer_share": 0.045
+      },
+      "Baroque": {
+        "ratings": 671,
+        "images": 48,
+        "mean_rating": 3.392,
+        "eligible_participants": 65,
+        "admirer_participants": 7,
+        "admirer_share": 0.108
+      },
+      "Color_Field_Painting": {
+        "ratings": 905,
+        "images": 64,
+        "mean_rating": 1.964,
+        "eligible_participants": 65,
+        "admirer_participants": 0,
+        "admirer_share": 0.0
+      },
+      "Contemporary_Realism": {
+        "ratings": 705,
+        "images": 50,
+        "mean_rating": 3.176,
+        "eligible_participants": 65,
+        "admirer_participants": 5,
+        "admirer_share": 0.077
+      },
+      "Cubism": {
+        "ratings": 638,
+        "images": 45,
+        "mean_rating": 2.698,
+        "eligible_participants": 65,
+        "admirer_participants": 3,
+        "admirer_share": 0.046
+      },
+      "Early_Renaissance": {
+        "ratings": 826,
+        "images": 59,
+        "mean_rating": 3.152,
+        "eligible_participants": 65,
+        "admirer_participants": 5,
+        "admirer_share": 0.077
+      },
+      "Expressionism": {
+        "ratings": 529,
+        "images": 38,
+        "mean_rating": 2.834,
+        "eligible_participants": 65,
+        "admirer_participants": 2,
+        "admirer_share": 0.031
+      },
+      "Fauvism": {
+        "ratings": 611,
+        "images": 44,
+        "mean_rating": 3.001,
+        "eligible_participants": 65,
+        "admirer_participants": 6,
+        "admirer_share": 0.092
+      },
+      "High_Renaissance": {
+        "ratings": 602,
+        "images": 45,
+        "mean_rating": 3.316,
+        "eligible_participants": 65,
+        "admirer_participants": 11,
+        "admirer_share": 0.169
+      },
+      "Impressionism": {
+        "ratings": 610,
+        "images": 45,
+        "mean_rating": 3.443,
+        "eligible_participants": 65,
+        "admirer_participants": 14,
+        "admirer_share": 0.215
+      },
+      "Mannerism_Late_Renaissance": {
+        "ratings": 699,
+        "images": 51,
+        "mean_rating": 3.379,
+        "eligible_participants": 65,
+        "admirer_participants": 11,
+        "admirer_share": 0.169
+      },
+      "Minimalism": {
+        "ratings": 873,
+        "images": 62,
+        "mean_rating": 1.89,
+        "eligible_participants": 65,
+        "admirer_participants": 0,
+        "admirer_share": 0.0
+      },
+      "Naive_Art_Primitivism": {
+        "ratings": 629,
+        "images": 45,
+        "mean_rating": 3.027,
+        "eligible_participants": 65,
+        "admirer_participants": 5,
+        "admirer_share": 0.077
+      },
+      "New_Realism": {
+        "ratings": 592,
+        "images": 42,
+        "mean_rating": 3.521,
+        "eligible_participants": 65,
+        "admirer_participants": 12,
+        "admirer_share": 0.185
+      },
+      "Northern_Renaissance": {
+        "ratings": 637,
+        "images": 47,
+        "mean_rating": 3.257,
+        "eligible_participants": 65,
+        "admirer_participants": 6,
+        "admirer_share": 0.092
+      },
+      "Pointillism": {
+        "ratings": 722,
+        "images": 51,
+        "mean_rating": 3.289,
+        "eligible_participants": 65,
+        "admirer_participants": 9,
+        "admirer_share": 0.138
+      },
+      "Pop_Art": {
+        "ratings": 655,
+        "images": 49,
+        "mean_rating": 2.628,
+        "eligible_participants": 65,
+        "admirer_participants": 2,
+        "admirer_share": 0.031
+      },
+      "Post_Impressionism": {
+        "ratings": 567,
+        "images": 40,
+        "mean_rating": 3.285,
+        "eligible_participants": 65,
+        "admirer_participants": 9,
+        "admirer_share": 0.138
+      },
+      "Realism": {
+        "ratings": 863,
+        "images": 64,
+        "mean_rating": 3.587,
+        "eligible_participants": 65,
+        "admirer_participants": 18,
+        "admirer_share": 0.277
+      },
+      "Rococo": {
+        "ratings": 745,
+        "images": 55,
+        "mean_rating": 3.57,
+        "eligible_participants": 67,
+        "admirer_participants": 20,
+        "admirer_share": 0.299
+      },
+      "Romanticism": {
+        "ratings": 523,
+        "images": 38,
+        "mean_rating": 3.656,
+        "eligible_participants": 64,
+        "admirer_participants": 19,
+        "admirer_share": 0.297
+      },
+      "Symbolism": {
+        "ratings": 523,
+        "images": 38,
+        "mean_rating": 3.214,
+        "eligible_participants": 65,
+        "admirer_participants": 3,
+        "admirer_share": 0.046
+      },
+      "Synthetic_Cubism": {
+        "ratings": 829,
+        "images": 59,
+        "mean_rating": 2.791,
+        "eligible_participants": 65,
+        "admirer_participants": 4,
+        "admirer_share": 0.062
+      }
+    },
+    "type": {
+      "Art": {
+        "ratings": 17698,
+        "images": 1279,
+        "mean_rating": 2.989,
+        "eligible_participants": 97,
+        "admirer_participants": 1,
+        "admirer_share": 0.01
+      },
+      "Photorealism": {
+        "ratings": 32524,
+        "images": 2275,
+        "mean_rating": 3.255,
+        "eligible_participants": 95,
+        "admirer_participants": 0,
+        "admirer_share": 0.0
+      }
+    }
+  }
+}

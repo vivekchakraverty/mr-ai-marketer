@@ -58,7 +58,7 @@ jobs:
 
       - name: Run tests
         working-directory: backend
-        run: python -m pytest app/tests -q
+        run: python -m pytest app/tests tests -q
 
   frontend:
     name: Frontend typecheck

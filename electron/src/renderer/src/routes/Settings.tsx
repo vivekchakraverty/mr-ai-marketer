@@ -515,6 +515,31 @@ export default function Settings(): React.JSX.Element {
           </Section>
 
           <Section
+            title="Games — IGDB"
+            optional
+            blurb="Connect the Twitch application you registered to find comparable games, ratings and platform metadata in Align → Games. Save these credentials, then restart the app."
+            accent="var(--accent-deep)"
+          >
+            <label style={label}>Client ID</label>
+            <input
+              value={settings.gameAnalysis?.igdbClientId ?? ''}
+              onChange={(e) => setSettings((s) => ({ ...s, gameAnalysis: { ...s.gameAnalysis, igdbClientId: e.target.value } }))}
+              autoComplete="off"
+              placeholder="From Twitch → Applications → Manage"
+              style={textInput}
+            />
+            <label style={{ ...label, marginTop: 12 }}>Client Secret</label>
+            <input
+              type="password"
+              value={settings.gameAnalysis?.igdbClientSecret ?? ''}
+              onChange={(e) => setSettings((s) => ({ ...s, gameAnalysis: { ...s.gameAnalysis, igdbClientSecret: e.target.value } }))}
+              autoComplete="off"
+              placeholder="From Twitch → Manage → New Secret"
+              style={textInput}
+            />
+          </Section>
+
+          <Section
             title="Data repositories"
             optional
             blurb="Three tools read a catalogue or a model that isn't shipped inside the app — it's pulled from Hugging Face on first use and cached. The Influencer Database has a public default and works with this left blank; set it only to use your own catalogue, for instance one with contact details. The other two have no default and their tool says so until you point it at a repo. Private repos work — they're fetched with the token above."

@@ -90,6 +90,11 @@ export interface EmailWriterModalSettings {
   modalProvisionedAt: string
 }
 
+export interface GameAnalysisSettings {
+  igdbClientId: string
+  igdbClientSecret: string
+}
+
 /**
  * Proxy for the Marketing Plan's Keyword Surfer tier, which scrapes Google with a
  * headless browser.
@@ -259,6 +264,7 @@ export interface AppSettings {
   marketingPlan: MarketingPlanSettings
   writerSpaces: WriterSpaceSettings
   emailWriterModal: EmailWriterModalSettings
+  gameAnalysis: GameAnalysisSettings
   brandForge: BrandForgeSettings
   topicScout: TopicScoutSettings
   telegram: TelegramSettings
@@ -281,6 +287,7 @@ export type SettingsPatch = Partial<
     | 'marketingPlan'
     | 'writerSpaces'
     | 'emailWriterModal'
+    | 'gameAnalysis'
     | 'brandForge'
     | 'topicScout'
     | 'telegram'
@@ -296,6 +303,7 @@ export type SettingsPatch = Partial<
   marketingPlan?: Partial<MarketingPlanSettings>
   writerSpaces?: Partial<WriterSpaceSettings>
   emailWriterModal?: Partial<EmailWriterModalSettings>
+  gameAnalysis?: Partial<GameAnalysisSettings>
   brandForge?: Partial<BrandForgeSettings>
   topicScout?: Partial<TopicScoutSettings>
   telegram?: Partial<TelegramSettings>
@@ -317,6 +325,7 @@ export const EMPTY_SETTINGS: AppSettings = {
   marketingPlan: { spaceUrl: '' },
   writerSpaces: { blogWriter: '', emailWriter: '' },
   emailWriterModal: { modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '' },
+  gameAnalysis: { igdbClientId: '', igdbClientSecret: '' },
   brandForge: { spaceId: '', modalTokenId: '', modalTokenSecret: '', modalProvisionedAt: '', modelRepo: '', imageBucket: '' },
   topicScout: {
     contactEmail: '',

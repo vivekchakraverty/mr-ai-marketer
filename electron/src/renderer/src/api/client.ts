@@ -7,6 +7,197 @@ export type { TrackerWorkbooks }
 
 export const backendUrl = window.api?.backendUrl ?? 'http://127.0.0.1:8756'
 
+export interface VisualArtChoices {
+  groups: string[]
+  styles: string[]
+  artsy_categories: string[]
+}
+
+export interface VisualArtLabels {
+  group: string
+  style: string
+  artsy_categories: string[]
+  description: string
+  model: string
+}
+
+export interface VisualArtEvidence {
+  dimension: 'group' | 'style'
+  name: string
+  ratings: number
+  images: number
+  mean_rating: number
+  eligible_participants: number
+  admirer_participants: number
+  admirer_share: number | null
+}
+
+export interface VisualArtReport {
+  artsy_categories: string[]
+  artsy_category_links: Record<string, string>
+  pamela_evidence: VisualArtEvidence[]
+  sources: { artsy: string; pamela: string; pamela_dataset: string }
+  sample: { ratings: number; participants: number; split: string }
+  method: string
+  boundary: string
+}
+
+export function fetchVisualArtChoices(): Promise<VisualArtChoices> {
+  return getJson('/align/visual-art/choices')
+}
+
+export async function classifyVisualArt(file: File): Promise<VisualArtLabels> {
+  const path = '/align/visual-art/classify'
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(`${backendUrl}${path}`, { method: 'POST', headers: authHeaders(), body: form })
+  if (!res.ok) throw await errorFrom(res, path)
+  return res.json()
+}
+
+export function matchVisualArt(group: string, style: string, artsyCategories: string[]): Promise<VisualArtReport> {
+  return postJson('/align/visual-art/match', { group, style, artsy_categories: artsyCategories })
+}
+
+export interface ViralFootprintMatch {
+  video_id: string
+  platform: string
+  title: string
+  post_url: string | null
+  creator: string | null
+  views: number | null
+  likes: number | null
+  comments: number | null
+  shares: number | null
+  posted_at: string | null
+  discovered_at: string | null
+  post_virality_score: number | null
+  outlier_multiplier: number | null
+  similarity: number
+  visual_similarity: number
+  transcript_similarity: number | null
+  duration_similarity: number
+  exact: boolean
+  confidence: string
+  is_match?: boolean
+  duration_seconds?: number
+}
+
+export interface ViralFootprintJob {
+  id: string
+  filename: string
+  search_terms: string
+  reference_url?: string
+  status: string
+  created_at: string
+  metadata: { duration: number; width: number; height: number; fps: number; codec: string; file_size: number } | null
+  error: string | null
+  report: {
+    content_virality: { score: number | null; status?: string; observed_views: number | null; detected_copies: number; platforms: string[]; views_are_unique_people: false }
+    matches: ViralFootprintMatch[]
+    comparisons?: ViralFootprintMatch[]
+    benchmark?: { sample_posts: number; measured_posts: number; median_views: number | null; highest_views: number | null }
+    coverage: { source: string; query: string; search_results: number; duration_candidates: number; checked: number; comparison_errors: number; queries?: string[]; reference_url?: string | null; duration_excluded?: number; limit_excluded?: number }
+    notes: string[]
+  } | null
+}
+
+export interface PublicVideoSourceStatus {
+  available: boolean
+  platforms: string[]
+  detail: string
+  limitations: string
+}
+
+export function fetchPublicVideoSource(): Promise<PublicVideoSourceStatus> {
+  return getJson('/align/videos/source')
+}
+
+export interface GameObservation { timestamp: number; observation: string; confidence: number }
+export interface GameEvent { start: number; end: number; type: string; description: string; confidence: number }
+export interface GameArchetype { archetype: string; affinity: number; reason: string; evidence_timestamps: number[]; confidence: number }
+export interface ComparableGame {
+  igdb_id: number; name: string; similarity: number; similarity_confidence: number
+  rating: number | null; rating_count: number | null; genres: string[]; platforms: string[]
+  cover_url: string | null; igdb_url: string | null; why: string[]; difference: string; score_factors: Record<string, number>
+}
+export interface GamePlatform {
+  name: string; score: number; category: string; confidence: number; reasons: string[]
+  comparable_presence?: number; comparable_total?: number; average_similarity?: number | null
+  input_suitability?: number; publishing_feasibility?: string
+}
+export interface GameAnalysisJob {
+  id: string; filename: string; status: string; created_at: string; completed_at: string | null; error: string | null
+  metadata: { duration: number; width: number; height: number; fps: number; codec: string; has_audio: boolean; sampling_fps: number } | null
+  metrics: { video_duration_seconds: number; frames_processed: number; modal_inference_seconds: number; model_calls: number; video_chunks: number; igdb_candidates: number } | null
+  report: {
+    description: string; overall_confidence: number; igdb_note: string; source_note: string
+    profile: {
+      genres: string[]; subgenres: string[]; themes: string[]; keywords: string[]; core_loop: string[]
+      observed_actions: string[]; inferred_mechanics: { name: string; confidence: number; evidence_timestamps: number[] }[]
+      pace: string; complexity: string; dimensions: Record<string, { score: number; confidence: number; evidence_timestamps: number[] }>
+      observations: GameObservation[]; events: GameEvent[]; uncertainties: string[]
+      claims: { claim: string; category: string; confidence: number; evidence: GameObservation[] }[]
+    }
+    comparables: ComparableGame[]
+    audience: { archetypes: GameArchetype[]; summary: string; basis: string; comparable_titles: string[] }
+    platforms: { hardware: GamePlatform[]; distribution: GamePlatform[]; discovery: GamePlatform[]; caveat: string }
+  } | null
+}
+
+export interface GameAnalysisStatus {
+  modal_credentials_configured: boolean
+  igdb_configured: boolean
+  message: string
+}
+
+export function fetchGameAnalysisStatus(): Promise<GameAnalysisStatus> {
+  return getJson('/align/games/status')
+}
+
+export function fetchGameAnalysis(id: string): Promise<GameAnalysisJob> {
+  return getJson(`/align/games/${encodeURIComponent(id)}`)
+}
+
+export function refreshGameComparables(id: string): Promise<GameAnalysisJob> {
+  return postJson(`/align/games/${encodeURIComponent(id)}/refresh-comparables`, {})
+}
+
+export function listGameAnalyses(): Promise<{ analyses: GameAnalysisJob[] }> {
+  return getJson('/align/games')
+}
+
+export async function analyzeGameplay(file: File, samplingFps: number): Promise<{ analysis_id: string; status: string; reused: boolean }> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('sampling_fps', String(samplingFps))
+  const path = '/align/games/analyze'
+  const res = await fetch(`${backendUrl}${path}`, { method: 'POST', headers: authHeaders(), body: form })
+  if (!res.ok) throw await errorFrom(res, path)
+  return res.json()
+}
+
+export async function deleteGameAnalysis(id: string): Promise<void> {
+  const path = `/align/games/${encodeURIComponent(id)}`
+  const res = await fetch(`${backendUrl}${path}`, { method: 'DELETE', headers: authHeaders() })
+  if (!res.ok) throw await errorFrom(res, path)
+}
+
+export function fetchViralFootprint(id: string): Promise<ViralFootprintJob> {
+  return getJson(`/align/videos/${encodeURIComponent(id)}`)
+}
+
+export async function analyzeViralFootprint(file: File, searchTerms: string, referenceUrl = ''): Promise<{ analysis_id: string; status: string }> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('search_terms', searchTerms)
+  form.append('reference_url', referenceUrl)
+  const path = '/align/videos/analyze'
+  const res = await fetch(`${backendUrl}${path}`, { method: 'POST', headers: authHeaders(), body: form })
+  if (!res.ok) throw await errorFrom(res, path)
+  return res.json()
+}
+
 /**
  * Proof that a request came from this app.
  *
@@ -786,6 +977,29 @@ export interface WritingProfile {
 
 export function fetchWritingProfiles(): Promise<{ books: WritingProfile[] }> {
   return getJson('/align/writing/books')
+}
+
+export interface MusicAudienceReport {
+  reference_artists: {
+    query: string
+    name: string
+    mbid: string
+    musicbrainz_url: string
+    unique_listeners: number | null
+    total_listens: number | null
+  }[]
+  adjacent_artists: {
+    name: string
+    mbid: string
+    musicbrainz_url: string
+    reference_artists: string[]
+  }[]
+  unmatched: string[]
+  warnings: string[]
+}
+
+export function fetchMusicAudience(referenceArtists: string): Promise<MusicAudienceReport> {
+  return postJson('/align/music/audience', { reference_artists: referenceArtists })
 }
 
 export async function analyzeWritingFile(file: File, title: string): Promise<{

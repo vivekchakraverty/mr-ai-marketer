@@ -5,6 +5,10 @@ import {
   reviewWritingProfile,
   type WritingProfile
 } from '../api/client'
+import AlignMusic from './AlignMusic'
+import AlignVideos from './AlignVideos'
+import AlignGames from './AlignGames'
+import AlignVisualArt from './AlignVisualArt'
 import { card, label, primaryButton, primaryButtonSmall, sectionEyebrow, textInput, textarea } from '../styles/styleKit'
 
 const fieldStyle = { ...textInput, boxSizing: 'border-box' as const }
@@ -15,6 +19,25 @@ function tags(value: string): string[] {
 }
 
 export default function Align(): React.JSX.Element {
+  const [tab, setTab] = useState<'Writing' | 'Music' | 'Videos' | 'Games' | 'Visual Art'>('Writing')
+  return (
+    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '30px 34px 60px' }}>
+      <div style={{ marginBottom: 22 }}>
+        <div style={sectionEyebrow}>Align</div>
+        <div style={{ font: "700 30px 'Kalam'", color: 'var(--ink)', marginTop: 6 }}>Find the audience who will love your work</div>
+        <div style={{ font: "600 14px/1.6 'Quicksand'", color: 'var(--ink-muted)', marginTop: 4, maxWidth: 760 }}>
+          Find readers for writing, explore a song's audience, compare videos, analyze a game's player fit, or explore potential visual art admirers.
+        </div>
+      </div>
+      <div role="tablist" aria-label="Align sections" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, borderBottom: '2px solid var(--border)', marginBottom: 18 }}>
+        {(['Writing', 'Music', 'Videos', 'Games', 'Visual Art'] as const).map((item) => <button key={item} type="button" role="tab" aria-selected={tab === item} onClick={() => setTab(item)} style={{ ...primaryButtonSmall, borderRadius: '12px 12px 0 0', boxShadow: 'none', background: tab === item ? 'var(--accent)' : 'var(--surface)', color: tab === item ? '#fff' : 'var(--ink-muted)' }}>{item}</button>)}
+      </div>
+      {tab === 'Writing' ? <WritingPanel /> : tab === 'Music' ? <AlignMusic /> : tab === 'Videos' ? <AlignVideos /> : tab === 'Games' ? <AlignGames /> : <AlignVisualArt />}
+    </div>
+  )
+}
+
+function WritingPanel(): React.JSX.Element {
   const [books, setBooks] = useState<WritingProfile[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [file, setFile] = useState<File | null>(null)
@@ -126,19 +149,7 @@ export default function Align(): React.JSX.Element {
   const plan = selected?.fingerprint_json.platform_plan ?? []
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '30px 34px 60px' }}>
-      <div style={{ marginBottom: 22 }}>
-        <div style={sectionEyebrow}>Align</div>
-        <div style={{ font: "700 30px 'Kalam'", color: 'var(--ink)', marginTop: 6 }}>Find the readers who will love your work</div>
-        <div style={{ font: "600 14px/1.6 'Quicksand'", color: 'var(--ink-muted)', marginTop: 4, maxWidth: 760 }}>
-          Writing turns a manuscript into a reader fingerprint, then suggests audience spaces based on its genre, ideas and tone.
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', gap: 8, borderBottom: '2px solid var(--border)', marginBottom: 18 }}>
-        <div style={{ ...primaryButtonSmall, borderRadius: '12px 12px 0 0', boxShadow: 'none', cursor: 'default' }}>Writing</div>
-      </div>
-
+    <>
       <div style={{ ...card, marginBottom: 18 }}>
         <div style={{ font: "700 20px 'Kalam'", color: 'var(--ink)', marginBottom: 5 }}>Analyze a creative work</div>
         <div style={{ font: "600 12.5px/1.6 'Quicksand'", color: 'var(--ink-muted)', marginBottom: 15 }}>
@@ -271,6 +282,6 @@ export default function Align(): React.JSX.Element {
           </section>
         )}
       </div>
-    </div>
+    </>
   )
 }

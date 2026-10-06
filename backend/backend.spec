@@ -6,11 +6,13 @@
 # the broad collect_all() list below rather than hand-picked hidden imports.
 from PyInstaller.utils.hooks import collect_all
 
-# Datasets and models are NOT bundled. They live in Hugging Face repos and are fetched on
+# Large datasets and models are NOT bundled. A small aggregate Visual Art preference index is bundled below.
+# Other assets live in Hugging Face repos and are fetched on
 # first use into the user's data directory — see app/services/hf_assets.py for why (a file
 # inside a distributed app is a file every user has, and cannot be revoked). What stays here
 # is configuration and code that the packages resolve relative to themselves.
 datas = [
+    ("app/services/pamela_affinity.json", "app/services"),
     ("vendor/dmstrategy/data/ad_benchmarks.json", "vendor/dmstrategy/data"),
     ("vendor/dmstrategy/data/social_benchmarks.json", "vendor/dmstrategy/data"),
     # vendor/socialpost resolves these at runtime relative to its own package root,
@@ -31,7 +33,19 @@ hiddenimports = [
     "app.main",
     "app.routers.settings",
     "app.routers.align_writing",
+    "app.routers.align_visual_art",
     "app.services.align_writing",
+    "app.services.align_visual_art",
+    "app.routers.music_audience",
+    "app.services.music_audience",
+    "app.routers.viral_footprint",
+    "app.services.viral_footprint.jobs",
+    "app.services.viral_footprint.media",
+    "app.services.viral_footprint.public_search",
+    "app.services.viral_footprint.scoring",
+    "app.routers.game_analysis",
+    "app.game_analysis.modal_runtime",
+    "app.game_analysis.modal_backend",
     "app.services.genqueue",
     "app.routers.library",
     "app.routers.marketing_plan",

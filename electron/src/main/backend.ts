@@ -87,6 +87,26 @@ function emailWriterModalEnv(): Record<string, string> {
   }
 }
 
+/** Align > Games can use the Modal workspace already configured for Brand Studio.
+ * Saved IGDB credentials are passed only to the local backend. */
+function gameAnalysisEnv(): Record<string, string> {
+  const env: Record<string, string> = {}
+  const igdb = getSettings().gameAnalysis
+  if (igdb.igdbClientId.trim() && igdb.igdbClientSecret.trim()) {
+    if (!process.env.IGDB_CLIENT_ID) env.IGDB_CLIENT_ID = igdb.igdbClientId.trim()
+    if (!process.env.IGDB_CLIENT_SECRET) env.IGDB_CLIENT_SECRET = igdb.igdbClientSecret.trim()
+  }
+  if ((process.env.GAME_ANALYSIS_MODAL_TOKEN_ID && process.env.GAME_ANALYSIS_MODAL_TOKEN_SECRET) ||
+      (process.env.MODAL_TOKEN_ID && process.env.MODAL_TOKEN_SECRET)) return env
+  const own = getSettings().brandForge
+  const alternate = getSettings().emailWriterModal
+  const tokenId = own.modalTokenId.trim() || alternate.modalTokenId.trim()
+  const tokenSecret = own.modalTokenSecret.trim() || alternate.modalTokenSecret.trim()
+  return tokenId && tokenSecret
+    ? { ...env, GAME_ANALYSIS_MODAL_TOKEN_ID: tokenId, GAME_ANALYSIS_MODAL_TOKEN_SECRET: tokenSecret }
+    : env
+}
+
 function writerSpaceEnv(): Record<string, string> {
   const { blogWriter, emailWriter } = getSettings().writerSpaces
   const env: Record<string, string> = {}
@@ -157,6 +177,7 @@ function spawnDevBackend(): ChildProcessWithoutNullStreams {
       ...marketingPlanEnv(),
       ...writerSpaceEnv(),
       ...emailWriterModalEnv(),
+      ...gameAnalysisEnv(),
       ...hfAssetEnv(),
       ...cloudPostingEnv()
     }
@@ -192,6 +213,7 @@ function spawnPackagedBackend(): ChildProcessWithoutNullStreams {
       ...marketingPlanEnv(),
       ...writerSpaceEnv(),
       ...emailWriterModalEnv(),
+      ...gameAnalysisEnv(),
       ...hfAssetEnv(),
       ...cloudPostingEnv()
     }

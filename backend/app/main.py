@@ -24,6 +24,10 @@ from . import config, db  # imports app.config as a side effect, which sets up t
 from .routers import (
     backup,
     align_writing,
+    align_visual_art,
+    music_audience,
+    viral_footprint,
+    game_analysis,
     blog_writer,
     community,
     community_account,
@@ -159,6 +163,10 @@ def on_startup() -> None:
         share_server.start(share_host, int(os.environ.get("MRAIM_SHARE_PORT", "8756")))
 
     db.init_db()
+    from .services.viral_footprint import jobs as viral_footprint_jobs
+    viral_footprint_jobs.initialize()
+    from .game_analysis import jobs as game_analysis_jobs
+    game_analysis_jobs.initialize()
     guest_post.initialize()
     marketing_plan.initialize()
     distribution.start_scheduler()
@@ -237,6 +245,10 @@ async def _queue_full(_request: Request, exc: GenQueueFull) -> JSONResponse:
 
 app.include_router(settings.router)
 app.include_router(align_writing.router)
+app.include_router(align_visual_art.router)
+app.include_router(music_audience.router)
+app.include_router(viral_footprint.router)
+app.include_router(game_analysis.router)
 app.include_router(backup.router)
 app.include_router(library.router)
 app.include_router(marketing_plan.router)

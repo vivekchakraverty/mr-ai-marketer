@@ -45,7 +45,7 @@ Eleven screens, grouped by what you're trying to get done:
 | **Analytics** | What happened: your sales pipeline, email opens and clicks, how your posts performed against comparable accounts. |
 | **Manage** | A live planning workspace where you track campaigns and budgets. |
 | **Community** | Run a Telegram community: an open group anyone can be added to, and a paid channel people subscribe to. |
-| **Align** | Analyze a creative writing manuscript and find audience spaces that fit its genre, themes, and tone. |
+| **Align** | Find readers for writing, analyze music locally, and search public videos for copies of an uploaded reel. |
 | **Distribute** | Connect the places you publish to, and push finished work out to them. |
 | **Library** | Everything the app has ever made for you, in one list. |
 | **Settings** | Your accounts and keys. All stored encrypted on your machine. |
@@ -355,6 +355,27 @@ first; it tells you how for whichever one is missing.
 
 Three pieces that talk to each other on your own machine:
 
+The Music tab runs the bundled Essentia WebAssembly engine inside the Electron app. It needs
+no separate service, API key, container, or download after installation. The build checks
+that the engine can analyze audio before making an installer.
+
+After song analysis, Align ranks documented music platforms and feedback communities using
+the artist's stated style, release stage, location, and goal. It links to the source for each
+route and does not treat tempo or key as proof of genre or audience demand. The source review
+and its maintenance notes are in [docs/align-music-audience-sources.md](docs/align-music-audience-sources.md).
+
+An optional listener research action uses one to three comparable artists entered by the
+musician. It looks up exact artist IDs in MusicBrainz, then shows aggregate ListenBrainz
+listener counts and nearby artist audiences. Only the artist names leave the app; the song
+audio stays local. The result is an exploratory audience lead, not a listener prediction.
+The tab links to cosine.club for manual soundalike research from a public song link.
+
+The Videos subtab compares an uploaded reel with public YouTube reference videos and checks
+for copies using frame fingerprints. The report shows footage similarities and public view
+counts; an optional YouTube link allows a direct comparison. A copy-spread score is unavailable
+until public copies and metrics are verified. See [docs/align-videos.md](docs/align-videos.md)
+for coverage limits and the scoring method.
+
 ```
 ┌─────────────────────────────┐
 │  The window you see         │   Electron + React
@@ -658,7 +679,8 @@ derivative work and must be GPLv3.** Worth confirming before you redistribute.
 
 | Thing | Licence | What that means here |
 | --- | --- | --- |
-| [ffmpeg](https://www.gyan.dev/ffmpeg/builds/) (gyan.dev static build) | **GPL-3.0** | The one real redistribution obligation. The app never links it — DocuMaker and TutorialMaker shell out to it as a separate executable on PATH — so this is mere aggregation and the MIT grant on the app code is unaffected. But GPLv3 obliges anyone distributing the binary to offer its corresponding source. If you publish an installer, link to the exact build you bundled. |
+| [ffmpeg](https://www.gyan.dev/ffmpeg/builds/) (gyan.dev static build) | **GPL-3.0** | Bundled for DocuMaker and TutorialMaker. Distributors must provide the corresponding source for the exact binary shipped. |
+| [Essentia.js](https://github.com/MTG/essentia.js) 0.1.3 | **AGPL-3.0** | Bundled WebAssembly engine for local Music analysis. The full licence is shipped in `resources/essentia/LICENSE`. Keep the app and dependency source and build instructions available to recipients under the applicable terms. |
 
 ### Services you run yourself
 
@@ -673,7 +695,7 @@ between you and them, not conditions on this repo.
 
 ### Notable libraries
 
-Ordinary dependencies, all permissive: **faster-whisper** (MIT), **yt-dlp** (Unlicense),
+Other notable dependencies: **faster-whisper** (MIT), **yt-dlp** (Unlicense),
 **ChromaDB** (Apache-2.0), **Sentence Transformers** (Apache-2.0), **FastAPI**, **Electron**
 and **React** (all MIT).
 
@@ -700,9 +722,7 @@ Released under the **MIT Licence** — see [LICENSE](LICENSE). In short: use it,
 ship it commercially, just keep the copyright notice.
 
 That grant covers the application code and the projects under `backend/vendor/` that were
-written for it. It does **not** override the terms of the third-party work this app builds
-on — most notably the GPL-3.0 ffmpeg binaries in the installer, and the GPLv3 project whose
-workflow the Lead Gen Agent follows.
+written for it. It does **not** override third-party terms, including Essentia.js's AGPL-3.0
+terms for the bundled music analyzer and the GPL-3.0 ffmpeg binaries.
 [What this is built on](#what-this-is-built-on-and-their-licences) has the full picture and
-the two items that need a decision before you redistribute. Read it before you fork this for
-anything beyond personal use.
+the licensing details to review before redistributing an installer.
