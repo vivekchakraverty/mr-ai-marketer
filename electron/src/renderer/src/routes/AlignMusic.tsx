@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { fetchMusicAudience, type MusicAudienceReport } from '../api/client'
+import { alignSavedReportsApi, type SavedAlignSummary } from '../api/alignSavedReports'
 import { card, label, primaryButton, primaryButtonSmall, sectionEyebrow, textInput } from '../styles/styleKit'
 import type { EssentiaSongResult, EssentiaWorkerReply } from './essentiaTypes'
 import { RESEARCH_REVIEWED, suggestMusicDestinations, type MusicAudienceContext, type MusicDestination, type MusicGoal, type ReleaseStage } from './musicDestinations'
@@ -85,9 +86,63 @@ export default function AlignMusic(): React.JSX.Element {
   const [audience, setAudience] = useState<MusicAudienceContext>({
     style: '', referenceArtists: '', location: '', goal: 'feedback', stage: 'draft'
   })
+  const [savedReports, setSavedReports] = useState<SavedAlignSummary[]>([])
+  const [savedTitle, setSavedTitle] = useState('')
+  const [saveError, setSaveError] = useState('')
+  const [savedAt, setSavedAt] = useState('')
+  const savedIdRef = useRef('')
+  const saveVersionRef = useRef(0)
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const workerRef = useRef<Worker | null>(null)
   const audienceRunRef = useRef(0)
   const destinations = result ? suggestMusicDestinations(result, audience) : []
+
+  useEffect(() => { void alignSavedReportsApi.list('music').then(({ reports }) => setSavedReports(reports)).catch(() => undefined) }, [])
+
+  useEffect(() => {
+    if (!result) return
+    const version = saveVersionRef.current
+    const timer = window.setTimeout(() => {
+      saveQueueRef.current = saveQueueRef.current.catch(() => undefined).then(async () => {
+        if (version !== saveVersionRef.current) return
+        try {
+          const saved = await alignSavedReportsApi.save('music', savedTitle || file?.name || 'Song', {
+            analysis: result, audience_context: audience, audience_report: audienceReport,
+            destinations: suggestMusicDestinations(result, audience)
+          }, savedIdRef.current)
+          if (version !== saveVersionRef.current) return
+          savedIdRef.current = saved.id
+          setSavedAt(saved.updated_at)
+          setSaveError('')
+          const { reports } = await alignSavedReportsApi.list('music')
+          if (version === saveVersionRef.current) setSavedReports(reports)
+        } catch (cause) {
+          if (version === saveVersionRef.current) setSaveError(cause instanceof Error ? cause.message : String(cause))
+        }
+      })
+    }, 450)
+    return () => window.clearTimeout(timer)
+  }, [result, audience, audienceReport, savedTitle, file])
+
+  async function openSaved(id: string): Promise<void> {
+    try {
+      const saved = await alignSavedReportsApi.get<{
+        analysis: EssentiaSongResult; audience_context: MusicAudienceContext; audience_report: MusicAudienceReport | null
+      }>(id)
+      saveVersionRef.current++
+      savedIdRef.current = saved.id
+      setFile(null)
+      const input = document.getElementById('align-music-file') as HTMLInputElement | null
+      if (input) input.value = ''
+      setSavedTitle(saved.title)
+      setResult(saved.document.analysis)
+      setAudience(saved.document.audience_context)
+      setAudienceReport(saved.document.audience_report)
+      setSavedAt(saved.updated_at)
+      setSaveError('')
+      setError('')
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+  }
 
   function updateAudience<K extends keyof MusicAudienceContext>(key: K, value: MusicAudienceContext[K]): void {
     if (key === 'referenceArtists') {
@@ -107,7 +162,25 @@ export default function AlignMusic(): React.JSX.Element {
     setAudienceReport(null)
     try {
       const report = await fetchMusicAudience(audience.referenceArtists.trim())
-      if (run === audienceRunRef.current) setAudienceReport(report)
+      if (run === audienceRunRef.current) {
+        setAudienceReport(report)
+        const version = saveVersionRef.current
+        try {
+          const saved = await alignSavedReportsApi.save('music', savedTitle || file?.name || 'Song', {
+            analysis: result, audience_context: audience, audience_report: report,
+            destinations: suggestMusicDestinations(result, audience)
+          }, savedIdRef.current)
+          if (version === saveVersionRef.current) {
+            savedIdRef.current = saved.id
+            setSavedAt(saved.updated_at)
+            setSaveError('')
+            const { reports } = await alignSavedReportsApi.list('music')
+            setSavedReports(reports)
+          }
+        } catch (cause) {
+          if (version === saveVersionRef.current) setSaveError(cause instanceof Error ? cause.message : String(cause))
+        }
+      }
     } catch (cause) {
       if (run === audienceRunRef.current) setAudienceError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -119,6 +192,11 @@ export default function AlignMusic(): React.JSX.Element {
 
   async function analyze(): Promise<void> {
     if (!file || busy) return
+    saveVersionRef.current++
+    savedIdRef.current = ''
+    setSavedTitle(file.name)
+    setSavedAt('')
+    setSaveError('')
     setError('')
     setResult(null)
     audienceRunRef.current++
@@ -163,7 +241,20 @@ export default function AlignMusic(): React.JSX.Element {
         worker!.onerror = () => reject(new Error('The bundled Essentia worker could not start.'))
       })
       worker.postMessage({ samples, sampleRate: decoded.sampleRate }, [samples.buffer])
-      setResult(await analysis)
+      const analyzed = await analysis
+      try {
+        const saved = await alignSavedReportsApi.save('music', file.name, {
+          analysis: analyzed, audience_context: audience, audience_report: null,
+          destinations: suggestMusicDestinations(analyzed, audience)
+        })
+        savedIdRef.current = saved.id
+        setSavedAt(saved.updated_at)
+        const { reports } = await alignSavedReportsApi.list('music')
+        setSavedReports(reports)
+      } catch (cause) {
+        setSaveError(cause instanceof Error ? cause.message : String(cause))
+      }
+      setResult(analyzed)
       setStatus('')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -177,12 +268,13 @@ export default function AlignMusic(): React.JSX.Element {
   }
 
   return <>
+    {savedReports.length > 0 && <section style={{ ...card, marginBottom: 16 }}><strong>Saved music analyses</strong><div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 9 }}>{savedReports.map((item) => <button type="button" key={item.id} onClick={() => void openSaved(item.id)} style={{ ...primaryButtonSmall, background: item.id === savedIdRef.current ? 'var(--accent)' : 'var(--surface)', color: item.id === savedIdRef.current ? 'var(--accent-ink)' : 'var(--ink)' }}>{item.title}</button>)}</div></section>}
     <section style={{ ...card, marginBottom: 16 }}>
       <div style={{ font: "700 20px 'Kalam'", color: 'var(--ink)', marginBottom: 5 }}>Analyze a song with Essentia</div>
       <p style={{ font: "600 12.5px/1.6 'Quicksand'", color: 'var(--ink-muted)', margin: '0 0 15px' }}>
         Essentia runs inside this app, even offline. Choose a song to measure its level, spectral balance, tempo, and estimated key. The audio stays on your device.
       </p>
-      <label><span style={label}>Song audio (up to 100 MB and 15 minutes)</span><input type="file" accept=".mp3,.wav,.ogg,.oga,.flac,.m4a,.aac,.aif,.aiff,audio/*" onChange={(event) => { setFile(event.target.files?.[0] ?? null); setResult(null); setAudienceReport(null); setAudienceBusy(false); audienceRunRef.current++ }} style={{ ...textInput, boxSizing: 'border-box', padding: '8px 10px' }} /></label>
+      <label><span style={label}>Song audio (up to 100 MB and 15 minutes)</span><input id="align-music-file" type="file" accept=".mp3,.wav,.ogg,.oga,.flac,.m4a,.aac,.aif,.aiff,audio/*" onChange={(event) => { saveVersionRef.current++; savedIdRef.current = ''; setSavedAt(''); setFile(event.target.files?.[0] ?? null); setResult(null); setAudienceReport(null); setAudienceBusy(false); audienceRunRef.current++ }} style={{ ...textInput, boxSizing: 'border-box', padding: '8px 10px' }} /></label>
       <div style={{ borderTop: '1px solid var(--border)', marginTop: 17, paddingTop: 14 }}>
         <div style={{ font: "700 15px 'Kalam'", color: 'var(--ink)' }}>Where might it find listeners?</div>
         <p style={{ font: "600 11px/1.55 'Quicksand'", color: 'var(--ink-muted)', margin: '3px 0 11px' }}>These details are optional and stay in this window. They make the platform and community suggestions specific without asking Essentia to guess genre or audience.</p>
@@ -199,12 +291,14 @@ export default function AlignMusic(): React.JSX.Element {
         {status && <span role="status" style={{ font: "600 11.5px 'Quicksand'", color: 'var(--ink-muted)' }}>{status}</span>}
       </div>
       {error && <div role="alert" style={{ marginTop: 12, font: "700 12px 'Quicksand'", color: 'var(--danger-ink)' }}>{error}</div>}
-      <p style={{ font: "600 10.5px/1.5 'Quicksand'", color: 'var(--ink-faint)', margin: '12px 0 0' }}>Essentia 0.1.3 is bundled under AGPL-3.0. Song audio stays on your device. Audience research contacts MusicBrainz and ListenBrainz only when you request it, sending the reference artist names you entered. This tool does not save the report.</p>
+      <p style={{ font: "600 10.5px/1.5 'Quicksand'", color: 'var(--ink-faint)', margin: '12px 0 0' }}>Essentia 0.1.3 is bundled under AGPL-3.0. Song audio stays on your device. Derived measurements, your context, and listener research are saved locally for future strategy work. Audience research contacts MusicBrainz and ListenBrainz only when you request it, sending the reference artist names you entered.</p>
+      {savedAt && <p role="status" style={{ font: "700 10.5px 'Quicksand'", color: 'var(--ink-muted)' }}>Derived report saved {new Date(savedAt).toLocaleString()}.</p>}
+      {saveError && <p role="alert" style={{ color: 'var(--danger-ink)' }}>Could not save analysis: {saveError}</p>}
     </section>
 
     {result && <section style={{ ...card, padding: 22 }}>
       <div style={sectionEyebrow}>Local Essentia analysis</div>
-      <h2 style={{ font: "700 22px 'Kalam'", color: 'var(--ink)', margin: '5px 0 12px' }}>{file?.name ?? 'Song'}</h2>
+      <h2 style={{ font: "700 22px 'Kalam'", color: 'var(--ink)', margin: '5px 0 12px' }}>{savedTitle || file?.name || 'Song'}</h2>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 9 }}>
         {metric(clock(result.durationSeconds), 'Duration', `Decoded at ${result.sampleRate.toLocaleString()} Hz`)}
         {metric(result.tempoBpm === null ? 'Unknown' : `${result.tempoBpm} BPM`, 'Tempo estimate', `${result.excerptCount} excerpt${result.excerptCount === 1 ? '' : 's'} measured`)}

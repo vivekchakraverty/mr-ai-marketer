@@ -32,6 +32,8 @@ interface Props {
   instance?: string
   /** Optional hook for a caller that can actually schedule — Distribute's modal. */
   onPickSlot?: (iso: string) => void
+  /** Show loading and request failures when this panel is part of a larger result. */
+  showStatus?: boolean
 }
 
 /** Platforms the backend collects a curve for. Anything else hides the panel. */
@@ -155,7 +157,8 @@ const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 export default function PostingTimePanel({
   platform,
   instance = '',
-  onPickSlot
+  onPickSlot,
+  showStatus = false
 }: Props): React.JSX.Element | null {
   const [data, setData] = useState<PostingTimeRecommendation | null>(null)
   const [error, setError] = useState('')
@@ -219,8 +222,8 @@ export default function PostingTimePanel({
   // those drafts would assert something about a network never in the corpus. Same
   // silence when Mastodon has no instance to answer for — see `answerable`.
   if (!answerable) return null
-  if (error) return null
-  if (!data) return null
+  if (error) return showStatus ? <p role="alert">Posting times could not be loaded: {error}</p> : null
+  if (!data) return showStatus ? <p>Loading posting times…</p> : null
 
   // A platform with no trustworthy curve says so, rather than borrowing another
   // platform's numbers or quietly rendering a flat line as if it were a finding.

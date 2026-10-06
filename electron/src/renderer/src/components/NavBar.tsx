@@ -3,6 +3,7 @@ import { useAppStore } from '../state/store'
 import AccountMenu from './AccountMenu'
 import marketerIcon from '../assets/marketer-icon.png'
 import MusicToggle from './MusicToggle'
+import NotificationCenter from './NotificationCenter'
 
 const navBase: CSSProperties = {
   display: 'flex',
@@ -191,6 +192,7 @@ export default function NavBar(): React.JSX.Element {
           {/* Opens the connected-accounts panel. Settings still lives on the cog; this
               answers "am I signed in to Bluesky?" without a trip through four screens. */}
           <AccountMenu />
+          <NotificationCenter />
           {/* Last in the row, so it sits in the top-right corner. */}
           <MusicToggle />
         </div>

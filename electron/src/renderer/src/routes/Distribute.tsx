@@ -18,6 +18,7 @@ import ApprovalQueueCard from '../components/ApprovalQueueCard'
 import BackendImage from '../components/BackendImage'
 import BackendVideo from '../components/BackendVideo'
 import ChannelConnectModal from '../components/ChannelConnectModal'
+import DistributionCalendar from '../components/DistributionCalendar'
 import { cloudSpaceStatus, type CloudSpaceStatus } from '../api/client'
 import MailComposer from '../components/MailComposer'
 import {
@@ -293,6 +294,7 @@ export default function Distribute(): React.JSX.Element {
       historyRefreshSequence.current += 1
       setJobs((current) => current.filter((item) => item.id !== job.id))
       setExpandedJob((current) => (current === job.id ? null : current))
+      window.dispatchEvent(new Event('distribution-jobs-changed'))
     } catch (err) {
       setCancelError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -461,6 +463,8 @@ export default function Distribute(): React.JSX.Element {
           </div>
         )}
       </div>
+
+      <DistributionCalendar />
 
       <div style={{ marginBottom: 14 }}>
         <div style={{ font: "700 18px 'Kalam'", color: 'var(--ink)' }}>Send history</div>

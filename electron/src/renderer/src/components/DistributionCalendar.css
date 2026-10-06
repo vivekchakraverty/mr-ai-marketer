@@ -1,0 +1,46 @@
+.distribution-calendar {
+  background: var(--surface);
+  border: 2.5px solid var(--border);
+  border-radius: 22px;
+  padding: 20px;
+  margin-bottom: 30px;
+  box-shadow: var(--shadow-sm);
+  font: 600 12px/1.5 var(--font-sans);
+  color: var(--ink-body);
+}
+.distribution-calendar h2 { font: 700 23px var(--font-serif); color: var(--ink); margin: 0; }
+.distribution-calendar h3 { font: 700 19px var(--font-serif); color: var(--ink); margin: 0 0 10px; }
+.distribution-calendar h4 { margin: 12px 0 6px; font-size: 13px; color: var(--ink); }
+.distribution-calendar p { margin: 5px 0 12px; }
+.distribution-calendar-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.distribution-calendar-controls { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; }
+.distribution-calendar-controls label { display: flex; flex: 1 1 240px; min-width: 0; flex-direction: column; gap: 5px; color: var(--ink); font-weight: 700; }
+.distribution-calendar-controls select { width: 100%; padding: 10px; border: 2px solid var(--border); border-radius: 12px; background: var(--surface-tint); color: var(--ink); font: inherit; }
+.distribution-calendar-controls select:disabled { opacity: .6; }
+.distribution-calendar-help { color: var(--ink-faint); font-size: 11px; }
+.distribution-calendar-scroll { overflow-x: auto; padding: 3px; margin: 0 -3px; }
+.distribution-calendar-weekdays, .distribution-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; min-width: 630px; }
+.distribution-calendar-weekdays { text-align: center; margin-bottom: 7px; font-weight: 700; }
+.distribution-calendar-day { min-height: 134px; display: flex; align-items: stretch; flex-direction: column; gap: 5px; text-align: left; background: var(--surface-paper); border: 1.5px solid var(--border-soft); border-radius: 12px; padding: 9px; color: var(--ink); font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+.distribution-calendar-day:hover { background: var(--surface-tint); }
+.distribution-calendar-day.has-posts { border-color: #24824f; }
+.distribution-calendar-day.selected { outline: 2px solid var(--border); outline-offset: 1px; background: var(--surface-tint); }
+.distribution-calendar-day:focus-visible, .distribution-calendar select:focus-visible, .distribution-calendar button:focus-visible { outline: 3px solid var(--tool-distribute); outline-offset: 2px; }
+.distribution-calendar-date { font-weight: 700; display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; }
+.distribution-calendar-date small { font-size: 9px; color: var(--accent-deep); }
+.distribution-calendar-scheduled { display: inline-block; align-self: flex-start; background: #d8f5e1; color: #185d38; border: 1px solid #24824f; border-radius: 7px; padding: 3px 6px; font-size: 10px; font-weight: 700; }
+.distribution-calendar-preview { font-size: 10px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.distribution-calendar-more { color: var(--accent-deep); font-size: 10px; font-weight: 700; margin-top: auto; }
+.distribution-calendar-empty { color: var(--ink-faint); font-size: 10px; }
+.distribution-calendar-details { background: var(--surface-tint); border: 1.5px solid var(--border-soft); border-radius: 14px; margin-top: 16px; padding: 14px; }
+.distribution-calendar-posts ul { padding-left: 18px; margin: 6px 0; }
+.distribution-calendar-events { max-height: 330px; overflow-y: auto; list-style: none; padding: 0; margin: 0; }
+.distribution-calendar-events li { padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
+.distribution-calendar-events li:last-child { border: 0; }
+.distribution-calendar-event-location { color: var(--ink-faint); font-size: 11px; margin-top: 3px; }
+.distribution-calendar a { color: var(--accent-deep); font-size: 11px; }
+.distribution-calendar-scope { display: inline-block; padding: 1px 6px; border-radius: 6px; font-size: 9px; background: #dcedff; color: #26547b; }
+.distribution-calendar-scope.national { background: #ffe3d9; color: #93422e; }
+.distribution-calendar-scope.regional { background: #eee4ff; color: #5b3d83; }
+.distribution-calendar-error { color: var(--danger-ink); border: 1px solid var(--danger-ink); border-radius: 10px; padding: 10px; margin: 10px 0; }
+.distribution-calendar-error button { margin-top: 7px; padding: 5px 10px; border: 1.5px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--ink); cursor: pointer; font: inherit; }

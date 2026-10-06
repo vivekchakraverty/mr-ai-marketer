@@ -1,0 +1,55 @@
+.bp2-root { display: grid; gap: 16px; color: var(--ink); font: 500 13px/1.55 'Quicksand', sans-serif; }
+.bp2-root h2,.bp2-root h3,.bp2-root h4,.bp2-root h5 { color: var(--ink); margin: 0 0 10px; }
+.bp2-root h2 { font: 700 21px 'Kalam'; }
+.bp2-root h3 { font: 700 18px 'Kalam'; }
+.bp2-root h4 { font: 700 15px 'Quicksand'; }
+.bp2-root h5 { font: 700 12px 'Quicksand'; margin-top: 12px; }
+.bp2-root p { margin: 5px 0 9px; }
+.bp2-intro { font-size: 14px; max-width: 760px; }
+.bp2-source { display: grid; gap: 5px; max-width: 550px; margin: 15px 0; }
+.bp2-source select { width: 100%; }
+.bp2-inputs { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--surface); }
+.bp2-input-grid,.bp2-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap: 14px; }
+.bp2-input-grid > div,.bp2-grid > section,.bp2-grid > div { min-width: 0; }
+.bp2-input-grid p { margin: 5px 0; text-transform: capitalize; }
+.bp2-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 15px; }
+.bp2-actions button:disabled { opacity: .55; cursor: wait; }
+.bp2-note { background: var(--accent-soft-bg); border-radius: 10px; padding: 10px 12px; color: var(--ink-muted); }
+.bp2-error { background: #fff1ee; border: 1px solid #db9486; border-radius: 10px; padding: 10px 12px; color: #a34a3a; }
+.bp2-muted,.bp2-root small { color: var(--ink-faint); }
+.bp2-chip { display: inline-block; border-radius: 999px; background: var(--accent-soft-bg); color: var(--accent-deep); padding: 2px 7px; font-size: 10px; font-weight: 700; }
+.bp2-table { width: 100%; border-collapse: collapse; min-width: 700px; font-size: 11.5px; }
+.bp2-table th,.bp2-table td { border-bottom: 1px solid var(--border); padding: 9px; text-align: left; vertical-align: top; }
+.bp2-table thead th { color: var(--ink-muted); white-space: nowrap; }
+.bp2-text-button { border: 0; background: transparent; padding: 0; color: var(--accent-deep); cursor: pointer; font: inherit; text-align: left; }
+.bp2-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.bp2-tabs button { padding: 8px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--ink); cursor: pointer; font: 700 12px 'Quicksand'; }
+.bp2-tabs button[aria-selected='true'] { background: var(--accent); color: var(--accent-ink); }
+.bp2-persona { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px; }
+.bp2-persona-head { display: flex; justify-content: space-between; gap: 20px; }
+.bp2-persona-head h3 { font-size: 25px; margin: 4px 0; }
+.bp2-eyebrow { color: var(--accent-deep); font-weight: 700; }
+.bp2-score { flex: 0 0 auto; display: grid; text-align: center; align-content: center; padding: 9px 16px; background: var(--accent-soft-bg); border-radius: 10px; }
+.bp2-score strong { font: 700 27px 'Kalam'; }
+.bp2-score span { font-size: 10px; }
+.bp2-persona .bp2-grid { margin-top: 18px; }
+.bp2-persona .bp2-grid section { border: 1px solid var(--border); border-radius: 11px; padding: 14px; }
+.bp2-detail { border: 1px solid var(--border); border-radius: 10px; padding: 10px 13px; margin-top: 14px; }
+.bp2-detail summary { cursor: pointer; font-weight: 700; }
+.bp2-detail[open] summary { margin-bottom: 12px; }
+.bp2-score-grid { display: grid; gap: 5px; }
+.bp2-score-grid > div { display: grid; grid-template-columns: 150px minmax(80px,1fr) 30px; gap: 8px; align-items: center; text-transform: capitalize; }
+.bp2-score-grid meter { width: 100%; }
+.bp2-list { padding-left: 18px; margin: 5px 0 10px; }
+.bp2-list li { margin: 3px 0; }
+.bp2-facts { margin: 0; }
+.bp2-facts > div { border-bottom: 1px solid var(--border-soft); padding: 5px 0; }
+.bp2-facts dt { font-weight: 700; text-transform: capitalize; }
+.bp2-facts dd { margin: 0; }
+.bp2-pair { border-bottom: 1px solid var(--border-soft); padding: 6px 0; }
+.bp2-journey { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 10px; }
+.bp2-journey > div { border: 1px solid var(--border); border-radius: 9px; padding: 10px; }
+.bp2-evidence { border-bottom: 1px solid var(--border-soft); padding: 9px 0; }
+.bp2-evidence a,.bp2-root a { color: var(--accent-deep); }
+.bp2-evidence small { margin-left: 9px; }
+.bp2-scroll { overflow-x: auto; margin-bottom: 20px; }

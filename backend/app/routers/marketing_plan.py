@@ -505,8 +505,10 @@ def generate_plan(body: GeneratePlanRequest) -> GeneratePlanResponse:
         raise HTTPException(status_code=400, detail="Please connect your Hugging Face account.")
 
     if body.targetPersonaRunId and body.targetPersonaId:
-        from . import personas as persona_router
-        selected_run = persona_router.get_run(body.targetPersonaRunId)
+        from ..services import saved_personas
+        selected_run = saved_personas.get_run(body.targetPersonaRunId)
+        if not selected_run:
+            raise HTTPException(status_code=404, detail="Persona run not found")
         selected = next((p for p in selected_run.get("personas", []) if p["id"] == body.targetPersonaId), None)
         if selected_run["status"] != "complete" or not selected:
             raise HTTPException(status_code=400, detail="Selected target persona is unavailable.")

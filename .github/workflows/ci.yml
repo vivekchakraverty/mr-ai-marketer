@@ -54,7 +54,7 @@ jobs:
       - name: Install test dependencies
         run: >
           pip install pytest httpx fastapi "pydantic>=2" pillow python-multipart==0.0.32 huggingface_hub==1.22.0
-          modal gradio_client python-docx requests requests-oauthlib atproto yt-dlp==2026.7.4
+          modal gradio_client python-docx requests requests-oauthlib atproto yt-dlp==2026.7.4 holidays==0.106
 
       - name: Run tests
         working-directory: backend
@@ -81,6 +81,10 @@ jobs:
       - name: Typecheck
         working-directory: electron
         run: npm run typecheck
+
+      - name: Calendar date checks
+        working-directory: electron
+        run: npm run verify:calendar
 
   secrets:
     name: Secret scan

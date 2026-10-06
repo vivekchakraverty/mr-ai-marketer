@@ -348,6 +348,7 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str)
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
+# Retained for reading saved research in Marketing Plan and Buyer Persona.
 _PERSONA_SCHEMA = """
 CREATE TABLE IF NOT EXISTS persona_runs (
     id TEXT PRIMARY KEY,
@@ -721,6 +722,17 @@ def get_distribution_job(job_id: str) -> Optional[dict]:
     with _connect() as conn:
         row = conn.execute("SELECT * FROM distribution_jobs WHERE id = ?", (job_id,)).fetchone()
         return dict(row) if row else None
+
+
+def list_calendar_distribution_jobs(start: str, end: str) -> list[dict]:
+    """All active schedules in a window, independent of the recent-history limit."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM distribution_jobs WHERE status IN ('scheduled', 'scheduled_cloud') "
+            "AND julianday(scheduled_at) >= julianday(?) AND julianday(scheduled_at) < julianday(?) "
+            "ORDER BY julianday(scheduled_at), id", (start, end),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
 
 def list_distribution_jobs(status: Optional[str] = None, limit: int = 100) -> list[dict]:

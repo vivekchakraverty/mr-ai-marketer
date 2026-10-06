@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useNotifications } from './notifications'
 
 /**
  * One place every error in the app surfaces.
@@ -51,6 +52,8 @@ export const useErrors = create<ErrorState>((set, get) => ({
   report: ({ message, source = 'app', detail = '' }) => {
     const text = (message || '').trim() || 'Something went wrong.'
     if (isNoise(text)) return
+    useNotifications.getState().add({ id: `app-error:${source}:${text}`, kind: 'error',
+      title: 'App needs attention', message: `${text}\n${source}` })
 
     const current = get().current
     // Don't stack modals, and don't let a loop of the same failure count up forever: an

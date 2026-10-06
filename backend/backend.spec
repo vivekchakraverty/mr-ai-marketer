@@ -13,9 +13,6 @@ from PyInstaller.utils.hooks import collect_all
 # is configuration and code that the packages resolve relative to themselves.
 datas = [
     ("app/services/pamela_affinity.json", "app/services"),
-    ("app/personas/questions.json", "app/personas"),
-    ("app/personas/config.json", "app/personas"),
-    ("app/personas/sample_data/demo.csv", "app/personas/sample_data"),
     ("vendor/dmstrategy/data/ad_benchmarks.json", "vendor/dmstrategy/data"),
     ("vendor/dmstrategy/data/social_benchmarks.json", "vendor/dmstrategy/data"),
     # vendor/socialpost resolves these at runtime relative to its own package root,
@@ -37,8 +34,10 @@ hiddenimports = [
     "app.routers.settings",
     "app.routers.align_writing",
     "app.routers.align_visual_art",
+    "app.routers.align_saved_reports",
     "app.services.align_writing",
     "app.services.align_visual_art",
+    "app.services.align_saved_reports",
     "app.routers.music_audience",
     "app.services.music_audience",
     "app.routers.viral_footprint",
@@ -52,9 +51,12 @@ hiddenimports = [
     "app.services.genqueue",
     "app.routers.library",
     "app.routers.marketing_plan",
-    "app.routers.personas",
-    "app.personas.core",
-    "app.personas.collectors",
+    "app.routers.saved_personas",
+    "app.services.saved_personas",
+    "app.services.public_research",
+    "app.routers.buyer_personas2",
+    "app.services.buyer_personas2",
+    "app.services.buyer_personas2_models",
     "app.routers.blog_writer",
     "app.routers.email_writer",
     "app.services.ctr_predictor",
@@ -221,6 +223,8 @@ _COLLECT_ALL = [
     "telethon",
     # Align's vec0 extension is loaded into sqlite3 connections at runtime.
     "sqlite_vec",
+    # Country modules and translated holiday names are resolved dynamically.
+    "holidays",
 ]
 for pkg in _COLLECT_ALL:
     d, b, h = collect_all(pkg)

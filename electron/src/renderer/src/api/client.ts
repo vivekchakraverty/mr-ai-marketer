@@ -950,6 +950,35 @@ export function fetchDistributionJobs(status?: string): Promise<{ jobs: Distribu
   return getJson(`/distribution/jobs${status ? `?status=${status}` : ''}`)
 }
 
+export interface CalendarEvent {
+  date: string
+  name: string
+  scope: 'international' | 'national' | 'regional'
+  country: string | null
+  regions: string[]
+  source: string
+}
+
+export interface DistributionCalendarEvents {
+  start: string
+  end: string
+  events: CalendarEvent[]
+  dataset_version: string
+  coverage: string
+}
+
+export function fetchCalendarLocations(country: string): Promise<{ countries: string[]; regions: { code: string; name: string }[] }> {
+  return getJson(`/distribution/calendar/locations?${new URLSearchParams({ country })}`)
+}
+
+export function fetchCalendarEvents(start: string, country: string, region: string): Promise<DistributionCalendarEvents> {
+  return getJson(`/distribution/calendar/events?${new URLSearchParams({ start, country, region })}`)
+}
+
+export function fetchCalendarPosts(start: string, end: string): Promise<{ jobs: DistributionJob[] }> {
+  return getJson(`/distribution/calendar/posts?${new URLSearchParams({ start, end })}`)
+}
+
 export interface WritingFingerprint {
   [key: string]: unknown
   platform_plan?: {
@@ -1125,8 +1154,10 @@ export interface SendToDistributionRequest {
   scheduledAt?: string
 }
 
-export function sendToDistribution(body: SendToDistributionRequest): Promise<{ jobs: DistributionJob[] }> {
-  return postJson('/distribution/send', body)
+export async function sendToDistribution(body: SendToDistributionRequest): Promise<{ jobs: DistributionJob[] }> {
+  const result = await postJson<{ jobs: DistributionJob[] }>('/distribution/send', body)
+  window.dispatchEvent(new Event('distribution-jobs-changed'))
+  return result
 }
 
 export async function generateDocu(fields: DocuFields, video: File): Promise<GenerateDocuResponse> {

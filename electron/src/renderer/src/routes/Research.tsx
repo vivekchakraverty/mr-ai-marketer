@@ -10,8 +10,9 @@ import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import { PLAN_INDUSTRY_OPTIONS, PLAN_MODEL_OPTIONS, planModelLabel } from '../state/types'
 import BrandForge from '../components/BrandForge'
-import AudiencePersonas from '../components/AudiencePersonas'
-import { personaApi } from '../api/personas'
+import BuyerPersonas2 from '../components/BuyerPersonas2'
+import ContentCalendar from '../components/ContentCalendar'
+import { listSavedPersonaOptions, type SavedPersonaOption } from '../api/savedPersonas'
 import InfluencerDb from '../components/InfluencerDb'
 import KeywordSurfer from '../components/KeywordSurfer'
 import MarkdownPanel from '../components/MarkdownPanel'
@@ -22,14 +23,15 @@ import ScreenBackdrop from '../components/ScreenBackdrop'
 import { card, label, primaryButton, primaryButtonSmall, secondaryButtonSmall, sectionEyebrow, segGroup, segItem, select, textInput, textarea } from '../styles/styleKit'
 import SaveButton from '../components/SaveButton'
 
-type ResearchTool = 'plan' | 'brand' | 'scout' | 'leads' | 'influencers' | 'personas'
+type ResearchTool = 'plan' | 'brand' | 'scout' | 'leads' | 'influencers' | 'personas2' | 'calendar'
 const RESEARCH_TOOLS: { key: ResearchTool; label: string }[] = [
   { key: 'plan', label: 'Marketing Plan' },
   { key: 'brand', label: 'Brand Studio' },
   { key: 'scout', label: 'Topic Scout' },
   { key: 'leads', label: 'Lead Gen Agent' },
   { key: 'influencers', label: 'Influencer Database' },
-  { key: 'personas', label: 'Audience Personas' }
+  { key: 'personas2', label: 'Buyer Persona' },
+  { key: 'calendar', label: 'Content Calendar' }
 ]
 
 const TOOL_HEADINGS: Record<ResearchTool, { title: string; subtitle: string }> = {
@@ -53,9 +55,13 @@ const TOOL_HEADINGS: Record<ResearchTool, { title: string; subtitle: string }> =
     subtitle:
       'Describe what you sell and who you sell to — an autonomous agent finds matching businesses, qualifies them as it learns your taste, verifies their emails, and drafts personalized outreach for you to approve. Track the whole pipeline in Analytics.'
   },
-  personas: {
-    title: 'Audience Personas',
-    subtitle: 'Interview your team, review approved evidence, and build buyer profiles with validation questions.'
+  personas2: {
+    title: 'Buyer Persona',
+    subtitle: 'Turn saved Align audience signals, project information, and sourced market research into actionable personas.'
+  },
+  calendar: {
+    title: 'Content Calendar',
+    subtitle: 'Turn saved buyer personas and Align audience signals into a four-week posting rhythm and topic plan.'
   },
   influencers: {
     title: 'Influencer Database',
@@ -104,10 +110,10 @@ export default function Research(): React.JSX.Element {
   const [showSend, setShowSend] = useState(false)
   const [researchTool, setResearchTool] = useState<ResearchTool>('plan')
   const [planMode, setPlanMode] = useState<PlanMode>('plan')
-  const [personaOptions, setPersonaOptions] = useState<{ runId: string; runName: string; personaId: string; label: string; confidence: string }[]>([])
+  const [personaOptions, setPersonaOptions] = useState<SavedPersonaOption[]>([])
   const [targetPersonaKey, setTargetPersonaKey] = useState('')
   useEffect(() => {
-    if (researchTool === 'plan') void personaApi.options().then(r => setPersonaOptions(r.options)).catch(() => setPersonaOptions([]))
+    if (researchTool === 'plan') void listSavedPersonaOptions().then(r => setPersonaOptions(r.options)).catch(() => setPersonaOptions([]))
   }, [researchTool])
 
   // Finished Keyword Surfer runs, offered as the keyword basis for a plan. Reloaded when
@@ -222,7 +228,8 @@ export default function Research(): React.JSX.Element {
       {researchTool === 'scout' && <TopicScout />}
       {researchTool === 'leads' && <LeadGenPanel />}
       {researchTool === 'influencers' && <InfluencerDb />}
-      {researchTool === 'personas' && <AudiencePersonas />}
+      {researchTool === 'personas2' && <BuyerPersonas2 />}
+      {researchTool === 'calendar' && <ContentCalendar />}
 
       {researchTool === 'plan' && (
         <div style={{ ...segGroup, marginBottom: 20, width: 'fit-content' }}>

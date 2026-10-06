@@ -98,6 +98,8 @@ accounts. The search tools use free public sources. The database is a file on yo
 Download the latest `mr-ai-marketer-Setup-<version>-x64.exe` from
 [Releases](../../releases) and run it. Windows 10/11, 64-bit. Nothing else to install —
 Python and the whole engine are inside the installer, which is why it's around 600MB.
+For version 1.0, open the [v1.0.0 release](../../releases/tag/v1.0.0) and choose the
+Windows installer there.
 
 **Windows will warn you before it runs.** You'll get a blue *"Windows protected your PC"*
 box from SmartScreen. That's expected and it isn't a virus warning: it means the installer
@@ -234,10 +236,13 @@ addresses, and drafts personalised outreach for you to approve. Nothing sends wi
 **Influencer Database.** A bundled catalogue of Instagram creators. Filter by niche, follower
 count and post count, narrow to verified or contactable, export a shortlist as a spreadsheet.
 
-**Audience Personas.** Interview your team, review a research plan, and combine your own
-feedback with approved public sources. Each persona links back to anonymized evidence and
-comes with interview questions and message tests. Try the fictional demo entirely offline;
-sparse data is labelled as a hypothesis. See [the guide](docs/personas/README.md).
+**Buyer Persona.** Generate evidence-based buyer profiles from saved Align analysis,
+project details, and bounded market research. Completed reports are saved locally.
+See [the guide](docs/buyer-personas-2.md).
+
+**Content Calendar.** Use a completed Buyer Persona report to build a four-week channel
+rhythm and topic plan. Bluesky and Mastodon plans include measured posting-time guidance;
+Mastodon timing is specific to your server.
 
 ### Create
 
@@ -312,6 +317,10 @@ in (Bluesky, Mastodon, X, LinkedIn, Facebook, Instagram, Discord, Reddit, email,
 replies) and you can **add hundreds more yourself** — the engine ships with connectors for
 around 750 services, and the app can browse that catalogue and wire a new one up for you
 without writing any code.
+
+The **Distribution Calendar** shows scheduled posts alongside country and regional
+observances. Dates are displayed in your local time zone; see the
+[calendar guide](docs/distribution-calendar.md).
 
 Reddit posts and Discord replies always pause for your approval before they go out. That's
 deliberate: it's the line between automation that builds an audience and automation that

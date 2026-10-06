@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 MUSICBRAINZ = "https://musicbrainz.org/ws/2"
 LISTENBRAINZ = "https://api.listenbrainz.org/1"
-USER_AGENT = "MrAIMarketer/0.7.25 (https://github.com/vivekchakraverty/mr-ai-marketer)"
+USER_AGENT = "MrAIMarketer/1.0.0 (https://github.com/vivekchakraverty/mr-ai-marketer)"
 _musicbrainz_lock = threading.Lock()
 _next_musicbrainz_request = 0.0
 _MBID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)

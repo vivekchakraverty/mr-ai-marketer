@@ -3,10 +3,10 @@ import os
 import logging
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from .. import db
@@ -14,6 +14,7 @@ from ..services import (
     activepieces_client,
     audio_attach,
     cloud_poster,
+    distribution_calendar,
     generation_link,
     mastodon_delivery,
     video_attach,
@@ -970,6 +971,33 @@ def send(body: SendRequest) -> dict:
 @router.get("/jobs")
 def list_jobs(status: Optional[str] = None) -> dict:
     return {"jobs": db.list_distribution_jobs(status=status)}
+
+
+@router.get("/calendar/locations")
+def calendar_locations(country: str = "") -> dict:
+    try:
+        regions = distribution_calendar.regions(country) if country and country != "worldwide" else ()
+        return {"countries": distribution_calendar.countries(),
+                "regions": [{"code": code, "name": name} for code, name in regions]}
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from None
+
+
+@router.get("/calendar/events")
+def calendar_events(start: date, country: str = "", region: str = "all") -> dict:
+    if not 2001 <= start.year <= 2098:
+        raise HTTPException(status_code=400, detail="Choose a date between 2001 and 2098.")
+    try:
+        return distribution_calendar.events(start, country, region)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from None
+
+
+@router.get("/calendar/posts")
+def calendar_posts(start: datetime = Query(...), end: datetime = Query(...)) -> dict:
+    if start.tzinfo is None or end.tzinfo is None or not timedelta(0) < end - start <= timedelta(days=32):
+        raise HTTPException(status_code=400, detail="Supply a timezone-aware calendar range of up to 32 days.")
+    return {"jobs": db.list_calendar_distribution_jobs(start.isoformat(), end.isoformat())}
 
 
 @router.post("/jobs/{job_id}/cancel")
