@@ -46,6 +46,7 @@ from .routers import (
     mail,
     mail_tracking,
     marketing_plan,
+    personas,
     mastodon_engage,
     mastodon_post,
     posting_time,
@@ -163,6 +164,7 @@ def on_startup() -> None:
         share_server.start(share_host, int(os.environ.get("MRAIM_SHARE_PORT", "8756")))
 
     db.init_db()
+    personas.initialize()
     from .services.viral_footprint import jobs as viral_footprint_jobs
     viral_footprint_jobs.initialize()
     from .game_analysis import jobs as game_analysis_jobs
@@ -252,6 +254,7 @@ app.include_router(game_analysis.router)
 app.include_router(backup.router)
 app.include_router(library.router)
 app.include_router(marketing_plan.router)
+app.include_router(personas.router)
 app.include_router(brand_forge.router)
 app.include_router(blog_writer.router)
 app.include_router(community.router)

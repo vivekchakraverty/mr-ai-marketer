@@ -10,6 +10,8 @@ import { refreshLibrary } from '../state/actions'
 import { useAppStore } from '../state/store'
 import { PLAN_INDUSTRY_OPTIONS, PLAN_MODEL_OPTIONS, planModelLabel } from '../state/types'
 import BrandForge from '../components/BrandForge'
+import AudiencePersonas from '../components/AudiencePersonas'
+import { personaApi } from '../api/personas'
 import InfluencerDb from '../components/InfluencerDb'
 import KeywordSurfer from '../components/KeywordSurfer'
 import MarkdownPanel from '../components/MarkdownPanel'
@@ -20,13 +22,14 @@ import ScreenBackdrop from '../components/ScreenBackdrop'
 import { card, label, primaryButton, primaryButtonSmall, secondaryButtonSmall, sectionEyebrow, segGroup, segItem, select, textInput, textarea } from '../styles/styleKit'
 import SaveButton from '../components/SaveButton'
 
-type ResearchTool = 'plan' | 'brand' | 'scout' | 'leads' | 'influencers'
+type ResearchTool = 'plan' | 'brand' | 'scout' | 'leads' | 'influencers' | 'personas'
 const RESEARCH_TOOLS: { key: ResearchTool; label: string }[] = [
   { key: 'plan', label: 'Marketing Plan' },
   { key: 'brand', label: 'Brand Studio' },
   { key: 'scout', label: 'Topic Scout' },
   { key: 'leads', label: 'Lead Gen Agent' },
-  { key: 'influencers', label: 'Influencer Database' }
+  { key: 'influencers', label: 'Influencer Database' },
+  { key: 'personas', label: 'Audience Personas' }
 ]
 
 const TOOL_HEADINGS: Record<ResearchTool, { title: string; subtitle: string }> = {
@@ -49,6 +52,10 @@ const TOOL_HEADINGS: Record<ResearchTool, { title: string; subtitle: string }> =
     title: 'Lead Gen Agent',
     subtitle:
       'Describe what you sell and who you sell to — an autonomous agent finds matching businesses, qualifies them as it learns your taste, verifies their emails, and drafts personalized outreach for you to approve. Track the whole pipeline in Analytics.'
+  },
+  personas: {
+    title: 'Audience Personas',
+    subtitle: 'Interview your team, review approved evidence, and build buyer profiles with validation questions.'
   },
   influencers: {
     title: 'Influencer Database',
@@ -97,6 +104,11 @@ export default function Research(): React.JSX.Element {
   const [showSend, setShowSend] = useState(false)
   const [researchTool, setResearchTool] = useState<ResearchTool>('plan')
   const [planMode, setPlanMode] = useState<PlanMode>('plan')
+  const [personaOptions, setPersonaOptions] = useState<{ runId: string; runName: string; personaId: string; label: string; confidence: string }[]>([])
+  const [targetPersonaKey, setTargetPersonaKey] = useState('')
+  useEffect(() => {
+    if (researchTool === 'plan') void personaApi.options().then(r => setPersonaOptions(r.options)).catch(() => setPersonaOptions([]))
+  }, [researchTool])
 
   // Finished Keyword Surfer runs, offered as the keyword basis for a plan. Reloaded when
   // returning from the collector tab so a run collected just now is immediately pickable.
@@ -141,7 +153,7 @@ export default function Research(): React.JSX.Element {
     setLoading(true)
     setError('')
     try {
-      const res = await generatePlan(fields)
+      const res = await generatePlan(fields, targetPersonaKey)
       setResult(res)
       setTab('full')
       void refreshLibrary()
@@ -193,13 +205,15 @@ export default function Research(): React.JSX.Element {
 
         <div style={{ ...segGroup, marginTop: 14 }}>
           {RESEARCH_TOOLS.map((t) => (
-            <div
+            <button
               key={t.key}
-              style={segItem(researchTool === t.key)}
+              type="button"
+              aria-pressed={researchTool === t.key}
+              style={{ ...segItem(researchTool === t.key), border: 0, background: researchTool === t.key ? 'var(--accent)' : 'transparent' }}
               onClick={() => setResearchTool(t.key)}
             >
               {t.label}
-            </div>
+            </button>
           ))}
         </div>
       </div>
@@ -208,6 +222,7 @@ export default function Research(): React.JSX.Element {
       {researchTool === 'scout' && <TopicScout />}
       {researchTool === 'leads' && <LeadGenPanel />}
       {researchTool === 'influencers' && <InfluencerDb />}
+      {researchTool === 'personas' && <AudiencePersonas />}
 
       {researchTool === 'plan' && (
         <div style={{ ...segGroup, marginBottom: 20, width: 'fit-content' }}>
@@ -230,6 +245,11 @@ export default function Research(): React.JSX.Element {
       >
         <div style={{ width: 400, flexShrink: 0, ...card, display: 'flex', flexDirection: 'column', gap: 17 }}>
           <div style={sectionEyebrow}>Brief</div>
+          {personaOptions.length > 0 && <div><label htmlFor="plan-target-persona" style={label}>Target persona (optional)</label>
+            <select id="plan-target-persona" style={select} value={targetPersonaKey} onChange={(e) => setTargetPersonaKey(e.target.value)}>
+              <option value="">General audience</option>
+              {personaOptions.map((option) => <option key={`${option.runId}:${option.personaId}`} value={`${option.runId}:${option.personaId}`}>{option.label} · {option.runName} ({option.confidence})</option>)}
+            </select></div>}
 
           <div>
             <label style={label}>Business / product name</label>

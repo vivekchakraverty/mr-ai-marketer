@@ -252,6 +252,8 @@ class GeneratePlanRequest(BaseModel):
     # A finished Keyword Surfer run to build the plan's keyword work on. Used only when
     # Google Ads returns nothing, so attaching one never overrides measured figures.
     surferRunId: str = ""
+    targetPersonaRunId: str = ""
+    targetPersonaId: str = ""
 
 
 class KeywordRow(BaseModel):
@@ -501,6 +503,16 @@ def generate_plan(body: GeneratePlanRequest) -> GeneratePlanResponse:
         raise HTTPException(status_code=400, detail="Please describe your product or service.")
     if not body.hfToken.strip():
         raise HTTPException(status_code=400, detail="Please connect your Hugging Face account.")
+
+    if body.targetPersonaRunId and body.targetPersonaId:
+        from . import personas as persona_router
+        selected_run = persona_router.get_run(body.targetPersonaRunId)
+        selected = next((p for p in selected_run.get("personas", []) if p["id"] == body.targetPersonaId), None)
+        if selected_run["status"] != "complete" or not selected:
+            raise HTTPException(status_code=400, detail="Selected target persona is unavailable.")
+        context = (f"\n\nTarget buyer context ({selected['confidence']}): {selected['label']}. "
+                   f"{selected['summary']} Treat this persona as directional research, not a measured market size.")
+        body = body.model_copy(update={"productDescription": body.productDescription + context})
 
     selected_model = None if body.model in ("Auto", "") else body.model
     utility_model = selected_model or llm.DEFAULT_MODEL

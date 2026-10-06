@@ -621,8 +621,9 @@ export function listPlanModels(): Promise<{ models: string[] }> {
   return getJson('/marketing-plan/models')
 }
 
-export async function generatePlan(fields: PlanFields): Promise<GeneratePlanResponse> {
+export async function generatePlan(fields: PlanFields, targetPersonaKey = ''): Promise<GeneratePlanResponse> {
   const settings = await window.api.settings.getAll()
+  const [targetPersonaRunId, targetPersonaId] = targetPersonaKey.split(':')
   return postJson('/marketing-plan/generate', {
     name: fields.name,
     productDescription: fields.productDescription,
@@ -634,7 +635,9 @@ export async function generatePlan(fields: PlanFields): Promise<GeneratePlanResp
     model: fields.model,
     googleAds: settings.googleAds,
     keywordSurfer: settings.keywordSurfer,
-    surferRunId: fields.surferRunId ?? ''
+    surferRunId: fields.surferRunId ?? '',
+    targetPersonaRunId: targetPersonaRunId ?? '',
+    targetPersonaId: targetPersonaId ?? ''
   })
 }
 

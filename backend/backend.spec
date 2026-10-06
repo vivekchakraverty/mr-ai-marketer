@@ -13,6 +13,9 @@ from PyInstaller.utils.hooks import collect_all
 # is configuration and code that the packages resolve relative to themselves.
 datas = [
     ("app/services/pamela_affinity.json", "app/services"),
+    ("app/personas/questions.json", "app/personas"),
+    ("app/personas/config.json", "app/personas"),
+    ("app/personas/sample_data/demo.csv", "app/personas/sample_data"),
     ("vendor/dmstrategy/data/ad_benchmarks.json", "vendor/dmstrategy/data"),
     ("vendor/dmstrategy/data/social_benchmarks.json", "vendor/dmstrategy/data"),
     # vendor/socialpost resolves these at runtime relative to its own package root,
@@ -49,6 +52,9 @@ hiddenimports = [
     "app.services.genqueue",
     "app.routers.library",
     "app.routers.marketing_plan",
+    "app.routers.personas",
+    "app.personas.core",
+    "app.personas.collectors",
     "app.routers.blog_writer",
     "app.routers.email_writer",
     "app.services.ctr_predictor",

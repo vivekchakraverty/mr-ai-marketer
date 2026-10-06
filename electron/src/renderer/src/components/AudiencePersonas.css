@@ -1,0 +1,65 @@
+.persona-root { position: relative; display: grid; gap: 18px; color: var(--ink); font: 600 13px/1.5 'Quicksand', sans-serif; }
+.persona-root h2 { margin: 4px 0; font: 700 29px 'Kalam', cursive; }
+.persona-root h3 { margin: 0 0 8px; font: 700 22px 'Kalam', cursive; }
+.persona-root h4 { margin: 18px 0 6px; font: 700 17px 'Kalam', cursive; }
+.persona-root p { margin: 5px 0 12px; }
+.persona-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 18px; align-items: end; }
+.persona-top p, .persona-muted, .persona-help, .persona-origin { color: var(--ink-muted); }
+.persona-run-controls { min-width: min(300px, 100%); }
+.persona-run-controls label, .persona-create label { display: block; font-weight: 700; margin-bottom: 5px; }
+.persona-create { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.persona-create label { width: 100%; }
+.persona-create input { max-width: 330px; flex: 1 1 230px; }
+.persona-stepper { display: flex; flex-wrap: wrap; gap: 5px; }
+.persona-stepper button { flex: 1 1 140px; display: flex; gap: 8px; align-items: center; justify-content: center; background: var(--surface); color: var(--ink-muted); border: 2px solid var(--border); border-radius: 12px; min-height: 43px; cursor: pointer; font: 700 12px 'Quicksand'; }
+.persona-stepper button.active { background: var(--accent); color: var(--accent-ink); }
+.persona-stepper button:disabled { opacity: .68; cursor: default; }
+.persona-stepper span { font-weight: 800; }
+.persona-progress { height: 7px; overflow: hidden; border-radius: 99px; background: var(--border); margin-top: -12px; }
+.persona-progress span { display: block; height: 100%; background: var(--accent); transition: width .2s; }
+.persona-panel { min-width: 0; }
+.persona-mode, .persona-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin: 16px 0; }
+.persona-mode button { background: var(--surface); border: 2px solid var(--border); border-radius: 10px; padding: 8px 12px; font: inherit; cursor: pointer; }
+.persona-mode button.active { background: var(--accent); }
+.persona-question { padding: 13px 0; border-bottom: 1px solid var(--border); }
+.persona-label { display: block; font: 700 13px/1.45 'Quicksand'; margin: 8px 0 5px; }
+.persona-help { font: 600 11px/1.4 'Quicksand'; margin: 0 0 8px; }
+.persona-choices { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.persona-choices label { white-space: nowrap; }
+.persona-unknown { border: 0; background: none; color: var(--accent-deep); font: 700 11px 'Quicksand'; margin: 4px 0; cursor: pointer; text-decoration: underline; }
+.persona-seeds { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 15px 0; }
+.persona-seeds span, .persona-confidence { background: var(--accent-soft-bg); color: var(--accent-deep); border-radius: 99px; padding: 4px 9px; font-size: 11px; }
+.persona-source-table { display: grid; gap: 7px; margin: 13px 0; }
+.persona-source-table > label, .persona-source-table > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 8px 11px; }
+.persona-source-table small { margin-left: auto; color: var(--ink-muted); }
+.persona-terms { display: block; margin: 15px 0; }
+.persona-import { border: 2px dashed var(--border); border-radius: 14px; padding: 15px; margin-top: 15px; display: grid; gap: 10px; }
+.persona-import small { color: var(--ink-muted); }
+.persona-mapping { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.persona-mapping label { flex: 1 1 170px; }
+.persona-status, .persona-note { background: var(--accent-soft-bg); border-radius: 10px; padding: 10px 13px; }
+.persona-error { background: #ffe7e2; border: 1px solid #cc705b; border-radius: 10px; padding: 10px 13px; color: #733323; }
+.persona-empty { padding: 28px; text-align: center; color: var(--ink-muted); }
+.persona-candidates { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 14px; margin-top: 16px; }
+.persona-candidate, .persona-card { border: 2px solid var(--border); border-radius: 15px; padding: 18px; background: var(--surface); min-width: 0; }
+.persona-snippet { display: block; text-align: left; width: 100%; margin: 8px 0; padding: 9px; color: var(--ink); background: var(--accent-soft-bg); border: 0; border-radius: 8px; cursor: pointer; font: 600 12px/1.4 'Quicksand'; }
+.persona-review-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.persona-review-grid label { font-size: 11px; }
+.persona-review-grid select { padding: 6px; }
+.persona-report { border-left: 4px solid var(--accent); padding: 8px 14px; background: var(--accent-soft-bg); border-radius: 8px; }
+.persona-card-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: center; }
+.persona-card-head h4 { margin: 4px 0; }
+.persona-claim-list { margin: 13px 0; }
+.persona-details { margin: 13px 0; border-top: 1px solid var(--border); padding-top: 10px; }
+.persona-details summary { cursor: pointer; font-weight: 700; color: var(--accent-deep); }
+.persona-claim-list ul, .persona-claim-list ol { margin: 6px 0; padding-left: 20px; }
+.persona-claim-list li { margin: 4px 0; }
+.persona-claim { border: 0; background: none; color: var(--accent-deep); padding: 0; text-align: left; text-decoration: underline; cursor: pointer; font: inherit; }
+.persona-origin { display: block; font-size: 10px; }
+.persona-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; color: var(--ink-muted); }
+.persona-delete { border: 0; background: none; color: #8c3a2b; text-decoration: underline; cursor: pointer; font: 700 12px 'Quicksand'; }
+.persona-drawer-backdrop { position: fixed; inset: 0; z-index: 1000; background: #101b2f80; display: flex; justify-content: flex-end; }
+.persona-drawer { width: min(450px, 100vw); height: 100%; overflow: auto; background: var(--surface); padding: 24px; box-shadow: -6px 0 20px #0002; }
+.persona-evidence { border-bottom: 1px solid var(--border); padding: 12px 0; }
+.persona-evidence small { display: block; color: var(--ink-muted); }
+@media (max-width: 660px) { .persona-panel { padding: 17px !important; } .persona-review-grid { grid-template-columns: 1fr; } .persona-stepper button { flex-basis: 120px; } }

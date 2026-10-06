@@ -39,7 +39,7 @@ Eleven screens, grouped by what you're trying to get done:
 | Screen | What it's for |
 | --- | --- |
 | **Home** | The front door — recent work and shortcuts. |
-| **Research / Strategy** | Decide what to do: build a marketing plan, define your brand, find topics worth writing about, find sales leads, browse an influencer database. |
+| **Research / Strategy** | Decide what to do: build a marketing plan, define your brand, create evidence-linked audience personas, find topics and sales leads, browse an influencer database. |
 | **Create** | Write it: blog posts, guest posts, tutorials, documentation, social posts, Mastodon posts, marketing emails. |
 | **Engage** | Your own Bluesky, Mastodon and Tumblr feeds — reply, post, keep up with your community. |
 | **Analytics** | What happened: your sales pipeline, email opens and clicks, how your posts performed against comparable accounts. |
@@ -233,6 +233,11 @@ addresses, and drafts personalised outreach for you to approve. Nothing sends wi
 
 **Influencer Database.** A bundled catalogue of Instagram creators. Filter by niche, follower
 count and post count, narrow to verified or contactable, export a shortlist as a spreadsheet.
+
+**Audience Personas.** Interview your team, review a research plan, and combine your own
+feedback with approved public sources. Each persona links back to anonymized evidence and
+comes with interview questions and message tests. Try the fictional demo entirely offline;
+sparse data is labelled as a hypothesis. See [the guide](docs/personas/README.md).
 
 ### Create
 

@@ -348,9 +348,24 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str)
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
+_PERSONA_SCHEMA = """
+CREATE TABLE IF NOT EXISTS persona_runs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    step INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'draft',
+    document_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_persona_runs_updated ON persona_runs(updated_at DESC);
+"""
+
+
 def init_db() -> None:
     with _connect() as conn:
         conn.executescript(_SCHEMA)
+        conn.executescript(_PERSONA_SCHEMA)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.executescript(_ALIGN_SCHEMA)
