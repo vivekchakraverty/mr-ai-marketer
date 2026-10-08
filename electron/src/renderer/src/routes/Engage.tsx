@@ -387,6 +387,9 @@ export default function Engage(): React.JSX.Element {
 
   const [busyKey, setBusyKey] = useState('')
   const [error, setError] = useState('')
+  const [feedError, setFeedError] = useState('')
+  const [postedUrl, setPostedUrl] = useState('')
+  const [postSucceeded, setPostSucceeded] = useState(false)
 
   // Only reachable via a handed-over draft — maxLength stops typing past the cap
   // but does not truncate a value set programmatically.
@@ -436,16 +439,17 @@ export default function Engage(): React.JSX.Element {
     // The follows tab has its own loader and no post list — switching to it should not
     // fire a timeline request, nor leave the previous tab's posts behind it.
     if (which === 'follows') {
+      setFeedError('')
       if (!suggestions) void loadSuggestions()
       return
     }
     setLoading(true)
-    setError('')
+    setFeedError('')
     try {
       const res = which === 'notifications' ? await getEngageNotifications() : await getEngageTimeline()
       setPosts(res.posts)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setFeedError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
@@ -486,6 +490,8 @@ export default function Engage(): React.JSX.Element {
     if (!postText.trim()) return
     setPosting(true)
     setError('')
+    setPostSucceeded(false)
+    setPostedUrl('')
     try {
       const result = await createEngagePost(postText, postImage, postVideo, postVideoFile)
       setPostText('')
@@ -493,6 +499,8 @@ export default function Engage(): React.JSX.Element {
       setPostVideo('')
       setPostVideoFile({ url: '', alt: '' })
       if (result.post) setPosts((current) => [result.post as FeedPost, ...current])
+      setPostedUrl(result.post?.webUrl || '')
+      setPostSucceeded(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -650,6 +658,13 @@ export default function Engage(): React.JSX.Element {
             </div>
           </div>
 
+          {postSucceeded && (
+            <div style={{ font: "700 13px 'Quicksand'", color: 'var(--accent-deep)', marginBottom: 14 }}>
+              Posted to Bluesky.{' '}
+              {postedUrl && <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => window.api.openExternal(postedUrl)}>Open post</span>}
+            </div>
+          )}
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
             <div style={segGroup}>
               {FEEDS.map((f) => (
@@ -674,6 +689,7 @@ export default function Engage(): React.JSX.Element {
           </div>
 
           {error && <div style={{ font: "700 13px 'Quicksand'", color: 'var(--danger-ink)', marginBottom: 14 }}>{error}</div>}
+          {feedError && <div style={{ font: "600 13px 'Quicksand'", color: 'var(--ink-muted)', marginBottom: 14 }}>Could not refresh {feed === 'notifications' ? 'notifications' : 'timeline'}: {feedError}</div>}
 
           {feed === 'follows' && (
             <SuggestedFollows
@@ -706,7 +722,7 @@ export default function Engage(): React.JSX.Element {
             </div>
           )}
 
-          {feed !== 'follows' && !loading && posts.length === 0 && !error && (
+          {feed !== 'follows' && !loading && posts.length === 0 && !feedError && (
             <div
               style={{
                 border: '2px dashed var(--border)',

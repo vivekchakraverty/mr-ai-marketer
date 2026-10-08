@@ -144,6 +144,7 @@ def enqueue(job_id: str, channel: str, payload: dict, due_at: str) -> None:
         raise CloudPosterError("Cloud posting is not set up yet.")
 
     from huggingface_hub.utils import HfHubHTTPError
+    from . import bluesky_link_card
 
     api = _api()
     repo = _setting("CLOUD_POSTER_OUTBOX")
@@ -157,6 +158,19 @@ def enqueue(job_id: str, channel: str, payload: dict, due_at: str) -> None:
 
     try:
         media = _attachment(payload, channel)
+        if channel == "bluesky" and media is None:
+            link = str(payload.get("externalUrl") or "") or bluesky_link_card.first_url(record["text"])
+            card = bluesky_link_card.describe(link) if link else None
+            if card:
+                record["externalCard"] = {
+                    "uri": card.uri,
+                    "title": card.title,
+                    "description": card.description,
+                }
+                thumb = bluesky_link_card.thumbnail(card)
+                if thumb:
+                    suffix = ".png" if thumb[1] == "image/png" else ".webp" if thumb[1] == "image/webp" else ".jpg"
+                    media = ("link-card" + suffix, thumb[0])
     except Exception as err:  # noqa: BLE001 - the attachment services raise their own types
         raise CloudPosterError(str(err)) from None
 

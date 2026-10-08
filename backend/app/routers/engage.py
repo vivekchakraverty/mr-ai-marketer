@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any
 
 from atproto import AtUri, models
-from ..services import audio_attach, image_prompt, video_attach
+from atproto_client.exceptions import InvokeTimeoutError, NetworkError
+from ..services import audio_attach, bluesky_link_card, image_prompt, video_attach
 import logging
 
 from fastapi import APIRouter, HTTPException
@@ -183,8 +185,40 @@ def _client() -> Any:
     return spg_bluesky.get_client()
 
 
-def _as_api_error(err: Exception) -> HTTPException:
+def _upstream_status(err: Exception) -> int | None:
+    return getattr(getattr(err, "response", None), "status_code", None)
+
+
+def _as_api_error(err: Exception, *, feed: bool = False, posting: bool = False) -> HTTPException:
+    upstream_status = _upstream_status(err)
+    if upstream_status == 429 or (upstream_status is not None and upstream_status >= 500) or isinstance(
+        err, (NetworkError, InvokeTimeoutError)
+    ):
+        detail = (
+            "Bluesky is temporarily unavailable. Refresh this feed in a moment."
+            if feed else
+            "Bluesky did not confirm the post. Check your profile before trying again to avoid a duplicate."
+            if posting else
+            "Bluesky did not confirm the action. Check whether it went through before trying again."
+        )
+        return HTTPException(status_code=503, detail=detail)
     return HTTPException(status_code=400, detail=str(err))
+
+
+def _read_with_retry(fn: Any, params: dict[str, Any]) -> Any:
+    """Retry only safe Bluesky reads, keeping the interactive delay short."""
+    for attempt in range(3):
+        try:
+            return fn(params)
+        except Exception as err:  # noqa: BLE001
+            status = _upstream_status(err)
+            transient = status == 429 or (status is not None and status >= 500) or isinstance(
+                err, (NetworkError, InvokeTimeoutError)
+            )
+            if not transient or attempt == 2:
+                raise
+            time.sleep(0.4 * (2**attempt))
+    raise RuntimeError("unreachable")
 
 
 def _clean_text(text: str) -> str:
@@ -713,9 +747,9 @@ def suggested_follows(niche: str = "", query: str = "", limit: int = 20) -> Sugg
 def timeline(limit: int = 30) -> FeedResponse:
     try:
         client = _client()
-        resp = client.app.bsky.feed.get_timeline({"limit": limit})
+        resp = _read_with_retry(client.app.bsky.feed.get_timeline, {"limit": limit})
     except Exception as err:  # noqa: BLE001
-        raise _as_api_error(err) from None
+        raise _as_api_error(err, feed=True) from None
 
     me_did = _me_did(client)
     return FeedResponse(posts=[_post_view_to_feed_post(item.post, me_did=me_did) for item in resp.feed])
@@ -725,14 +759,22 @@ def timeline(limit: int = 30) -> FeedResponse:
 def notifications(limit: int = 30) -> FeedResponse:
     try:
         client = _client()
-        resp = client.app.bsky.notification.list_notifications({"limit": limit})
-        post_uris = [n.uri for n in resp.notifications if _is_feed_post_record(getattr(n, "record", None))]
-        post_views = {}
-        if post_uris:
-            posts_resp = client.app.bsky.feed.get_posts({"uris": post_uris})
-            post_views = {p.uri: p for p in posts_resp.posts or []}
+        resp = _read_with_retry(client.app.bsky.notification.list_notifications, {"limit": limit})
     except Exception as err:  # noqa: BLE001
-        raise _as_api_error(err) from None
+        raise _as_api_error(err, feed=True) from None
+
+    post_uris = [n.uri for n in resp.notifications if _is_feed_post_record(getattr(n, "record", None))]
+    post_views = {}
+    # getPosts accepts at most 25 URIs. Hydration is optional: a notification's
+    # record can still produce a useful card if appview fails after the list loads.
+    for start in range(0, len(post_uris), 25):
+        try:
+            posts_resp = _read_with_retry(
+                client.app.bsky.feed.get_posts, {"uris": post_uris[start:start + 25]}
+            )
+            post_views.update({p.uri: p for p in posts_resp.posts or []})
+        except Exception as err:  # noqa: BLE001
+            log.warning("Could not hydrate Bluesky notifications: %s", type(err).__name__)
 
     me_did = _me_did(client)
     posts = []
@@ -753,38 +795,17 @@ def notifications(limit: int = 30) -> FeedResponse:
 
 
 def _send_with_video(client, text: str, raw_url: str):
-    """Post with a YouTube link card attached.
-
-    The thumbnail is uploaded as a blob because that is the only way a card carries an
-    image; without it the card is a bare title and reads like an accident. A thumbnail that
-    will not fetch is not fatal — the card still goes out.
-    """
-    from atproto import models
-
+    """Post with the explicitly selected YouTube link card attached."""
     from ..services import youtube_embed
 
     try:
         video = youtube_embed.describe(raw_url)
     except youtube_embed.NotYouTube as err:
         raise HTTPException(status_code=400, detail=str(err)) from None
-
-    thumb_blob = None
-    raw_thumb = youtube_embed.thumbnail_bytes(video)
-    if raw_thumb:
-        try:
-            thumb_blob = client.upload_blob(raw_thumb).blob
-        except Exception as err:  # noqa: BLE001 — a card without a picture still posts
-            log.info("[engage] could not upload the video thumbnail: %s", str(err)[:160])
-
-    embed = models.AppBskyEmbedExternal.Main(
-        external=models.AppBskyEmbedExternal.External(
-            uri=video.url,
-            title=video.title,
-            description=video.description,
-            thumb=thumb_blob,
-        )
+    card = bluesky_link_card.Card(
+        video.url, video.title, video.description, video.thumbnail_url
     )
-    return client.send_post(text, embed=embed)
+    return client.send_post(text, embed=bluesky_link_card.sdk_embed(client, card))
 
 
 @router.post("/post", response_model=ActionResponse)
@@ -831,9 +852,8 @@ def create_post(body: ComposeRequest) -> ActionResponse:
                 ),
             )
         elif body.videoUrl.strip():
-            # A link card, which is as close to an embed as the protocol goes: there is no
-            # inline player in app.bsky.embed.*. Clients render this one with the thumbnail
-            # and a play affordance, which is what people mean by "embed the video".
+            # Bluesky's app recognizes supported video URLs in external cards and offers
+            # inline playback; other clients can still open the card's source URL.
             #
             # Checked before the image branch because the two are mutually exclusive in the
             # record — a post carries one embed — and a video the user explicitly pasted is
@@ -851,7 +871,12 @@ def create_post(body: ComposeRequest) -> ActionResponse:
                 text, images=[content], image_alts=[body.imageAlt.strip() or filename]
             )
         else:
-            created = client.send_post(text)
+            link = bluesky_link_card.first_url(text)
+            card = bluesky_link_card.describe(link) if link else None
+            created = (
+                client.send_post(text, embed=bluesky_link_card.sdk_embed(client, card))
+                if card else client.send_post(text)
+            )
         return ActionResponse(
             createdUri=created.uri,
             createdCid=created.cid,
@@ -860,7 +885,7 @@ def create_post(body: ComposeRequest) -> ActionResponse:
     except HTTPException:
         raise
     except Exception as err:  # noqa: BLE001
-        raise _as_api_error(err) from None
+        raise _as_api_error(err, posting=True) from None
 
 
 @router.post("/reply", response_model=ActionResponse)

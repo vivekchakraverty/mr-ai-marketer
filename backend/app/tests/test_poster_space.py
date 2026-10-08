@@ -263,3 +263,50 @@ def test_audio_reaching_the_bluesky_path_is_refused_in_words(space) -> None:
             None,
             "3ku7l2vv6b2xx",
         )
+
+
+def test_bluesky_cloud_post_writes_external_card_with_uploaded_thumb(space, monkeypatch) -> None:
+    """The queued thumbnail must be a card thumb, never a separate image embed."""
+    _, networks = space
+    posted = []
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, body):
+            self.body = body
+
+        def json(self):
+            return self.body
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def post(self, url, **kwargs):
+            if url.endswith("uploadBlob"):
+                return Response({"blob": {"$type": "blob", "ref": {"$link": "cid"}, "mimeType": "image/jpeg", "size": 5}})
+            posted.append(kwargs["json"]["record"])
+            return Response({"uri": "at://posted"})
+
+    monkeypatch.setattr(networks.httpx, "Client", Client)
+    result = networks.post_bluesky(
+        "https://pds.example", "did:plc:someone", "jwt", "watch this",
+        ("link-card.jpg", b"image"), "", None, "3ku7l2vv6b2xx",
+        external_card={"uri": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "title": "A song", "description": "Artist on YouTube"},
+    )
+    assert result == "at://posted"
+    assert posted[0]["embed"] == {
+        "$type": "app.bsky.embed.external",
+        "external": {
+            "uri": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "title": "A song", "description": "Artist on YouTube",
+            "thumb": {"$type": "blob", "ref": {"$link": "cid"}, "mimeType": "image/jpeg", "size": 5},
+        },
+    }

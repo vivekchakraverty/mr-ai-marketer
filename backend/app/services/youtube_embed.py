@@ -67,13 +67,19 @@ def video_id(raw: str) -> str:
     text = (raw or "").strip()
     if not text:
         return ""
+    if re.fullmatch(r"[\w-]{11}", text):
+        return text
+    parsed = urlparse(text)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in {"http", "https"} or host not in {
+        "youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com",
+        "youtube-nocookie.com", "www.youtube-nocookie.com", "youtu.be", "www.youtu.be",
+    }:
+        return ""
     for pattern in _PATTERNS:
         found = pattern.search(text)
         if found:
             return found.group(1)
-    # A bare id, which is what someone pastes when they have copied from a URL by hand.
-    if re.fullmatch(r"[\w-]{11}", text):
-        return text
     return ""
 
 

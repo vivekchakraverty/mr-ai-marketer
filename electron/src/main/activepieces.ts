@@ -261,23 +261,10 @@ export async function startActivepiecesIfConfigured(): Promise<AutoStartOutcome>
   if (!status.dockerRunning) await ensureDaemonRunning()
 
   if (await isActivepiecesRunning()) {
-    // Still take the keep-alive: the container may have been left running by a previous
-    // session, and without it the WSL2 VM can idle out from under it.
-    startWslKeepAlive()
-    // And still announce. The container has `restart: unless-stopped`, so after the first
-    // time it is *usually* already up when the app launches — meaning this branch, not the
-    // one below, is the normal path. Announcing only when we start the engine ourselves
-    // left the share listener closed on almost every launch, and a post with an image
-    // attached went out as text: the engine fetched the link, found nothing listening on
-    // the host, and carried on without the picture.
-    const host = await wslHostAddress()
-    if (host) {
-      refreshHostAddress(host)
-      await maintainShareHost(host)
-    } else {
-      console.warn('[distribution] could not discover the WSL host; keeping the listener and retrying discovery')
-      scheduleShareHostDiscovery()
-    }
+    // A fixed container name and port can outlive an interrupted workspace switch. Run
+    // Compose even when it answers HTTP: it reconciles the bind mount and encryption key
+    // with this workspace's env file before its flows or connections are used.
+    await startActivepieces()
     return 'already-running'
   }
 
@@ -295,6 +282,16 @@ export async function stopActivepieces(): Promise<void> {
   // Close the share socket with the engine that needed it. Nothing else fetches those
   // links, and a listener with no reader is just surface area.
   await announceShareHost('')
+  stopWslKeepAlive()
+}
+
+/** Used before a new profile's backend starts, even if that profile has no .env yet. */
+export async function stopStaleActivepieces(): Promise<void> {
+  if (!(await isActivepiecesRunning())) return
+  const result = await dockerCommand(['stop', CONTAINER_NAME])
+  if (result.code !== 0 || await isActivepiecesRunning()) {
+    throw new Error('The previous workspace distribution engine is still running.')
+  }
   stopWslKeepAlive()
 }
 

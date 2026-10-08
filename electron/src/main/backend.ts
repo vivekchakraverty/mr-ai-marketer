@@ -244,6 +244,22 @@ export function stopBackend(): void {
   }
 }
 
+/** Switching accounts must wait until the old Python process releases its port and DB. */
+export async function stopBackendAndWait(): Promise<void> {
+  const child = backendProcess
+  if (!child) return
+  backendProcess = null
+  if (child.exitCode !== null) return
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('The current workspace is still closing. Try again.')), 10_000)
+    child.once('exit', () => {
+      clearTimeout(timer)
+      resolve()
+    })
+    child.kill()
+  })
+}
+
 // Packaged cold starts (first launch after install, disk cache cold, catalog xlsx parse +
 // PyInstaller's own unpack-on-first-run overhead) can comfortably exceed 30s — 90s gives
 // real headroom without masking a genuinely broken backend forever.

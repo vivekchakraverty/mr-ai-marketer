@@ -13,6 +13,8 @@ from .. import db
 from ..services import (
     activepieces_client,
     audio_attach,
+    bluesky_delivery,
+    bluesky_link_card,
     cloud_poster,
     distribution_calendar,
     generation_link,
@@ -284,6 +286,11 @@ def connect_channel(channel: str, body: ConnectionRequest) -> dict:
                 str(value.get("base_url") or ""),
                 str(value.get("access_token") or ""),
             )
+        if channel == "bluesky":
+            bluesky_delivery.set_credentials(
+                str(value.get("identifier") or ""),
+                str(value.get("password") or ""),
+            )
     except ActivepiecesError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
     return {"connected": True}
@@ -302,6 +309,8 @@ def disconnect_channel(channel: str) -> dict:
         raise HTTPException(status_code=400, detail=str(err)) from err
     if channel == "mastodon":
         mastodon_delivery.set_credentials()
+    if channel == "bluesky":
+        bluesky_delivery.set_credentials()
     return {"connected": False}
 
 
@@ -733,6 +742,10 @@ def _payload_for(body: SendRequest) -> dict:
     # so make the empty shape explicit for every Bluesky send.
     if "bluesky" in body.channels:
         payload.setdefault("imageUrls", [])
+        if not body.imageUrl and not body.videoFileUrl:
+            link = bluesky_link_card.first_url(body.text)
+            if link:
+                payload["externalUrl"] = link
     for field in ("channelId", "pageId", "to", "subject", "subreddit", "title"):
         value = getattr(body, field)
         if value is not None:
@@ -768,6 +781,10 @@ def _upgrade_legacy_media_payload(payload: dict, channel: str) -> dict:
     """Add the media fields introduced after older scheduled jobs were persisted."""
     if channel == "bluesky" and "imageUrls" not in payload:
         payload = {**payload, "imageUrls": []}
+    if channel == "bluesky" and not payload.get("externalUrl") and not payload.get("imageUrl") and not payload.get("videoUrl"):
+        link = bluesky_link_card.first_url(str(payload.get("text") or ""))
+        if link:
+            payload = {**payload, "externalUrl": link}
     image_url = payload.get("imageUrl")
     if not isinstance(image_url, str) or not image_url:
         return payload
@@ -787,6 +804,15 @@ def _upgrade_legacy_media_payload(payload: dict, channel: str) -> dict:
         except image_prompt.ImageRenderError as err:
             raise HTTPException(status_code=400, detail=str(err)) from None
     return upgraded
+
+
+def _native_bluesky_link(channel: str, payload: dict) -> bool:
+    return bool(
+        channel == "bluesky"
+        and not payload.get("imageUrl")
+        and not payload.get("videoUrl")
+        and (payload.get("externalUrl") or bluesky_link_card.first_url(str(payload.get("text") or "")))
+    )
 
 
 def _record_run_outcome(job_id: str, run: dict) -> None:
@@ -858,6 +884,15 @@ def fire_job(job_id: str, channel: str, payload: dict) -> None:
             status="sent",
             activepieces_run_id=f"mastodon:{status_id}" if status_id else None,
         )
+        return
+
+    if _native_bluesky_link(channel, payload):
+        try:
+            uri = bluesky_delivery.publish(payload)
+        except Exception as err:  # noqa: BLE001 - converted to a durable job failure
+            db.update_distribution_job(job_id, status="failed", error=str(err))
+            return
+        db.update_distribution_job(job_id, status="sent", activepieces_run_id=uri)
         return
 
     # A generous buffer against clock skew between this process and the Activepieces
@@ -1193,8 +1228,12 @@ def _fire_due_scheduled_jobs() -> None:
         return
     needs_engine = any(
         not (
-            job["channel"] == "mastodon"
-            and mastodon_delivery.carries_media(json.loads(job["payload"] or "{}"))
+            (job["channel"] == "mastodon"
+             and mastodon_delivery.carries_media(json.loads(job["payload"] or "{}")))
+            or _native_bluesky_link(
+                job["channel"],
+                json.loads(job["payload"] or "{}"),
+            )
         )
         for job in jobs
     )
@@ -1217,14 +1256,15 @@ def _fire_due_scheduled_jobs() -> None:
                 job["channel"] == "mastodon"
                 and mastodon_delivery.carries_media(canonical_payload)
             )
+            native_bluesky = _native_bluesky_link(job["channel"], canonical_payload)
             if native_mastodon and not mastodon_delivery.has_credentials():
                 # Electron hands the OS-decrypted token over just after backend startup.
                 # A due post must wait through that small launch window, not be claimed and
                 # permanently failed before the credential arrives.
                 continue
-            if not native_mastodon and not engine_ready:
+            if not native_mastodon and not native_bluesky and not engine_ready:
                 continue
-            payload = canonical_payload if native_mastodon else _materialize_media_payload(canonical_payload)
+            payload = canonical_payload if native_mastodon or native_bluesky else _materialize_media_payload(canonical_payload)
         except HTTPException as err:
             if err.status_code == 503:
                 # Electron announces the WSL-reachable listener just after backend

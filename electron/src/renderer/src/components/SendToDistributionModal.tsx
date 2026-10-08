@@ -281,6 +281,11 @@ export default function SendToDistributionModal({
 
             <label style={label}>Post text</label>
             <textarea value={text} onChange={(e) => setText(e.target.value)} rows={5} style={{ ...textarea, marginBottom: 6 }} />
+            {selected.includes('bluesky') && (
+              <div style={{ font: "600 11.5px/1.5 'Quicksand'", color: 'var(--ink-faint)', marginBottom: 8 }}>
+                Bluesky links get a preview card when this post has no image or uploaded video.
+              </div>
+            )}
 
             {/* Counted against every selected channel at once, because that is the thing
                 this screen does that a single composer does not: one body of text going to

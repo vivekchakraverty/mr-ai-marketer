@@ -1,6 +1,6 @@
 {
   "name": "mr-ai-marketer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Mr. AI Marketer — desktop marketing studio",
   "main": "./out/main/index.js",
   "//desktopName": "Root level, not build.linux — app-builder-lib reads it from package.json metadata (LinuxTargetHelper), and linux.syncDesktopName is the flag that makes it take effect. Electron uses it as app_id/WM_CLASS so Linux desktops associate running windows with the .desktop entry.",
@@ -18,11 +18,12 @@
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build && npm run verify:essentia && npm run verify:audience",
+    "build": "electron-vite build && npm run verify:essentia && npm run verify:audience && npm run verify:workspaces",
     "verify:essentia": "node scripts/verify-essentia.mjs",
     "verify:audience": "node scripts/verify-music-destinations.mjs",
     "verify:calendar": "node scripts/verify-distribution-calendar.mjs",
     "verify:notifications": "node scripts/verify-notifications.mjs",
+    "verify:workspaces": "node scripts/verify-workspaces.mjs",
     "start": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",

@@ -2,6 +2,7 @@ import { ElectronAPI } from '@electron-toolkit/preload'
 import type { AppSettings, SettingsPatch } from '../main/settingsStore'
 import type { DockerRuntimeStatus } from '../main/dockerRuntime'
 import type { UpdateState } from '../main/updater'
+import type { WorkspaceSnapshot } from '../main/workspaces'
 
 export interface DistributionStatus extends DockerRuntimeStatus {
   activepiecesRunning: boolean
@@ -20,6 +21,12 @@ export interface MrAiMarketerApi {
     setHfToken: (token: string | null) => Promise<void>
     getAll: () => Promise<AppSettings>
     setAll: (partial: SettingsPatch) => Promise<AppSettings>
+  }
+  workspaces: {
+    list: () => Promise<WorkspaceSnapshot>
+    create: (name: string) => Promise<WorkspaceSnapshot>
+    rename: (id: string, name: string) => Promise<WorkspaceSnapshot>
+    switchTo: (id: string) => Promise<void>
   }
   openFile: (path: string) => Promise<string>
   /** Ask the user where to put these bytes. Resolves false if they cancelled. */

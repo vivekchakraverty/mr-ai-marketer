@@ -3,6 +3,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import type { AppSettings, SettingsPatch } from '../main/settingsStore'
 import type { DockerRuntimeStatus } from '../main/dockerRuntime'
 import type { UpdateState } from '../main/updater'
+import type { WorkspaceSnapshot } from '../main/workspaces'
 
 type DistributionStatus = DockerRuntimeStatus & { activepiecesRunning: boolean }
 type LeadgenStatus = DockerRuntimeStatus & { leadgenRunning: boolean }
@@ -27,6 +28,12 @@ const api = {
     setHfToken: (token: string | null): Promise<void> => ipcRenderer.invoke('settings:set-hf-token', token),
     getAll: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get-all'),
     setAll: (partial: SettingsPatch): Promise<AppSettings> => ipcRenderer.invoke('settings:set-all', partial)
+  },
+  workspaces: {
+    list: (): Promise<WorkspaceSnapshot> => ipcRenderer.invoke('workspaces:list'),
+    create: (name: string): Promise<WorkspaceSnapshot> => ipcRenderer.invoke('workspaces:create', name),
+    rename: (id: string, name: string): Promise<WorkspaceSnapshot> => ipcRenderer.invoke('workspaces:rename', id, name),
+    switchTo: (id: string): Promise<void> => ipcRenderer.invoke('workspaces:switch', id)
   },
   openFile: (path: string): Promise<string> => ipcRenderer.invoke('shell:open-file', path),
   /** Ask the user where to put these bytes. Resolves false if they cancelled. */

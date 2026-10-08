@@ -3,7 +3,8 @@ import { copyFile, mkdir, stat, writeFile } from 'fs/promises'
 import { basename, join } from 'path'
 import { randomUUID } from 'crypto'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { startBackend, stopBackend, waitForBackendHealth, API_TOKEN, BACKEND_URL } from './backend'
+import { startBackend, stopBackend, stopBackendAndWait, waitForBackendHealth, API_TOKEN, BACKEND_URL } from './backend'
+import { assertWorkspaceAvailable, createWorkspace, getWorkspaces, initializeWorkspaces, markWorkspaceStarted, previousWorkspaceNeedsCleanup, renameWorkspace, selectWorkspace } from './workspaces'
 import {
   getHfToken,
   getSettings,
@@ -16,14 +17,29 @@ import {
 import { bootstrap, detectStatus, RebootRequiredError } from './dockerRuntime'
 import {
   isActivepiecesRunning,
+  hasBeenSetUp as activepiecesHasBeenSetUp,
   startActivepieces,
   startActivepiecesIfConfigured,
-  stopActivepieces
+  stopActivepieces,
+  stopStaleActivepieces
 } from './activepieces'
-import { isLeadgenRunning, startLeadgen, stopLeadgen } from './leadgen'
+import { hasBeenSetUp as leadgenHasBeenSetUp, isLeadgenRunning, startLeadgen, stopLeadgen, stopStaleLeadgen } from './leadgen'
 import { checkForUpdate, downloadUpdate, getUpdateState, installUpdate, startUpdateWatch } from './updater'
 
 let mainWindow: BrowserWindow | null = null
+let workspaceSwitching = false
+let distributionStartup: Promise<unknown> = Promise.resolve()
+
+// Keep the fixed backend and Docker ports owned by one workspace process at a time. Acquire
+// the lock before changing userData, so it is installation-wide rather than profile-wide.
+const singleInstance = app.requestSingleInstanceLock()
+if (!singleInstance) app.quit()
+else initializeWorkspaces()
+
+app.on('second-instance', () => {
+  if (mainWindow?.isMinimized()) mainWindow.restore()
+  mainWindow?.focus()
+})
 
 /**
  * The host the Mastodon embed in Engage is allowed to be.
@@ -226,8 +242,20 @@ async function handOverMastodonKeys(): Promise<void> {
   }
 }
 
-app.whenReady().then(async () => {
+if (singleInstance) app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.vivekchakraverty.mraimarketer')
+
+  if (previousWorkspaceNeedsCleanup()) {
+    try {
+      await stopStaleActivepieces()
+      await stopStaleLeadgen()
+    } catch (err) {
+      dialog.showErrorBox('Could not switch workspace safely', err instanceof Error ? err.message : String(err))
+      app.quit()
+      return
+    }
+  }
+  markWorkspaceStarted()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
@@ -270,6 +298,31 @@ app.whenReady().then(async () => {
       void handOverCloudPosting()
     }
     return updated
+  })
+  ipcMain.handle('workspaces:list', () => getWorkspaces())
+  ipcMain.handle('workspaces:create', (_event, name: string) => createWorkspace(name))
+  ipcMain.handle('workspaces:rename', (_event, id: string, name: string) => renameWorkspace(id, name))
+  ipcMain.handle('workspaces:switch', async (_event, id: string) => {
+    if (workspaceSwitching) throw new Error('A workspace switch is already in progress.')
+    if (getWorkspaces().activeId === id) return
+    // Validate before stopping anything. Keep the old registry active until every process
+    // using its files and fixed ports has finished closing.
+    assertWorkspaceAvailable(id)
+    workspaceSwitching = true
+    try {
+      await distributionStartup
+      if (activepiecesHasBeenSetUp()) await stopActivepieces()
+      await stopStaleActivepieces()
+      if (leadgenHasBeenSetUp()) await stopLeadgen()
+      await stopStaleLeadgen()
+      await stopBackendAndWait()
+      selectWorkspace(id)
+      app.relaunch()
+      app.quit()
+    } catch (err) {
+      workspaceSwitching = false
+      throw err
+    }
   })
   ipcMain.handle('shell:open-file', (_event, path: string) => shell.openPath(path))
 
@@ -416,7 +469,7 @@ app.whenReady().then(async () => {
   // startActivepiecesIfConfigured. A machine that has never set it up, or has no Docker,
   // is left alone rather than prompted, because installing that is a decision the user
   // makes on the Distribute screen and it can require a reboot.
-  void startActivepiecesIfConfigured()
+  distributionStartup = startActivepiecesIfConfigured()
     .then((outcome) => {
       if (outcome === 'started') console.log('[distribution] engine started')
       else if (outcome !== 'already-running') console.log(`[distribution] engine not started: ${outcome}`)
@@ -433,6 +486,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  if (!singleInstance || workspaceSwitching) return
   stopBackend()
   void stopActivepieces()
   void stopLeadgen()
@@ -442,6 +496,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  if (!singleInstance || workspaceSwitching) return
   stopBackend()
   void stopActivepieces()
   void stopLeadgen()

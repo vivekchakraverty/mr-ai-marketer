@@ -505,6 +505,7 @@ def post_bluesky(
     aspect_ratio: dict[str, int] | None,
     rkey: str,
     session: dict[str, Any] | None = None,
+    external_card: dict[str, str] | None = None,
 ) -> str:
     """Create one post at a known record key and return its at:// URI.
 
@@ -523,6 +524,16 @@ def post_bluesky(
         "createdAt": _now_iso(),
     }
 
+    if external_card:
+        external = {
+            "uri": str(external_card.get("uri") or ""),
+            "title": str(external_card.get("title") or ""),
+            "description": str(external_card.get("description") or ""),
+        }
+        if not external["uri"]:
+            raise PostError("The Bluesky link card has no URL.")
+        record["embed"] = {"$type": "app.bsky.embed.external", "external": external}
+
     if media is not None:
         filename, content = media
         # Two genuinely different routes, which is the whole point of this branch. A video has
@@ -539,6 +550,8 @@ def post_bluesky(
                 f"Bluesky cannot carry audio, and {filename} is a sound file. "
                 "It should have been converted to a video before it was queued."
             )
+        if external_card and kind.startswith("video/"):
+            raise PostError("A Bluesky link card thumbnail must be an image.")
         if kind.startswith("video/"):
             ref = upload_bluesky_video(pds, did, access_jwt, filename, content, session)
             embed: dict[str, Any] = {"$type": "app.bsky.embed.video", "video": ref}
@@ -568,8 +581,12 @@ def post_bluesky(
             image: dict[str, Any] = {"image": ref, "alt": alt.strip()[:1000]}
             if aspect_ratio:
                 image["aspectRatio"] = aspect_ratio
-            embed = {"$type": "app.bsky.embed.images", "images": [image]}
-        record["embed"] = embed
+            if external_card:
+                record["embed"]["external"]["thumb"] = ref
+            else:
+                embed = {"$type": "app.bsky.embed.images", "images": [image]}
+        if not external_card:
+            record["embed"] = embed
 
     try:
         with httpx.Client(timeout=60) as client:

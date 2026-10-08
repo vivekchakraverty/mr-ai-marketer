@@ -19,7 +19,7 @@ import { label, primaryButtonSmall, secondaryButtonSmall, select, textarea, text
 import PostImagePanel from '../components/PostImagePanel'
 import SaveCompositionButton from '../components/SaveCompositionButton'
 import SendToEngageButton from '../components/SendToEngageButton'
-import VideoEmbedInput from '../components/VideoEmbedInput'
+import VideoEmbedInput, { isYouTubeLink } from '../components/VideoEmbedInput'
 import UploadVideoButton, { type ChosenVideo } from '../components/UploadVideoButton'
 import BrandVoiceSelect from '../components/BrandVoiceSelect'
 import NichePanel from '../components/NichePanel'
@@ -119,6 +119,11 @@ export default function SocialPost(): React.JSX.Element {
         brandVoiceId
       )
       setResult(res)
+      // A video supplied as source material should travel with the finished post even
+      // when the generator writes about it without repeating its URL in the text.
+      if (!rewrite) {
+        setVideoUrl(isYouTubeLink(fields.sourceUrl) ? fields.sourceUrl.trim() : '')
+      }
       // A fresh generate starts the history over — a new topic should not be
       // steered away from the wording of the last one.
       setPreviousTexts((prev) => (rewrite ? [...prev, res.text].slice(-3) : [res.text]))
@@ -377,6 +382,9 @@ export default function SocialPost(): React.JSX.Element {
                 outline: 'none'
               }}
             />
+            <div style={{ font: "600 11.5px/1.5 'Quicksand'", color: 'var(--ink-faint)', marginTop: 6 }}>
+              Links in this post become Bluesky preview cards when no image or uploaded video is attached.
+            </div>
 
             <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
               <div

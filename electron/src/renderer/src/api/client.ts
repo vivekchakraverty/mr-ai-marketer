@@ -245,7 +245,7 @@ export async function fetchObjectUrl(path: string): Promise<string> {
  * one useful sentence arrives wrapped in JSON noise. Pull it out when it's
  * there, and fall back to the envelope when it isn't.
  */
-async function errorFrom(res: Response, path: string): Promise<Error> {
+async function errorFrom(res: Response, path: string, report = true): Promise<Error> {
   const text = await res.text().catch(() => '')
   let message = `${path} failed: HTTP ${res.status}${text ? ` ${text}` : ''}`
   try {
@@ -262,14 +262,15 @@ async function errorFrom(res: Response, path: string): Promise<Error> {
   } catch {
     // Not JSON — keep the envelope, which is all we have.
   }
-  // Raise it globally as well as returning it. Callers still catch this and render their own
-  // inline message; the popup is what makes an error copyable, and what catches the ones a
-  // caller forgets to handle.
-  reportError({
-    message,
-    source: `${res.status} ${path}`,
-    detail: text && text !== message ? text : ''
-  })
+  // Action failures get a copyable global popup. Feed reads handle their own inline
+  // errors, so a background refresh cannot look like a failed post.
+  if (report) {
+    reportError({
+      message,
+      source: `${res.status} ${path}`,
+      detail: text && text !== message ? text : ''
+    })
+  }
   return new Error(message)
 }
 
@@ -283,9 +284,9 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>
 }
 
-async function getJson<T>(path: string): Promise<T> {
+async function getJson<T>(path: string, report = true): Promise<T> {
   const res = await fetch(`${backendUrl}${path}`, { headers: authHeaders() })
-  if (!res.ok) throw await errorFrom(res, path)
+  if (!res.ok) throw await errorFrom(res, path, report)
   return res.json() as Promise<T>
 }
 
@@ -2507,11 +2508,11 @@ export function getEngageStatus(): Promise<EngageStatus> {
 }
 
 export function getEngageTimeline(limit = 30): Promise<FeedResponse> {
-  return getJson(`/engage/timeline?limit=${limit}`)
+  return getJson(`/engage/timeline?limit=${limit}`, false)
 }
 
 export function getEngageNotifications(limit = 30): Promise<FeedResponse> {
-  return getJson(`/engage/notifications?limit=${limit}`)
+  return getJson(`/engage/notifications?limit=${limit}`, false)
 }
 
 export function createEngagePost(

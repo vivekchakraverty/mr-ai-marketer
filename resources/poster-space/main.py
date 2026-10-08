@@ -125,6 +125,7 @@ def _post_bluesky(job: dict, media, alt: str, rkey: str) -> str:
         rkey,
         # Carries didDoc, which saves resolving the account's PDS over the network again.
         session,
+        job.get("externalCard") if isinstance(job.get("externalCard"), dict) else None,
     )
 
 

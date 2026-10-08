@@ -33,6 +33,10 @@ function secretsEnvPath(): string {
   return join(stateDir(), '.env')
 }
 
+export function hasBeenSetUp(): boolean {
+  return existsSync(secretsEnvPath())
+}
+
 function dataDir(): string {
   const dir = join(stateDir(), 'data')
   mkdirSync(dir, { recursive: true })
@@ -117,6 +121,32 @@ export async function startLeadgen(): Promise<void> {
 
 export async function stopLeadgen(): Promise<void> {
   await dockerCommand(composeArgs(['down']))
+  stopWslKeepAlive()
+}
+
+/** Stop fixed-port services left by another profile after an interrupted switch. */
+export async function stopStaleLeadgen(): Promise<void> {
+  const [reacherUp, searxngUp] = await Promise.all([
+    pingService(`${LEADGEN_REACHER_URL}/`), pingService(`${LEADGEN_SEARXNG_URL}/`)
+  ])
+  if (!reacherUp && !searxngUp) return
+  const names = [
+    'mr-ai-marketer-leadgen-reacher',
+    'mr-ai-marketer-leadgen-searxng',
+    'mr-ai-marketer-leadgen-ollama'
+  ]
+  for (const name of names) {
+    const running = await dockerCommand(['inspect', '--format', '{{.State.Running}}', name])
+    if (running.code !== 0 || running.stdout.trim() !== 'true') continue
+    const stopped = await dockerCommand(['stop', name])
+    if (stopped.code !== 0) throw new Error(`Could not stop ${name} for the workspace switch.`)
+  }
+  const [reacherStillUp, searxngStillUp] = await Promise.all([
+    pingService(`${LEADGEN_REACHER_URL}/`), pingService(`${LEADGEN_SEARXNG_URL}/`)
+  ])
+  if (reacherStillUp || searxngStillUp) {
+    throw new Error('The previous workspace lead generation engine is still running.')
+  }
   stopWslKeepAlive()
 }
 

@@ -98,7 +98,7 @@ accounts. The search tools use free public sources. The database is a file on yo
 Download the latest `mr-ai-marketer-Setup-<version>-x64.exe` from
 [Releases](../../releases) and run it. Windows 10/11, 64-bit. Nothing else to install —
 Python and the whole engine are inside the installer, which is why it's around 600MB.
-For version 1.0, open the [v1.0.0 release](../../releases/tag/v1.0.0) and choose the
+For version 1.0.1, open the [v1.0.1 release](../../releases/tag/v1.0.1) and choose the
 Windows installer there.
 
 **Windows will warn you before it runs.** You'll get a blue *"Windows protected your PC"*

@@ -41,6 +41,10 @@ _BATCH = 25
 
 def _published_uri(run_id: str) -> str:
     """The at:// URI the Bluesky action reported, or '' if this run did not produce one."""
+    # Native link cards and the poster Space store the post's AT URI directly. There is
+    # no Activepieces run to inspect for those deliveries.
+    if run_id.startswith("at://"):
+        return run_id
     from . import activepieces_client
 
     try:

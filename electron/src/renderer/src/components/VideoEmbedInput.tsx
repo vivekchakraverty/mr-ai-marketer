@@ -8,7 +8,8 @@ import { textInput } from '../styles/styleKit'
  * are getting rather than letting the result be a surprise after posting:
  *
  *   Tumblr    a real player, inline in the post.
- *   Bluesky   a link card with the thumbnail — there is no inline player in the protocol.
+ *   Bluesky   an external card with video details. Its app can play supported providers
+ *             such as YouTube inline; other clients may open the source link.
  *   Mastodon  whatever the server makes of the link. Mastodon has no embed field at all;
  *             instances build their own preview cards, and some are configured not to.
  *
@@ -16,11 +17,29 @@ import { textInput } from '../styles/styleKit'
  * video exists is the backend's question, since answering it means asking YouTube.
  */
 
-const YOUTUBE = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/|v\/))([\w-]{11})/
+export function isYouTubeLink(raw: string): boolean {
+  try {
+    const url = new URL(raw.trim())
+    if (!['http:', 'https:'].includes(url.protocol)) return false
+    const host = url.hostname.toLowerCase()
+    const id = host === 'youtu.be' || host === 'www.youtu.be'
+      ? url.pathname.split('/')[1]
+      : ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtube-nocookie.com', 'www.youtube-nocookie.com'].includes(host)
+        ? url.pathname === '/watch'
+          ? url.searchParams.get('v')
+          : /^\/(shorts|embed|live|v)\//.test(url.pathname)
+            ? url.pathname.split('/')[2]
+            : null
+        : null
+    return /^[\w-]{11}$/.test(id ?? '')
+  } catch {
+    return false
+  }
+}
 
 const NOTE: Record<string, string> = {
   tumblr: 'Posts as a playable video in the post.',
-  bluesky: 'Posts as a link card with the thumbnail — Bluesky has no inline player.',
+  bluesky: 'Posts with video details and a thumbnail; YouTube plays in the Bluesky app.',
   mastodon: "Posts as a link; your server builds the preview card, and some don't."
 }
 
@@ -39,7 +58,7 @@ export default function VideoEmbedInput({
 }: Props): React.JSX.Element {
   const [touched, setTouched] = useState(false)
   const trimmed = value.trim()
-  const looksValid = YOUTUBE.test(trimmed)
+  const looksValid = isYouTubeLink(trimmed)
   const complain = touched && trimmed.length > 0 && !looksValid
 
   return (
@@ -69,7 +88,9 @@ export default function VideoEmbedInput({
           ? "That doesn't look like a YouTube link — paste the full address of the video."
           : trimmed
             ? NOTE[network]
-            : 'Paste a link and it goes out with the post.'}
+            : network === 'bluesky'
+              ? 'Optional: links already in the post text are detected automatically.'
+              : 'Paste a link and it goes out with the post.'}
       </div>
     </div>
   )
