@@ -53,6 +53,10 @@ RECHECK_DELAY = 90
 _HEALTHY = {"RUNNING", "RUNNING_BUILDING"}
 _STARTING = {"RUNNING_APP_STARTING", "APP_STARTING", "BUILDING"}
 _ERROR = {"PAUSED", "RUNTIME_ERROR", "BUILD_ERROR", "CONFIG_ERROR", "NO_APP_FILE", "DELETING"}
+# The subset of _ERROR a restart can actually fix, mirroring hf_spaces.RESTARTABLE_STAGES.
+# BUILD_ERROR, CONFIG_ERROR and NO_APP_FILE need the code or the config changed, so restarting
+# those just loops; DELETING is not ours to interrupt.
+_RESTARTABLE = {"PAUSED", "RUNTIME_ERROR"}
 
 
 def data_dir() -> Path:
@@ -63,12 +67,29 @@ def config_path() -> Path:
     return data_dir() / "healthmon.json"
 
 
+#: The label the poster Space is watched under. Fixed rather than user-chosen because the
+#: restart decision keys on it, and because there is only ever one.
+POSTER_LABEL = "Cloud poster"
+
 TEMPLATE = {
     "_comment": "Spaces this watcher keeps an eye on. Labels are yours; ids are owner/name.",
     "intervalHours": 6,
     "wakeSleeping": True,
+    # Restart a Space that is PAUSED or crashed, rather than only reporting it. Waking and
+    # restarting are separate settings because they are different acts: a wake is a GET that
+    # a request would have done anyway, while a restart changes the state of something in the
+    # user's account. Both default on because the alternative is what actually happened — a
+    # paused poster Space sat in a report nobody read while scheduled posts stopped.
+    "restartBroken": True,
     "notifyOnError": True,
     "spaces": {},
+    # The poster Space, kept apart from `spaces` because the app owns its identity: it is
+    # created per install by the setup walkthrough, so it has no business being typed in by
+    # hand like the generation Spaces above. It is here at all because healthmon cannot read
+    # the app's encrypted settings (see config.py), and because the one monitor that should
+    # have caught a paused poster skipped it for months for exactly that reason.
+    "posterSpace": "",
+    "posterSpaceUrl": "",
     "mailTrackerUrl": "",
     # Once a day, also exercise every module the app exposes — see app_checks_due(). Kept to
     # once a day because it is the app's whole API surface, and because nothing it finds
@@ -113,6 +134,11 @@ class Result:
     status: str  # ok | starting | asleep | error | unreachable
     detail: str
     woke: bool = False
+    #: The raw Spaces API stage, when one was readable. Carried separately from `detail`
+    #: because the restart decision has to key on the stage itself: "PAUSED" and
+    #: "BUILD_ERROR" are both `error` with a sentence to show, and only one of them is worth
+    #: restarting.
+    stage: str = ""
 
 
 @dataclass
@@ -164,13 +190,17 @@ def check_space(label: str, space_id: str, token: str) -> Result:
     if resp.status_code == 200:
         stage = ((resp.json() or {}).get("runtime") or {}).get("stage") or ""
         if stage in _HEALTHY:
-            return Result(label, "ok", "Running.")
+            return Result(label, "ok", "Running.", stage=stage)
         if stage in _STARTING:
-            return Result(label, "starting", "Starting up.")
+            return Result(label, "starting", "Starting up.", stage=stage)
         if stage == "SLEEPING":
-            return Result(label, "asleep", "Asleep.")
+            return Result(label, "asleep", "Asleep.", stage=stage)
+        if stage == "PAUSED":
+            # Spelled out rather than title-cased like its neighbours, because "Paused." reads
+            # like a resting state and this one is an outage: it will not come back by itself.
+            return Result(label, "error", "Paused — it will not wake on its own.", stage=stage)
         if stage in _ERROR:
-            return Result(label, "error", f"{stage.replace('_', ' ').title()}.")
+            return Result(label, "error", f"{stage.replace('_', ' ').title()}.", stage=stage)
         # 200 but no stage: a protected Space hides its metadata. Ask the app instead.
         status, detail = _probe(space_id)
         return Result(label, status, detail)
@@ -204,9 +234,23 @@ def restart(space_id: str, token: str) -> bool:
         return False
 
 
+def watched_spaces(cfg: dict) -> dict[str, str]:
+    """Every Space this watcher is responsible for, label -> id.
+
+    One function so the poll and the menu action cannot disagree about what is watched. They
+    did: "Wake / restart all" read `cfg["spaces"]` directly, so anything added anywhere else
+    would have been checked and then left alone.
+    """
+    spaces: dict[str, str] = {k: v for k, v in (cfg.get("spaces") or {}).items() if v}
+    poster = str(cfg.get("posterSpace") or "").strip()
+    if poster:
+        spaces.setdefault(POSTER_LABEL, poster)
+    return spaces
+
+
 def run_checks(cfg: dict) -> list[Result]:
     token = hf_token()
-    spaces: dict[str, str] = {k: v for k, v in (cfg.get("spaces") or {}).items() if v}
+    spaces = watched_spaces(cfg)
     results = [check_space(label, sid, token) for label, sid in spaces.items()]
 
     tracker = (cfg.get("mailTrackerUrl") or "").strip().rstrip("/")
@@ -218,25 +262,41 @@ def run_checks(cfg: dict) -> list[Result]:
         except Exception:  # noqa: BLE001
             results.append(Result("Email tracking", "asleep", "Not answering yet."))
 
-    if not cfg.get("wakeSleeping", True):
+    wake_on = cfg.get("wakeSleeping", True)
+    restart_on = cfg.get("restartBroken", True)
+    if not wake_on and not restart_on:
         return results
 
-    woken = [r for r in results if r.status == "asleep"]
-    for r in woken:
+    nudged: list[Result] = []
+    for r in results:
         sid = spaces.get(r.label)
-        if sid:
+        if not sid:
+            continue
+        if wake_on and r.status == "asleep":
             wake(sid)
             r.woke = True
             r.detail = "Waking it up."
-    # Only pay the re-check wait if something was actually woken.
-    if woken:
+            nudged.append(r)
+        elif restart_on and r.stage in _RESTARTABLE:
+            # The case a wake cannot touch. A paused Space ignores requests entirely, so
+            # without this the watcher would report the same outage every six hours and fix
+            # nothing — which is what it did while scheduled posts were not going out.
+            if restart(sid, token):
+                r.woke = True
+                r.detail = f"{r.stage.replace('_', ' ').title()} — restarting it."
+                nudged.append(r)
+            elif not token:
+                r.detail += " Set HF_TOKEN so this can be restarted automatically."
+
+    # Only pay the re-check wait if something was actually nudged.
+    if nudged:
         time.sleep(RECHECK_DELAY)
-        for r in woken:
+        for r in nudged:
             sid = spaces.get(r.label)
             if not sid:
                 continue
             again = check_space(r.label, sid, token)
-            r.status, r.detail = again.status, again.detail
+            r.status, r.detail, r.stage = again.status, again.detail, again.stage
             if r.status == "asleep":
                 # Still not up after the wait. Starting, most likely — say so rather than
                 # calling a slow cold start a failure.
@@ -279,12 +339,17 @@ def backend_is_up() -> bool:
         return False
 
 
-def run_app_checks() -> list[Result]:
+def run_app_checks(cfg: dict | None = None) -> list[Result]:
     """The daily module sweep, folded down to one tray row per outcome.
 
     Fifty-odd individual checks would bury the Spaces in the status window, so the detail
     goes to the HTML report and history — which is where it is actually readable — and the
     tray keeps a one-line verdict plus a named list of whatever is not ok.
+
+    `cfg` is passed through for the handful of checks that need something only this tray
+    knows. The poster Space is the one that matters: checks.py reads it from the environment,
+    which never has it, so without this the sweep's poster row says "not configured" however
+    carefully it is filled in here.
     """
     from . import report, runner
     from .checks import health_checks
@@ -293,7 +358,12 @@ def run_app_checks() -> list[Result]:
         return [Result("App modules", "asleep",
                        "The app isn't running — its modules can only be checked while it is.")]
 
-    results = runner.run_all(health_checks())
+    cfg = cfg or {}
+    poster = (
+        str(cfg.get("posterSpace") or "").strip(),
+        str(cfg.get("posterSpaceUrl") or "").strip(),
+    )
+    results = runner.run_all(health_checks(poster))
     entry = runner.record("health", results)
     try:
         report.write(entry, runner.load_history())
@@ -456,7 +526,7 @@ def main() -> int:
             if app_checks_due(state, cfg) or check_modules_now.is_set():
                 check_modules_now.clear()
                 icon.title = "Space health — checking the app's modules…"
-                app_rows = run_app_checks()
+                app_rows = run_app_checks(cfg)
                 # Only a real sweep marks the day done; refusing to when the app was closed
                 # means the check still happens later, once it is open.
                 if not (len(app_rows) == 1 and app_rows[0].status == "asleep"):
@@ -515,13 +585,16 @@ def main() -> int:
 
     def on_wake_all(icon, _item) -> None:
         token = hf_token()
+        spaces = watched_spaces(cfg)
         for r in state.results:
-            sid = (cfg.get("spaces") or {}).get(r.label)
+            sid = spaces.get(r.label)
             if not sid:
                 continue
             if r.status == "asleep":
                 wake(sid)
             elif r.status == "error":
+                # Asked for by hand, so every error stage is attempted — unlike the automatic
+                # pass, which restarts only what a restart can plausibly fix.
                 restart(sid, token)
         wake_now.set()
 

@@ -500,3 +500,221 @@ def test_a_prefilled_bluesky_password_is_resolved_before_it_reaches_bluesky(
     assert result["connected"] is True
     assert sent["password"] == "real-app-pw"
     assert distribution.SETTINGS_PLACEHOLDER not in sent.values()
+
+
+# --- paused is not asleep ---------------------------------------------------
+#
+# The regression these guard cost three days of scheduled posts (2026-10-28). The poster Space
+# was PAUSED, which over HTTP is indistinguishable from SLEEPING: both are silence. Every
+# recovery mechanism in the app — /tick, _wake_cloud_if_due, the GitHub heartbeat, healthmon's
+# wake() — assumes silence means sleeping and is fixed by a request. A paused Space answers an
+# instant 503 for ever and is fixed only by restart_space, so the status line reassured the
+# user ("asleep or unreachable... anything queued still goes out when it wakes") about a Space
+# that was never going to wake.
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int, payload: dict | None = None) -> None:
+        self.status_code = status_code
+        self._payload = payload or {}
+
+    def json(self) -> dict:
+        return self._payload
+
+
+@pytest.fixture()
+def configured_space(monkeypatch: pytest.MonkeyPatch):
+    """A poster Space whose /status answer and whose Spaces API stage the test decides."""
+    monkeypatch.setattr(cloud_poster, "_runtime", {})
+    assert cloud_poster.set_credentials(
+        space_id="someone/poster",
+        url="https://someone-poster.hf.space",
+        key="k",
+        outbox="someone/poster-outbox",
+        token="hf_test",
+    )
+
+    def _make(*, status: object, stage: str) -> None:
+        from app.services import hf_spaces
+
+        def _get(*_a, **_k):
+            if isinstance(status, Exception):
+                raise status
+            return status
+
+        monkeypatch.setattr("requests.get", _get)
+        monkeypatch.setattr(hf_spaces, "stage", lambda *_a, **_k: stage)
+
+    return _make
+
+
+def test_a_paused_space_is_not_reported_as_asleep(configured_space) -> None:
+    """The bug itself. Silence plus a PAUSED stage must produce an answer that says to act."""
+    import requests
+
+    configured_space(status=requests.ConnectionError("no route"), stage="PAUSED")
+    result = cloud_poster.space_status()
+
+    assert result["reachable"] is False
+    assert result["stage"] == "PAUSED"
+    assert result["restartable"] is True
+    assert "paused" in result["detail"].lower()
+    # The reassurance that made the old wording dangerous must be gone. It said "asleep or
+    # unreachable" and invited the user to wait; this has to tell them to restart instead.
+    assert "asleep or unreachable" not in result["detail"].lower()
+    assert "restart" in result["detail"].lower()
+
+
+def test_the_router_503_is_also_checked_against_the_stage(configured_space) -> None:
+    """The other door to the same question, and the one a real paused Space comes through:
+    Hugging Face's router answers 503 rather than dropping the connection, which the old code
+    reported as the uninformative "Your Space answered HTTP 503"."""
+    configured_space(status=_FakeResponse(503), stage="PAUSED")
+    result = cloud_poster.space_status()
+
+    assert result["restartable"] is True
+    assert "503" not in result["detail"]
+
+
+def test_a_sleeping_space_is_still_reported_as_asleep(configured_space) -> None:
+    """The fix must not turn the ordinary case into an alarm. A sleeping free Space is normal,
+    the queue is safe, and there is nothing for the user to do."""
+    import requests
+
+    configured_space(status=requests.Timeout("slow"), stage="SLEEPING")
+    result = cloud_poster.space_status()
+
+    assert result["reachable"] is False
+    assert result.get("restartable") is None
+    assert "asleep" in result["detail"].lower()
+
+
+def test_a_hugging_face_outage_is_not_mistaken_for_a_paused_space(configured_space) -> None:
+    """stage() returns "" when it cannot read the API. That must fall back to describing what
+    we saw, not invent a verdict — telling someone to restart a healthy Space because
+    huggingface.co was down would be worse than saying nothing."""
+    import requests
+
+    configured_space(status=requests.ConnectionError("no route"), stage="")
+    result = cloud_poster.space_status()
+
+    assert result.get("restartable") is None
+    assert "asleep or unreachable" in result["detail"]
+
+
+def test_a_crashed_space_is_restartable_too(configured_space) -> None:
+    configured_space(status=_FakeResponse(503), stage="RUNTIME_ERROR")
+    result = cloud_poster.space_status()
+
+    assert result["stage"] == "RUNTIME_ERROR"
+    assert result["restartable"] is True
+
+
+def test_a_healthy_space_never_asks_the_spaces_api(configured_space, monkeypatch) -> None:
+    """The stage lookup is a second HTTP call, so it must only happen when the first one has
+    already failed — not on every poll of a working Space."""
+    from app.services import hf_spaces
+
+    configured_space(status=_FakeResponse(200, {"queued": 2}), stage="PAUSED")
+    asked = {"n": 0}
+    real = hf_spaces.stage
+
+    def _counting(*a, **k):
+        asked["n"] += 1
+        return real(*a, **k)
+
+    monkeypatch.setattr(hf_spaces, "stage", _counting)
+
+    result = cloud_poster.space_status()
+    assert result["reachable"] is True
+    assert result["queued"] == 2
+    assert asked["n"] == 0
+
+
+def test_the_stage_lookup_survives_every_way_it_can_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """stage() is only ever used to add detail to a decided answer, so it returns "" rather
+    than raising. A Hugging Face outage must not turn a status row into a stack trace."""
+    import requests
+
+    from app.services import hf_spaces
+
+    assert hf_spaces.stage("") == ""
+
+    monkeypatch.setattr("requests.get", lambda *a, **k: (_ for _ in ()).throw(requests.Timeout()))
+    assert hf_spaces.stage("someone/poster") == ""
+
+    monkeypatch.setattr("requests.get", lambda *a, **k: _FakeResponse(404))
+    assert hf_spaces.stage("someone/poster") == ""
+
+    monkeypatch.setattr("requests.get", lambda *a, **k: _FakeResponse(200, {}))
+    assert hf_spaces.stage("someone/poster") == ""
+
+    monkeypatch.setattr(
+        "requests.get", lambda *a, **k: _FakeResponse(200, {"runtime": {"stage": "PAUSED"}})
+    )
+    assert hf_spaces.stage("someone/poster") == "PAUSED"
+
+
+# --- restarting -------------------------------------------------------------
+
+
+def test_restarting_without_a_write_token_is_refused_with_advice() -> None:
+    """The token the Space itself holds is fine-grained and scoped to the outbox dataset, so
+    it cannot restart anything. Saying so is the difference between a user adding the right
+    token and concluding the button is broken."""
+    from app.services import hf_spaces
+
+    with pytest.raises(hf_spaces.SpaceProvisionError) as err:
+        hf_spaces.restart("", "someone/poster")
+    assert "token" in str(err.value).lower()
+
+    with pytest.raises(hf_spaces.SpaceProvisionError):
+        hf_spaces.restart("hf_write", "")
+
+
+def test_the_restart_endpoint_defaults_to_the_active_space(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Settings panel sends no space id, so the endpoint has to find it the same way every
+    other runtime caller does — through _setting(), never config, which is the spawn
+    environment and frozen at import."""
+    from app.routers import cloud_posting
+
+    monkeypatch.setattr(cloud_poster, "_runtime", {})
+    cloud_poster.set_credentials(
+        space_id="someone/poster",
+        url="https://someone-poster.hf.space",
+        key="k",
+        outbox="someone/poster-outbox",
+        token="hf_test",
+    )
+    asked: dict[str, str] = {}
+    monkeypatch.setattr(
+        cloud_posting.hf_spaces,
+        "restart",
+        lambda token, space_id: asked.update(token=token, space_id=space_id),
+    )
+
+    result = cloud_posting.restart(cloud_posting.RestartRequest(hfToken="hf_write"))
+    assert result["restarted"] is True
+    assert asked == {"token": "hf_write", "space_id": "someone/poster"}
+
+
+def test_restarting_with_no_space_set_up_is_a_clear_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import config
+    from app.routers import cloud_posting
+
+    monkeypatch.setattr(config, "CLOUD_POSTER_SPACE", "")
+    monkeypatch.setattr(cloud_poster, "_runtime", {})
+    with pytest.raises(HTTPException) as err:
+        cloud_posting.restart(cloud_posting.RestartRequest(hfToken="hf_write"))
+    assert err.value.status_code == 400
+
+
+def test_the_restartable_stages_exclude_the_ones_a_restart_cannot_fix() -> None:
+    """A build failure needs the code or the config changed. Restarting it just loops, and an
+    automatic restarter that loops is worse than one that reports."""
+    from app.services import hf_spaces
+
+    assert "PAUSED" in hf_spaces.RESTARTABLE_STAGES
+    assert "RUNTIME_ERROR" in hf_spaces.RESTARTABLE_STAGES
+    for stage in ("BUILD_ERROR", "CONFIG_ERROR", "NO_APP_FILE", "DELETING", "SLEEPING", "RUNNING"):
+        assert stage not in hf_spaces.RESTARTABLE_STAGES

@@ -1,5 +1,5 @@
 import { app, shell, BrowserWindow, dialog, ipcMain } from 'electron'
-import { copyFile, mkdir, stat, writeFile } from 'fs/promises'
+import { copyFile, mkdir, readFile, stat, writeFile } from 'fs/promises'
 import { basename, join } from 'path'
 import { randomUUID } from 'crypto'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -207,7 +207,47 @@ async function handOverTumblrKeys(): Promise<void> {
  * the backend started — so without this the walkthrough would finish, report success, and
  * leave scheduled posts going to the local scheduler until the app was restarted.
  */
+/**
+ * Tell the tray watcher which Space is the poster.
+ *
+ * healthmon reads its own configuration and cannot read ours — config.enc is encrypted with
+ * safeStorage and nothing outside Electron can decrypt it. Its poster check therefore keyed
+ * on an environment variable it never had, and reported "no poster Space configured" on every
+ * run for months while the Space it was meant to be watching sat PAUSED and scheduled posts
+ * silently stopped (2026-10-28).
+ *
+ * Only the id and the URL are written, and neither is a secret — the Space is public. The
+ * token stays where it is; healthmon finds its own. Written on every handover rather than
+ * once at provision time, so a Space that is re-created or renamed cannot leave a stale id
+ * behind, and so installs that already have a Space pick it up on their next launch without
+ * anyone re-running setup.
+ */
+async function publishPosterSpaceToHealthmon(): Promise<void> {
+  try {
+    const c = getSettings().cloudPosting
+    if (!c.spaceId.trim()) return
+    const path = join(app.getPath('userData'), 'healthmon.json')
+    let current: Record<string, unknown> = {}
+    try {
+      current = JSON.parse(await readFile(path, 'utf-8')) as Record<string, unknown>
+    } catch {
+      // No config yet, or an unreadable one. The tray writes its own template on first run,
+      // so the worst case is that it does that and this lands on the next handover.
+      return
+    }
+    if (current.posterSpace === c.spaceId && current.posterSpaceUrl === c.spaceUrl) return
+    await writeFile(
+      path,
+      JSON.stringify({ ...current, posterSpace: c.spaceId, posterSpaceUrl: c.spaceUrl }, null, 2),
+      'utf-8'
+    )
+  } catch {
+    // A watcher that is not configured is not a reason to fail a launch.
+  }
+}
+
 async function handOverCloudPosting(): Promise<void> {
+  void publishPosterSpaceToHealthmon()
   try {
     const c = getSettings().cloudPosting
     await fetch(`${BACKEND_URL}/cloud-posting/credentials`, {

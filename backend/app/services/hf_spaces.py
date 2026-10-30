@@ -33,6 +33,8 @@ import threading
 import time
 from pathlib import Path
 
+import requests
+
 log = logging.getLogger(__name__)
 
 _lock = threading.Lock()
@@ -92,6 +94,80 @@ def space_url(space_id: str) -> str:
     owner, _, name = space_id.partition("/")
     slug = f"{owner}-{name}".lower().replace(".", "-").replace("_", "-")
     return f"https://{slug}.hf.space"
+
+
+#: Stages that mean the Space is deliberately stopped rather than resting, and that a
+#: request will therefore never fix.
+#:
+#: PAUSED is the one that matters, and the distinction is the whole reason this exists. A
+#: SLEEPING Space boots on the next request, which is what /tick, the GitHub heartbeat and
+#: healthmon's wake() all rely on. A PAUSED Space answers an instant 503 from the router and
+#: never boots from a request at all — it needs restart_space. On 2026-10-28 two scheduled
+#: posts did not go out for three days because every mechanism in the app treated the two as
+#: the same thing and kept pinging a Space that could not answer.
+#:
+#: RUNTIME_ERROR is included because a restart is the right first move for a crashed
+#: container too. The build failures are deliberately NOT here: BUILD_ERROR, CONFIG_ERROR and
+#: NO_APP_FILE need the code or the config fixed, so restarting only loops.
+RESTARTABLE_STAGES = frozenset({"PAUSED", "RUNTIME_ERROR"})
+
+
+def stage(space_id: str, token: str = "") -> str:
+    """The Space's runtime stage, or "" when it cannot be read.
+
+    The Spaces API is public for a public Space, so this needs no credential — which is what
+    makes it usable as the second opinion when the Space's own HTTP surface is not answering.
+    A token is accepted anyway so the same call works if someone makes their poster private.
+
+    Deliberately total: every failure returns "" rather than raising, because this is only
+    ever used to ADD detail to an answer that has already been decided. A Hugging Face outage
+    must not turn "your Space is not answering" into a stack trace.
+    """
+    if not space_id.strip():
+        return ""
+    headers = {"Authorization": f"Bearer {token.strip()}"} if token.strip() else {}
+    try:
+        resp = requests.get(
+            f"https://huggingface.co/api/spaces/{space_id.strip()}",
+            headers=headers,
+            timeout=20,
+        )
+    except requests.RequestException:
+        return ""
+    if resp.status_code != 200:
+        return ""
+    try:
+        return str(((resp.json() or {}).get("runtime") or {}).get("stage") or "")
+    except ValueError:
+        return ""
+
+
+def restart(hf_token: str, space_id: str) -> None:
+    """Bring a paused or crashed Space back up.
+
+    Needs a token that can WRITE to the account — not the fine-grained one the Space itself
+    holds, which is scoped to the outbox dataset and cannot touch the Space. That is why this
+    takes the token per call like provision() does, rather than reading one from the
+    environment: the broad token lives in the app's encrypted settings and is handed over by
+    the caller, so a Space created or re-tokened mid-session is still restartable.
+    """
+    if not hf_token.strip():
+        raise SpaceProvisionError(
+            "Restarting your Space needs your Hugging Face token. Add it in Settings first."
+        )
+    if not space_id.strip():
+        raise SpaceProvisionError("There is no poster Space to restart yet.")
+
+    from huggingface_hub.utils import HfHubHTTPError
+
+    try:
+        _api(hf_token).restart_space(repo_id=space_id.strip())
+    except HfHubHTTPError as err:
+        raise SpaceProvisionError(f"Could not restart your Space: {err}") from None
+    except Exception as err:  # noqa: BLE001 - reached by a button; must become a sentence
+        # Broader than the handler above on purpose: an unexpected error from the hub has to
+        # read as something the user can act on rather than surface as a 500.
+        raise SpaceProvisionError(f"Could not restart your Space: {err}") from None
 
 
 def status() -> dict:

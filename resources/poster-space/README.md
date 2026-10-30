@@ -42,6 +42,14 @@ when it is next woken.
 whose time has passed, not only what is due this minute. If exact timing matters,
 upgrade this Space to paid hardware and it will not sleep at all.
 
+**Asleep and paused are not the same thing.** An asleep Space wakes on the next
+request, which is what everything below relies on. A **paused** Space answers an
+instant 503 and ignores requests entirely — no pinger, and nothing in the app, can
+wake it. It comes back only when you press **Restart this Space** here on Hugging
+Face, or use Settings → Cloud posting → Restart this Space in the app. If scheduled
+posts have stopped altogether, this is the first thing to check: the stage is shown
+at the top of this page.
+
 To narrow the window for free, point a scheduler at `/tick`. **cron-job.org** is
 free and does exactly this — add the address, set it to every 5 minutes, and turn
 notifications off, since a sleeping Space is normal here and an uptime monitor will

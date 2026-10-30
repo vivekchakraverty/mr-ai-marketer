@@ -78,6 +78,12 @@ def is_configured() -> bool:
     return bool(_setting("CLOUD_POSTER_OUTBOX") and _setting("CLOUD_POSTER_TOKEN"))
 
 
+def space_id() -> str:
+    """Which Space is active, for the callers that act on the Space itself rather than the
+    outbox. Read through _setting() for the same reason can_wake() is."""
+    return _setting("CLOUD_POSTER_SPACE")
+
+
 def can_wake() -> bool:
     """Whether there is a Space URL worth nudging.
 
@@ -364,6 +370,41 @@ def wake() -> bool:
         return False
 
 
+def _stopped() -> dict | None:
+    """The Spaces API's verdict, when it is one the user has to act on.
+
+    Asked only after the Space has failed to answer, and only to tell the two silences apart:
+
+      * SLEEPING — the next request boots it, everything due goes out, nothing to do. This is
+        the common case on free hardware and it is not a fault.
+      * PAUSED — an instant 503 from Hugging Face's router, forever. No ping wakes it, so
+        /tick, the GitHub heartbeat and _wake_cloud_if_due are all powerless, and scheduled
+        posts simply stop. It needs a restart from someone holding a write token.
+
+    Reporting the second as the first is how three days of posts went missing on 2026-10-28:
+    every status line said "asleep or unreachable" and invited the user to wait.
+
+    None means the stage is unknown or unremarkable, and the caller should fall back to
+    describing what it saw.
+    """
+    from . import hf_spaces
+
+    current = hf_spaces.stage(space_id(), _setting("CLOUD_POSTER_TOKEN"))
+    if not current or current not in hf_spaces.RESTARTABLE_STAGES:
+        return None
+    if current == "PAUSED":
+        detail = (
+            "Your Space is paused, not asleep — pinging it will not wake it, so nothing "
+            "scheduled is going out. Restart it and the whole queue goes out at once."
+        )
+    else:
+        detail = (
+            "Your Space has crashed. Restart it and anything queued goes out; if it crashes "
+            "again, its logs on Hugging Face will say why."
+        )
+    return {"reachable": False, "stage": current, "restartable": True, "detail": detail}
+
+
 def space_status() -> dict:
     """What the Space says about itself, for the Distribute status row."""
     if not _setting("CLOUD_POSTER_URL") or not _setting("CLOUD_POSTER_KEY"):
@@ -378,10 +419,22 @@ def space_status() -> dict:
         )
     except requests.RequestException as err:
         # A sleeping free Space answers slowly or not at all. That is not a fault, and the
-        # queue is safe either way — say so rather than showing an error.
-        return {"reachable": False, "detail": f"Your Space is asleep or unreachable: {err}"}
+        # queue is safe either way — say so rather than showing an error. But a PAUSED Space
+        # is silent in exactly the same way and is NOT fine, so ask the Spaces API before
+        # settling on the reassuring wording.
+        return _stopped() or {
+            "reachable": False,
+            "detail": f"Your Space is asleep or unreachable: {err}",
+        }
     if resp.status_code == 401:
         return {"reachable": False, "detail": "Your Space did not recognise this app's key."}
+    if resp.status_code >= 500:
+        # 503 is what the router returns for a Space that is not running at all, paused
+        # included, so this is the other door to the same question.
+        return _stopped() or {
+            "reachable": False,
+            "detail": f"Your Space answered HTTP {resp.status_code}.",
+        }
     if resp.status_code >= 400:
         return {"reachable": False, "detail": f"Your Space answered HTTP {resp.status_code}."}
     return {"reachable": True, **(resp.json() or {})}

@@ -262,12 +262,17 @@ def _watched_spaces() -> list[tuple[str, str, bool]]:
     return spaces
 
 # A Space at rest is not a broken Space. Only the error stages are failures.
+#
+# PAUSED counts as one, which it did not until 2026-10-30. It reads like a resting state and
+# is nothing of the kind: SLEEPING wakes on the next request, PAUSED answers an instant 503
+# for ever and recovers only when somebody restarts it. Calling that a warning is how a dead
+# poster Space sat in an amber row for three days while scheduled posts quietly stopped.
 _STAGE_STATUS = {
     "RUNNING": "ok",
     "RUNNING_BUILDING": "ok",
     "RUNNING_APP_STARTING": "ok",
     "SLEEPING": "ok",
-    "PAUSED": "warn",
+    "PAUSED": "fail",
     "BUILDING": "warn",
     "APP_STARTING": "warn",
     "NO_APP_FILE": "fail",
@@ -297,7 +302,11 @@ def _space_check(space_id: str, critical: bool = True):
         runtime = (resp.json() or {}).get("runtime") or {}
         stage = runtime.get("stage") or "UNKNOWN"
         status = _STAGE_STATUS.get(stage, "warn")
-        note = " — wakes on first request" if stage == "SLEEPING" else ""
+        note = ""
+        if stage == "SLEEPING":
+            note = " — wakes on first request"
+        elif stage == "PAUSED":
+            note = " — will NOT wake on its own; needs a restart"
         if status == "fail" and not critical:
             status, note = "warn", " — optional fallback tier, app unaffected"
         return CheckResult(space_id, "space", status, f"{stage}{note}", meta={"stage": stage})
@@ -305,19 +314,59 @@ def _space_check(space_id: str, critical: bool = True):
     return run
 
 
-def check_cloud_poster() -> tuple[str, str]:
-    """The poster Space, judged by whether it answers rather than by its Spaces API stage.
+def check_cloud_poster(space_id: str = "", url: str = "") -> tuple[str, str]:
+    """The poster Space, judged by its stage FIRST and by whether it answers second.
 
-    A sleeping free Space is not a broken one — it wakes on the next request and posts
-    everything whose time has passed — so an unreachable poster is reported as a warning, not
-    a failure. What WOULD be a failure is /health answering something other than 200, which
-    means the container is up and the app inside it is not.
+    This check used to read only whether the Space answered, on the reasoning that a sleeping
+    free Space is not a broken one — it wakes on the next request and posts everything whose
+    time has passed. That reasoning is sound and it hid a three-day outage, because a PAUSED
+    Space is silent in precisely the same way and never wakes at all. Silence alone cannot
+    tell the two apart; only the Spaces API stage can, so the id is asked for first and the
+    HTTP probe is the follow-up rather than the whole check.
+
+    Arguments override the configured values, because the tray knows the Space from
+    healthmon.json while this module only ever sees the environment — and the environment is
+    exactly what it did not have. Left empty, the configured values are used, so the CLI
+    behaves as before.
     """
-    if not config.CLOUD_POSTER_URL:
-        return "skip", "no poster Space configured (CLOUD_POSTER_URL)"
+    space = (space_id or config.CLOUD_POSTER_SPACE).strip()
+    base = (url or config.CLOUD_POSTER_URL).strip().rstrip("/")
+    if not space and not base:
+        return "skip", "no poster Space configured (CLOUD_POSTER_SPACE or CLOUD_POSTER_URL)"
+
+    stage = ""
+    if space:
+        headers = {"Authorization": f"Bearer {config.HF_TOKEN}"} if config.HF_TOKEN else {}
+        try:
+            resp = requests.get(
+                f"https://huggingface.co/api/spaces/{space}",
+                headers=headers,
+                timeout=config.DEFAULT_TIMEOUT,
+            )
+            if resp.status_code == 200:
+                stage = str(((resp.json() or {}).get("runtime") or {}).get("stage") or "")
+            elif resp.status_code == 404:
+                return "fail", f"{space} does not exist (renamed or deleted?)"
+        except (requests.RequestException, ValueError):
+            # Hugging Face itself being unreachable says nothing about the poster. Fall
+            # through to the HTTP probe rather than reporting their outage as ours.
+            stage = ""
+
+    if stage == "PAUSED":
+        return "fail", "PAUSED — no ping can wake it, nothing scheduled is going out; restart it"
+    if stage in {"RUNTIME_ERROR", "BUILD_ERROR", "CONFIG_ERROR", "NO_APP_FILE"}:
+        return "fail", f"{stage} — nothing scheduled is going out"
+
+    if not base:
+        # Nothing to probe, but the stage was readable and unremarkable, which is an answer.
+        return ("ok", f"{stage} — no CLOUD_POSTER_URL to probe") if stage else (
+            "skip", "poster Space configured but no CLOUD_POSTER_URL to probe"
+        )
     try:
-        return _http_ok(f"{config.CLOUD_POSTER_URL}/health")
+        return _http_ok(f"{base}/health")
     except requests.RequestException as err:
+        if stage == "SLEEPING":
+            return "ok", "SLEEPING — wakes on the next request; queued posts are unaffected"
         return "warn", f"asleep or unreachable ({type(err).__name__}); queued posts are unaffected"
 
 
@@ -473,13 +522,19 @@ def _contract_probe(path: str, body: dict):
 # --------------------------------------------------------------------------- registry
 
 
-def health_checks() -> list[Check]:
+def health_checks(poster: tuple[str, str] = ("", "")) -> list[Check]:
     """The daily set: every module and every capability, with no AI generation.
 
     "Cheaply" here means no inference, no crawling and no writes — not shallow. Read
     surfaces are called for real, and the work-only endpoints are held to their request
     contract (see CONTRACT_PROBES), so a green run means every router in the app loaded,
     answered, and enforced its own interface.
+
+    `poster` is (space id, url) for the cloud poster, for callers that know it from somewhere
+    this module cannot see. The tray does, from healthmon.json; this module only ever reads
+    the environment, which on a normal install does not have it — so the poster check reported
+    "not configured" on every run for months while the Space it should have been watching was
+    down. Omitted, the configured values are used and nothing changes.
     """
     checks = [
         Check("Backend API", "infra", check_backend),
@@ -492,7 +547,8 @@ def health_checks() -> list[Check]:
         Check("Video search (yt-dlp)", "infra", check_yt_search),
         Check("Video search (Piped)", "infra", check_piped),
         Check("Mail tracking Space", "space", check_mail_tracker),
-        Check("Cloud poster Space", "space", check_cloud_poster),
+        Check("Cloud poster Space", "space",
+              lambda: check_cloud_poster(poster[0], poster[1])),
     ]
     checks += [Check(label, "space", _space_check(space_id, critical))
                for label, space_id, critical in _watched_spaces()]

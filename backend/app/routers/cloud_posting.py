@@ -223,3 +223,40 @@ def wake() -> dict:
 @router.get("/space-status")
 def space_status() -> dict:
     return cloud_poster.space_status()
+
+
+class RestartRequest(BaseModel):
+    """`hfToken` must be able to write to the account. `spaceId` is optional — the active
+    Space is used when it is omitted, which is what the Settings panel does."""
+
+    hfToken: str = ""
+    spaceId: str = ""
+
+
+@router.post("/restart")
+def restart(body: RestartRequest) -> dict:
+    """Bring a paused or crashed poster Space back up.
+
+    The app could not do this at all until now, which is the gap that let a paused Space stop
+    scheduled posting silently: /wake pings a URL, and a paused Space does not answer pings.
+    Only healthmon's tray could restart one, and it was not watching the poster.
+
+    The queue needs no attention afterwards. The Space fires everything whose time has passed
+    on its first pass, and both networks are idempotent per job id, so a post stranded by the
+    pause goes out exactly once however many times this is called.
+    """
+    target = body.spaceId.strip() or cloud_poster.space_id()
+    if not target:
+        raise HTTPException(status_code=400, detail="There is no poster Space to restart yet.")
+    try:
+        hf_spaces.restart(body.hfToken, target)
+    except hf_spaces.SpaceProvisionError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from None
+    return {
+        "restarted": True,
+        "spaceId": target,
+        "detail": (
+            "Restarting. It takes a minute or two to come up, and then everything that was "
+            "due while it was down goes out."
+        ),
+    }

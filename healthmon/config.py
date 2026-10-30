@@ -108,8 +108,21 @@ WATCHED_SPACES = {
 }
 MAIL_TRACKER_URL = os.environ.get("MAIL_TRACKER_URL", "").strip().rstrip("/")
 
-# The user's own poster Space. Not in WATCHED_SPACES: those are checked through the Spaces
-# API by repo id, and this one is per-install and better judged by whether it answers.
+# The user's own poster Space. Not in WATCHED_SPACES, because the failure that matters here
+# is different: those Spaces are noticed the moment someone uses the tool, while the poster is
+# only ever used by a schedule, so nobody finds out it is down.
+#
+# BOTH of these are needed, and the id is the more important one. Judging the poster purely by
+# whether it answers cannot tell a SLEEPING Space (fine — the next request boots it) from a
+# PAUSED one (an instant 503 forever, no ping recovers it, every scheduled post silently
+# stops). Only the Spaces API stage distinguishes them. That is what let a paused poster go
+# unnoticed for three days on 2026-10-28.
+#
+# The URL alone also could not be relied on: it reaches this process only if someone puts it
+# in healthmon's own .env, because the real value lives in the app's encrypted settings, which
+# nothing outside Electron can read (see this module's own docstring). The tray therefore also
+# takes both from healthmon.json, which is the config a user can actually fill in.
+CLOUD_POSTER_SPACE = os.environ.get("CLOUD_POSTER_SPACE", "").strip()
 CLOUD_POSTER_URL = os.environ.get("CLOUD_POSTER_URL", "").strip().rstrip("/")
 
 DEFAULT_TIMEOUT = int(os.environ.get("HEALTHMON_TIMEOUT", "25"))

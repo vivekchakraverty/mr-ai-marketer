@@ -51,6 +51,10 @@ jobs:
       - name: Ping /tick
         env:
           POSTER_SPACE_URL: ${{ vars.POSTER_SPACE_URL }}
+          # Optional, and only used to explain a failure: with it, a run that cannot reach the
+          # Space says whether it is paused instead of leaving you to guess. Set it with:
+          #   gh variable set POSTER_SPACE_ID --body <owner>/<space-name>
+          POSTER_SPACE_ID: ${{ vars.POSTER_SPACE_ID }}
         # Explicit, because the default is `bash -e {0}` and every retry here is an expected
         # non-zero that must not end the step before the loop has had its three goes.
         shell: bash --noprofile --norc {0}
@@ -77,5 +81,21 @@ jobs:
           # Only now is it worth telling anyone. Failing loudly here is deliberate: a Space
           # that cannot be woken in three attempts over two minutes is not sleeping, it is
           # broken, and scheduled posts are silently not going out.
+          #
+          # Say WHICH kind of broken, because the commonest answer is one this job cannot fix
+          # and the failure text alone sent somebody looking in the wrong place for three
+          # days. A PAUSED Space answers an instant 503 for ever and recovers only when its
+          # owner restarts it; no amount of pinging will do it. The Spaces API is public for a
+          # public Space, so this costs nothing and needs no token.
+          if [ -n "${POSTER_SPACE_ID:-}" ]; then
+            stage=$(curl -sS --max-time 20 "https://huggingface.co/api/spaces/${POSTER_SPACE_ID}" \
+              | tr ',' '\n' | grep -m1 '"stage"' | cut -d'"' -f4)
+            echo "Spaces API stage: ${stage:-unreadable}"
+            if [ "$stage" = "PAUSED" ]; then
+              echo "::error::Your poster Space is PAUSED, so nothing scheduled is going out. Pinging cannot wake it — restart it at https://huggingface.co/spaces/${POSTER_SPACE_ID} (or use Settings → Cloud posting → Restart this Space)."
+              exit 1
+            fi
+          fi
+
           echo "::error::Could not reach $url after three attempts. Scheduled posts may not be going out."
           exit 1

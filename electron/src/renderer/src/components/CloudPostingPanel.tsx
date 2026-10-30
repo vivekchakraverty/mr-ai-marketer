@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { cloudSpaceStatus, type CloudSpaceStatus } from '../api/client'
+import { cloudSpaceStatus, restartCloudPoster, type CloudSpaceStatus } from '../api/client'
 import { useAppStore } from '../state/store'
 import { label, primaryButtonSmall, secondaryButtonSmall } from '../styles/styleKit'
 import type { CloudPostingSettings } from '../../../shared/settings'
@@ -13,13 +13,18 @@ import type { CloudPostingSettings } from '../../../shared/settings'
  * screen that owns each connection rather than offering to change it in place.
  *
  * A Space that does not answer is reported as asleep rather than broken, because on the free
- * tier that is almost always what it is, and the queue is safe either way.
+ * tier that is almost always what it is, and the queue is safe either way. With one
+ * exception, which this panel used to get wrong: a PAUSED Space is silent in the same way and
+ * is NOT safe to wait on — it never wakes, and scheduled posts stop until someone restarts
+ * it. The backend tells the two apart (cloud_poster._stopped) and this shows what it found.
  */
 export default function CloudPostingPanel(): React.JSX.Element {
   const openSetup = useAppStore((s) => s.openSetup)
   const [cloud, setCloud] = useState<CloudPostingSettings | null>(null)
   const [status, setStatus] = useState<CloudSpaceStatus | null>(null)
   const [checking, setChecking] = useState(false)
+  const [restarting, setRestarting] = useState(false)
+  const [restartNote, setRestartNote] = useState('')
 
   useEffect(() => {
     void (async () => {
@@ -38,6 +43,32 @@ export default function CloudPostingPanel(): React.JSX.Element {
       setStatus({ reachable: false, detail: err instanceof Error ? err.message : String(err) })
     } finally {
       setChecking(false)
+    }
+  }
+
+  /**
+   * The token is read here rather than held in state because this is the only screen that
+   * needs it and it is the broad, account-wide one — the fine-grained `spaceToken` the Space
+   * itself holds is scoped to the outbox dataset and cannot restart anything.
+   */
+  async function restart(): Promise<void> {
+    setRestarting(true)
+    setRestartNote('')
+    try {
+      const saved = await window.api.settings.getAll()
+      if (!saved.hfToken.trim()) {
+        setRestartNote('Add your Hugging Face token in Settings first — restarting needs it.')
+        return
+      }
+      const result = await restartCloudPoster({ hfToken: saved.hfToken, spaceId: cloud?.spaceId })
+      setRestartNote(result.detail)
+      // Not checked immediately: a Space that has just been told to restart reports the stage
+      // it was already in for a few seconds, which would read as "the restart did nothing".
+      setTimeout(() => void check(), 20000)
+    } catch (err) {
+      setRestartNote(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRestarting(false)
     }
   }
 
@@ -65,8 +96,22 @@ export default function CloudPostingPanel(): React.JSX.Element {
     border: '1.5px solid var(--border)'
   })
 
+  // A stage is only ever reported for a Space that is STOPPED, so its presence is the signal.
+  // Without this the row said "Asleep or waking" about a Space that was never going to wake.
+  const stopped = Boolean(status && !status.reachable && status.stage)
+
   const rows: [string, boolean, string][] = [
-    ['Space', Boolean(status?.reachable), status?.reachable ? 'Awake' : 'Asleep or waking'],
+    [
+      'Space',
+      Boolean(status?.reachable),
+      status?.reachable
+        ? 'Awake'
+        : status?.stage === 'PAUSED'
+          ? 'Paused — not posting'
+          : status?.stage === 'RUNTIME_ERROR'
+            ? 'Crashed — not posting'
+            : 'Asleep or waking'
+    ],
     [
       'Mastodon',
       Boolean(status?.mastodonConfigured),
@@ -104,9 +149,39 @@ export default function CloudPostingPanel(): React.JSX.Element {
         </p>
       )}
 
-      {status && !status.reachable && status.detail && (
+      {status && !status.reachable && status.detail && !stopped && (
         <p style={{ font: "600 12.5px/1.7 'Quicksand'", color: 'var(--ink-muted)', margin: '0 0 12px' }}>
           {status.detail} Anything already queued still goes out when it wakes.
+        </p>
+      )}
+
+      {stopped && (
+        <div
+          style={{
+            border: '2px dashed var(--border)',
+            background: 'var(--tip-bg)',
+            borderRadius: 12,
+            padding: '9px 12px',
+            font: "600 12.5px/1.6 'Quicksand'",
+            color: 'var(--danger-ink)',
+            marginBottom: 12
+          }}
+        >
+          {status?.detail}
+          {status?.restartable && (
+            <div
+              style={{ ...primaryButtonSmall, marginTop: 9, opacity: restarting ? 0.6 : 1 }}
+              onClick={restarting ? undefined : () => void restart()}
+            >
+              {restarting ? 'Restarting…' : 'Restart this Space'}
+            </div>
+          )}
+        </div>
+      )}
+
+      {restartNote && (
+        <p style={{ font: "600 12.5px/1.7 'Quicksand'", color: 'var(--ink-muted)', margin: '0 0 12px' }}>
+          {restartNote}
         </p>
       )}
 
@@ -130,7 +205,8 @@ export default function CloudPostingPanel(): React.JSX.Element {
       <div style={label}>Keep it awake</div>
       <p style={{ font: "600 12px/1.7 'Quicksand'", color: 'var(--ink-muted)', margin: '4px 0 0' }}>
         Optional backstop for when the Space has actually slept. <strong>cron-job.org</strong> is free — add this
-        address, every 5 minutes, notifications off.
+        address, every 5 minutes, notifications off. It cannot help a <em>paused</em> Space, which ignores requests
+        and only comes back from a restart.
       </p>
       <code
         style={{

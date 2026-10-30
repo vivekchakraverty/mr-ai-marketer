@@ -1101,6 +1101,14 @@ export interface CloudSpaceStatus {
   needsBlueskyReauth?: boolean
   mastodonConfigured?: boolean
   blueskyConfigured?: boolean
+  /**
+   * The Spaces API stage, present only when the Space is stopped rather than merely quiet —
+   * "PAUSED" or "RUNTIME_ERROR". A sleeping Space has no stage here: it is indistinguishable
+   * from a paused one over HTTP, which is exactly why the backend looks this up.
+   */
+  stage?: string
+  /** Whether a restart is the fix. Nothing else recovers a paused Space. */
+  restartable?: boolean
 }
 
 export function provisionCloudPoster(body: {
@@ -1136,6 +1144,20 @@ export function connectCloudBluesky(body: {
 
 export function cloudSpaceStatus(): Promise<CloudSpaceStatus> {
   return getJson('/cloud-posting/space-status')
+}
+
+/**
+ * Bring a paused or crashed poster Space back up.
+ *
+ * Distinct from waking it: a wake is a GET at /tick, which a paused Space answers with 503
+ * and ignores. This is the only thing that recovers one, and until it existed a paused Space
+ * stopped scheduled posting with no way to fix it from inside the app.
+ */
+export function restartCloudPoster(body: {
+  hfToken: string
+  spaceId?: string
+}): Promise<{ restarted: boolean; spaceId: string; detail: string }> {
+  return postJson('/cloud-posting/restart', body)
 }
 
 export interface SendToDistributionRequest {
