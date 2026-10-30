@@ -105,23 +105,55 @@ jobs:
           cp "ffmpeg-${ver}-essentials_build/bin/ffmpeg.exe"  resources/ffmpeg/win/
           cp "ffmpeg-${ver}-essentials_build/bin/ffprobe.exe" resources/ffmpeg/win/
 
-      # evermeet.cx publishes signed static builds. UNVERIFIED: macos-latest runners are arm64
-      # and evermeet has historically served x86_64 — if it still does, these binaries run
-      # under Rosetta on the runner (so the verification step below passes) but ship an Intel
-      # ffmpeg inside an arm64 app. Check `file resources/ffmpeg/mac/ffmpeg` in the job output
-      # the first time this runs for real, and switch to a per-arch source if it says x86_64.
-      # This is the least-tested leg of the matrix; Windows is the supported platform today.
+      # Was evermeet.cx, until it retired the floating getrelease API: from v1.1.0 every call
+      # answered HTTP 410 Gone, which curl -f reports as exit 56 — the same code as a dropped
+      # connection, so it read as a network blip and was re-run once for nothing. Its pinned
+      # files answer 403 to scripts. It was also never right for this app: evermeet builds
+      # x86_64 only and says it will not do Apple Silicon, while macos-latest is arm64 and
+      # electron-builder builds the dmg for the host arch — so it shipped an Intel ffmpeg
+      # inside an arm64 app, leaning on Rosetta 2.
+      #
+      # Martin Riedl's builds are native arm64, GPL static (--enable-gpl --enable-version3,
+      # not nonfree — the same licence class as the Linux leg, so what ships is unchanged),
+      # link nothing outside /usr/lib and /System, and are published at pinned per-version
+      # URLs with a documented scheme for scripts. Verified from the bytes on 2026-10-30.
+      #
+      # The hashes are pinned HERE rather than read from the host's .sha256 files, which is
+      # stronger than the Linux leg can be: a sidecar on the same server only catches a
+      # truncated download, while a pinned hash also catches the server handing out a
+      # different binary later. To move to a new build, change ver, build and both hashes
+      # together — and re-check the arch, which the step below now enforces rather than
+      # leaving in a comment.
       - name: Fetch ffmpeg (macOS)
         if: matrix.platform == 'mac'
         shell: bash
         run: |
           set -euo pipefail
+          ver=9.0.2
+          build=1789931890
+          base="https://ffmpeg.martin-riedl.de/download/macos/arm64/${build}_${ver}"
+          ffmpeg_sha=c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924
+          ffprobe_sha=fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6
+          curl -fsSL --retry 3 --retry-delay 5 "$base/ffmpeg.zip"  -o ffmpeg.zip
+          curl -fsSL --retry 3 --retry-delay 5 "$base/ffprobe.zip" -o ffprobe.zip
+          # shasum, not sha256sum: the latter is coreutils and not guaranteed on macOS.
+          printf '%s  ffmpeg.zip\n%s  ffprobe.zip\n' "$ffmpeg_sha" "$ffprobe_sha" > expected.sha256
+          shasum -a 256 -c expected.sha256
           mkdir -p resources/ffmpeg/mac
-          curl -fsSL "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip"  -o ffmpeg.zip
-          curl -fsSL "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip" -o ffprobe.zip
           unzip -qo ffmpeg.zip  -d resources/ffmpeg/mac
           unzip -qo ffprobe.zip -d resources/ffmpeg/mac
           chmod +x resources/ffmpeg/mac/ffmpeg resources/ffmpeg/mac/ffprobe
+          # Enforced, because "it runs" proves nothing here: an x86_64 binary runs perfectly on
+          # an arm64 runner under Rosetta, which is exactly how the wrong arch shipped before.
+          for bin in ffmpeg ffprobe; do
+            archs="$(lipo -archs "resources/ffmpeg/mac/$bin")"
+            echo "$bin: $archs"
+            case " $archs " in
+              *" arm64 "*) ;;
+              *) echo "::error::$bin is $archs, not arm64"; exit 1 ;;
+            esac
+          done
+          resources/ffmpeg/mac/ffmpeg -version | head -n1
 
       # johnvansickle's "release" URL is a floating pointer to the current stable, not a pinned
       # version — there is no stable per-version URL. The published .md5 is checked so a
